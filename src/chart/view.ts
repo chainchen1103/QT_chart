@@ -33,6 +33,7 @@ export class ChartView {
   readonly volume: ISeriesApi<"Histogram">;
   private bars: Candle[] = [];
   private pictureUrl = "";
+  private pictureSrc: string | null = null;
   private readonly o: ChartViewOptions;
 
   constructor(o: ChartViewOptions) {
@@ -119,6 +120,8 @@ export class ChartView {
   }
 
   private setPicture(dataUrl: string) {
+    if (dataUrl === this.pictureSrc) return; // colors changed, not the picture
+    this.pictureSrc = dataUrl;
     if (this.pictureUrl) URL.revokeObjectURL(this.pictureUrl);
     this.pictureUrl = dataUrl ? URL.createObjectURL(dataUrlToBlob(dataUrl)) : "";
     this.o.picture.style.backgroundImage = this.pictureUrl ? `url("${this.pictureUrl}")` : "none";
