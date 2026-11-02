@@ -18,7 +18,7 @@ export type PaintOptions = {
   trades: ReadonlyMap<string, PositionResult>;
 };
 
-export const FONT = "11px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
+const FONT = "11px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
 export const ACCENT = "#2962ff";
 const FAR = 100000; // px: endless lines are drawn this far out and the canvas clips them
 

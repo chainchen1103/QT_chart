@@ -42,7 +42,6 @@ export const MAX_LOG = 100;
 export const MAX_NOTE = 120;
 /** "every": quiet this long after going off. */
 export const REARM_SEC = 60;
-export const DEFAULT_OPTIONS: AlertOptions = { sound: true, system: true };
 
 export const COND_TEXT: Record<AlertCond, string> = {
   touch: "觸及",
