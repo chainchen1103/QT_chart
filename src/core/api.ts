@@ -22,6 +22,8 @@ export type Instrument = {
   volUsdt24h: number;
 };
 
+/** A symbol and a timeframe: one live candle channel. */
+export type Pair = { instId: string; bar: string };
 export type CandleEvent = { instId: string; bar: string; candle: Candle };
 export type StreamStatus = { state: "connecting" | "ws" | "polling" | "error"; detail: string };
 
@@ -34,15 +36,11 @@ export const getCandles = (instId: string, bar: string, before: number | null, c
 /** Opens https://www.tradingview.com/ in the default browser (credit for the chart library). */
 export const openTradingView = () => invoke<void>("open_tradingview");
 
-export const startStream = (instId: string, bar: string) => invoke<void>("start_stream", { instId, bar });
-
+/** Live candles for exactly these channels, over one connection (src-tauri/src/stream.rs); [] stops. */
+export const setStreams = (pairs: Pair[]) => invoke<void>("set_streams", { pairs });
 export const onCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
   listen<CandleEvent>("candle", (e) => cb(e.payload));
 
-/** 1-minute candles of every symbol with an alert on (see src-tauri/src/watch.rs); [] stops. */
-export const watchSymbols = (instIds: string[]) => invoke<void>("watch_symbols", { instIds });
-export const onWatchCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
-  listen<CandleEvent>("watch_candle", (e) => cb(e.payload));
 /** Saved data, kept as files by the backend (src-tauri/src/store.rs): all of it at once, or one value. */
 export const storeLoad = () => invoke<Record<string, string>>("store_load");
 export const storeSet = (key: string, value: string) => invoke<void>("store_set", { key, value });

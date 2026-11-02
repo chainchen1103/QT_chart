@@ -51,6 +51,7 @@ export class Overlays {
   private readonly zoneLayer: ZoneLayer;
   private redrawTimer = 0;
   private queued = false;
+  private dead = false;
 
   constructor(private readonly h: OverlayHost) {
     this.sources = new SourceStore(() => this.queueRefresh());
@@ -59,6 +60,12 @@ export class Overlays {
   }
 
   // ------------------------------------------------------------------- chart lifecycle
+  /** The chart is going away: stop timers, drop bars still on the way. */
+  destroy() {
+    this.dead = true;
+    clearTimeout(this.redrawTimer);
+    this.sources.reset("");
+  }
   setSymbol(inst: string) {
     this.sources.reset(inst);
   }
@@ -123,6 +130,7 @@ export class Overlays {
 
   /** Recompute everything; `full` redraws every line, otherwise only what a live tick changed. */
   refresh(full: boolean) {
+    if (this.dead) return;
     this.refreshLines(full);
     this.refreshZones();
     if (full) this.h.changed();

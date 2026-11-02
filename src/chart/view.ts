@@ -1,5 +1,6 @@
-// The chart: candles and volume, time labels, colors and the background picture, and the price-scale labels
-// the library draws itself. Indicators, drawings and alerts attach to `candles` from outside.
+// One chart: candles and volume, time labels, colors, and the price-scale labels the library draws itself.
+// Indicators, drawings and alerts attach to `candles` from outside. The chart is see-through: the background
+// color and picture behind it are the same for every chart (backdrop.ts).
 
 import {
   createChart,
@@ -17,10 +18,8 @@ import { hexToRgba } from "../drawings/geometry.ts";
 import type { Appearance, ScaleLabels } from "../settings/model.ts";
 
 export type ChartViewOptions = {
-  /** The chart's own element, the box around it (background color) and the background picture layer. */
+  /** The chart's own element. */
   el: HTMLElement;
-  wrap: HTMLElement;
-  picture: HTMLElement;
   appearance: Setting<Appearance>;
   labels: Setting<ScaleLabels>;
   /** True for daily and weekly bars: times then show the day only. */
@@ -32,8 +31,6 @@ export class ChartView {
   readonly candles: ISeriesApi<"Candlestick">;
   readonly volume: ISeriesApi<"Histogram">;
   private bars: Candle[] = [];
-  private pictureUrl = "";
-  private pictureSrc: string | null = null;
   private readonly o: ChartViewOptions;
 
   constructor(o: ChartViewOptions) {
@@ -59,7 +56,10 @@ export class ChartView {
       upColor: a.up, downColor: a.down, borderVisible: false, wickUpColor: a.up, wickDownColor: a.down,
     });
     this.volume = this.chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, 1);
-    this.chart.panes()[1]?.setHeight(110);
+    // volume takes a share of the height (a fixed height would crowd a small chart in a split layout)
+    const [prices, volume] = this.chart.panes();
+    prices?.setStretchFactor(0.85);
+    volume?.setStretchFactor(0.15);
   }
 
   private bar = (c: Candle) => ({ time: toChartTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close });
@@ -90,6 +90,14 @@ export class ChartView {
     const len = this.bars.length;
     this.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, len - n), to: len + 8 });
   }
+  /** Pixels per bar right now: the zoom. (The library keeps it to itself; its visible range spans
+   *  width / spacing bars, counted from the first to the last bar inclusive.) */
+  barSpacing(): number | null {
+    const ts = this.chart.timeScale();
+    const r = ts.getVisibleLogicalRange();
+    const w = ts.width();
+    return r && w > 0 ? w / (r.to - r.from + 1) : null;
+  }
   /** Keep the same bars on screen after `added` bars were put in front. */
   keepView(added: number, range: { from: number; to: number } | null) {
     if (range) this.chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
@@ -103,28 +111,12 @@ export class ChartView {
     return p == null || !(p > 0) ? null : p;
   }
 
-  /** Colors, and the background picture (shown from a blob: URL, so the page doesn't keep a second copy of the
-   *  long data URL in its styles). */
-  applyAppearance(picture: string) {
+  /** Text, grid and candle colors. */
+  applyAppearance() {
     const a = this.o.appearance.get();
-    this.o.wrap.style.backgroundColor = a.bg;
-    this.setPicture(picture);
-    const pic = this.o.picture.style;
-    pic.backgroundSize = a.imageFit === "stretch" ? "100% 100%" : a.imageFit;
-    pic.opacity = String(1 - a.imageTransparency / 100);
     this.chart.applyOptions({ layout: { textColor: a.text }, grid: { vertLines: { color: a.grid }, horzLines: { color: a.grid } } });
     this.candles.applyOptions({ upColor: a.up, downColor: a.down, wickUpColor: a.up, wickDownColor: a.down });
     this.volume.setData(this.bars.map(this.vol));
-    document.documentElement.style.setProperty("--up", a.up);
-    document.documentElement.style.setProperty("--down", a.down);
-  }
-
-  private setPicture(dataUrl: string) {
-    if (dataUrl === this.pictureSrc) return; // colors changed, not the picture
-    this.pictureSrc = dataUrl;
-    if (this.pictureUrl) URL.revokeObjectURL(this.pictureUrl);
-    this.pictureUrl = dataUrl ? URL.createObjectURL(dataUrlToBlob(dataUrl)) : "";
-    this.o.picture.style.backgroundImage = this.pictureUrl ? `url("${this.pictureUrl}")` : "none";
   }
 
   /** The library's own labels: last price and its line, volume, crosshair price. */
@@ -134,14 +126,4 @@ export class ChartView {
     this.volume.applyOptions({ lastValueVisible: l.volume });
     this.chart.applyOptions({ crosshair: { horzLine: { labelVisible: l.crosshair } } });
   }
-}
-
-/** "data:image/jpeg;base64,…" → Blob, without fetch (the page's content policy allows no fetching). */
-function dataUrlToBlob(url: string): Blob {
-  const comma = url.indexOf(",");
-  const type = url.slice(5, url.indexOf(";")) || "image/jpeg";
-  const bin = atob(url.slice(comma + 1));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type });
 }

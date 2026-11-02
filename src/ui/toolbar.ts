@@ -1,7 +1,7 @@
-// The top bar: symbol search, timeframe buttons, and the indicator switches (均線, FVG, OB, 支撐阻力) with their
-// settings windows.
+// The top bar: symbol search and timeframe buttons for the chart in use, and the indicator switches (均線, FVG,
+// OB, 支撐阻力) with their settings windows (shared by every chart).
 
-import type { MarketFeed } from "../chart/feed.ts";
+import type { Catalog } from "../chart/catalog.ts";
 import type { Instrument } from "../core/api.ts";
 import { TIMEFRAMES } from "../core/timeframes.ts";
 import { clone, DEFAULT_FVG, DEFAULT_OB, DEFAULT_SR, type Groups } from "../settings/model.ts";
@@ -12,8 +12,10 @@ import { toggleFvgPanel, toggleObPanel, toggleSrPanel } from "./panels/zones.ts"
 import { closePopover } from "./popover.ts";
 
 export type ToolbarDeps = {
-  feed: MarketFeed;
+  catalog: Catalog;
   settings: Settings;
+  /** Symbol and timeframe of the chart in use. */
+  current(): { instId: string; bar: string };
   switchTo(instId: string, bar: string): void;
 };
 
@@ -30,29 +32,35 @@ export class Toolbar {
     this.d = d;
     this.setupSymbolBox();
     this.setupIndicators();
-    this.paintTimeframes();
     d.settings.groups.watch(() => this.paintGroups());
   }
 
-  /** Timeframe buttons, the current one highlighted; the symbol box shows the symbol on screen. */
+  /** Timeframe buttons, the current one highlighted; the symbol box shows the symbol of the chart in use.
+   *  (Painted by the owner once there is a chart, and whenever the chart in use changes.) */
   paintTimeframes() {
-    const { feed } = this.d;
+    const cur = this.d.current();
     const nav = $("timeframes");
     nav.replaceChildren();
     for (const tf of TIMEFRAMES) {
-      const b = el("button", "tf-btn" + (tf.bar === feed.bar ? " active" : ""), tf.label);
+      const b = el("button", "tf-btn" + (tf.bar === cur.bar ? " active" : ""), tf.label);
       b.onclick = () => {
-        if (tf.bar !== feed.bar) this.d.switchTo(feed.instId, tf.bar);
+        const now = this.d.current();
+        if (tf.bar !== now.bar) this.d.switchTo(now.instId, tf.bar);
       };
       nav.append(b);
     }
-    if (document.activeElement !== this.input) this.input.value = feed.instId;
+    if (document.activeElement !== this.input) this.input.value = cur.instId;
+  }
+
+  /** Put the cursor in the symbol box (a new tab: type the symbol it should show). */
+  focusSymbol() {
+    this.input.focus();
   }
 
   // ------------------------------------------------------------------- symbol search
   private renderList(filter: string) {
     const q = filter.trim().toUpperCase().replace(/[-\s/]/g, "");
-    this.rows = this.d.feed.instruments.filter((i) => !q || i.instId.replace(/-/g, "").includes(q)).slice(0, 80);
+    this.rows = this.d.catalog.list.filter((i) => !q || i.instId.replace(/-/g, "").includes(q)).slice(0, 80);
     this.active = Math.min(this.active, Math.max(0, this.rows.length - 1));
     this.list.replaceChildren();
     this.rows.forEach((inst, k) => {
@@ -75,7 +83,8 @@ export class Toolbar {
   private pick(id: string) {
     this.list.hidden = true;
     this.input.blur();
-    if (id !== this.d.feed.instId) this.d.switchTo(id, this.d.feed.bar);
+    const cur = this.d.current();
+    if (id !== cur.instId) this.d.switchTo(id, cur.bar);
     else this.input.value = id;
   }
 
@@ -94,7 +103,7 @@ export class Toolbar {
     });
     input.addEventListener("blur", () => {
       this.list.hidden = true;
-      input.value = this.d.feed.instId;
+      input.value = this.d.current().instId;
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -129,7 +138,7 @@ export class Toolbar {
 
   private setupIndicators() {
     const s = this.d.settings;
-    const bar = () => this.d.feed.bar;
+    const bar = () => this.d.current().bar;
     const flip = (k: keyof Groups) => () => this.setGroups({ ...s.groups.get(), [k]: !s.groups.get()[k] });
     $("ma-toggle").onclick = flip("ma");
     $("fvg-toggle").onclick = flip("fvg");

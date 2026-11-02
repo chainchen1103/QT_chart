@@ -1,4 +1,5 @@
-// Price alerts at run time: the saved list, prices from the watcher, going off, and the log.
+// Price alerts at run time: the saved list, 1-minute prices of the symbols with an alert on, going off, and
+// the log.
 // Everything outside (storage, the backend, drawings, formatting, how a notice is shown) comes in through
 // AlertDeps, so this file knows nothing about the chart or the DOM.
 
@@ -57,6 +58,8 @@ export class AlertService {
   private readonly tracks = new Map<string, Snapshot>();
   private readonly drawings = new Map<string, Drawing[]>();
   private readonly listeners = new Set<() => void>();
+  /** Symbols with an alert on: the only prices that matter. */
+  private watched = new Set<string>();
   private watching = "";
 
   constructor(deps: AlertDeps) {
@@ -184,8 +187,9 @@ export class AlertService {
   }
 
   // ------------------------------------------------------------------- prices
-  /** A 1-minute candle snapshot of a watched symbol. */
+  /** A 1-minute candle snapshot (of any symbol: others than the watched ones are ignored). */
   onCandle(instId: string, c: Snapshot) {
+    if (!this.watched.has(instId)) return;
     const m = moveSince(this.tracks.get(instId) ?? null, c);
     if (!m) return;
     this.tracks.set(instId, { time: c.time, high: c.high, low: c.low, close: c.close });
@@ -257,6 +261,7 @@ export class AlertService {
     if (key === this.watching) return;
     this.watching = key;
     const keep = new Set(ids);
+    this.watched = keep;
     for (const k of [...this.tracks.keys()]) if (!keep.has(k)) this.tracks.delete(k);
     for (const k of [...this.drawings.keys()]) if (!keep.has(k)) this.drawings.delete(k);
     this.deps.watch(ids);

@@ -1,6 +1,6 @@
 // The left bar: cursor, lines (with a menu of kinds), Fib, rectangle, position (with its settings), magnet
-// (with its settings), Fib levels, and "delete all drawings" (press twice). Also the settings window a
-// drawing opens on double-click or right-click.
+// (with its settings), Fib levels, and "delete all drawings" (press twice), for the chart in use. Also the
+// settings window a drawing opens on double-click or right-click.
 
 import type { DrawingLayer, Tool } from "../drawings/layer.ts";
 import { readRaw, writeRaw } from "../core/storage.ts";
@@ -14,13 +14,12 @@ import { positionPanelAt, togglePositionPanel } from "./panels/position.ts";
 import type { Render } from "./popover.ts";
 
 export type ToolsDeps = {
-  drawings: DrawingLayer;
+  /** The drawings of the chart in use. */
+  drawings(): DrawingLayer;
   settings: Settings;
   /** Status-bar hint; null restores the default. */
   hint(text: string | null): void;
   instId(): string;
-  /** The 提醒 section of a drawing's settings window. */
-  alertSection(d: Drawing): Render;
 };
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -64,10 +63,9 @@ export class Tools {
     b.title = `吸附到 K 線開高低收：${m.on ? "常開（按一下關閉）" : "常關（按一下開啟）"}；按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附；右邊小箭頭或按右鍵改設定`;
   }
 
-  /** Double-click or right-click on a drawing: its settings (with its alert). */
-  openSettings(d: Drawing, x: number, y: number) {
-    const { drawings, settings } = this.d;
-    const alert = this.d.alertSection(d);
+  /** Double-click or right-click on a drawing of `drawings`: its settings, with its alert section. */
+  openSettings(drawings: DrawingLayer, d: Drawing, x: number, y: number, alert: Render) {
+    const { settings } = this.d;
     if (d.kind === "fib") {
       toggleFibPanel($("tool-settings"), settings.fib, alert);
       return;
@@ -92,7 +90,11 @@ export class Tools {
   }
 
   private setup() {
-    const { drawings, settings } = this.d;
+    const { settings } = this.d;
+    const drawings = {
+      getTool: () => this.d.drawings().getTool(),
+      setTool: (t: Tool) => this.d.drawings().setTool(t),
+    };
     const toggle = (t: Tool) => () => drawings.setTool(drawings.getTool() === t ? "cursor" : t);
     const onRight = (b: HTMLElement, open: () => void) => {
       b.oncontextmenu = (e) => {
@@ -125,7 +127,7 @@ export class Tools {
 
   /** Delete every drawing of the symbol: the first press arms the button for 3 seconds, the second deletes. */
   private clearAll() {
-    const { drawings } = this.d;
+    const drawings = this.d.drawings();
     const btn = $("tool-clear");
     if (!drawings.count()) {
       this.d.hint("這個幣種沒有畫線");

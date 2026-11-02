@@ -7,7 +7,8 @@
 // the time scale (a selected drawing shows all its points there).
 // Mouse: listeners on the chart element in the capture phase, so a press on a drawing (or while placing one)
 // never reaches the chart and never starts a pan. Points are stored as (bar start time, price), so drawings
-// stay put across timeframes, history loading and restarts.
+// stay put across timeframes, history loading and restarts. With several charts on screen, only the chart in
+// use (active) takes the keys: Esc, Delete, the tool shortcuts.
 
 import type {
   IChartApi,
@@ -108,6 +109,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   /** Size and outcome of every position (see trade.ts), recomputed with each redraw. */
   private trades = new Map<string, PositionResult>();
   private timeLabels: ISeriesPrimitiveAxisView[] = [];
+  /** The chart in use: the one the keys go to. */
+  private active = true;
+  private readonly offs: (() => void)[] = [];
 
   private readonly views: IPrimitivePaneView[] = [
     { zOrder: () => "bottom", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => paintUnder(t, this.geo, this.paintOptions()) }) },
@@ -120,14 +124,37 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     host.el.addEventListener("mousedown", (e) => this.onDown(e), true);
     host.el.addEventListener("dblclick", (e) => this.onDblClick(e), true);
     host.el.addEventListener("contextmenu", (e) => this.onContext(e), true);
-    window.addEventListener("mousemove", (e) => this.onMove(e), true);
-    window.addEventListener("mouseup", (e) => this.onUp(e), true);
-    window.addEventListener("keydown", (e) => this.onKey(e, true));
-    window.addEventListener("keyup", (e) => this.onKey(e, false));
-    window.addEventListener("blur", () => {
+    this.onWindow("mousemove", (e) => this.onMove(e), true);
+    this.onWindow("mouseup", (e) => this.onUp(e), true);
+    this.onWindow("keydown", (e) => this.onKey(e, true));
+    this.onWindow("keyup", (e) => this.onKey(e, false));
+    this.onWindow("blur", () => {
       this.setHold(false);
       this.setShift(false);
     });
+  }
+
+  private onWindow<K extends keyof WindowEventMap>(type: K, fn: (e: WindowEventMap[K]) => void, capture = false) {
+    window.addEventListener(type, fn, capture);
+    this.offs.push(() => window.removeEventListener(type, fn, capture));
+  }
+
+  /** The chart is going away: stop listening to the window. */
+  destroy() {
+    for (const off of this.offs) off();
+    this.offs.length = 0;
+  }
+
+  /** In use or not; a chart that is left drops the drawing being placed and its selection. */
+  setActive(on: boolean) {
+    if (this.active === on) return;
+    this.active = on;
+    if (on) return;
+    if (this.tool !== "cursor") this.setTool("cursor");
+    if (this.selected) {
+      this.selected = null;
+      this.redraw();
+    }
   }
 
   // ------------------------------------------------------------------- primitive interface
@@ -710,7 +737,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.setHold(down);
       return;
     }
-    if (!down || isTyping(document.activeElement)) return;
+    if (!down || !this.active || isTyping(document.activeElement)) return;
     if (e.key === "Escape") {
       this.cancel();
     } else if ((e.key === "Delete" || e.key === "Backspace") && this.selected && !this.drag) {

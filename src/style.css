@@ -63,11 +63,53 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .icon-caret svg { width: 6px; height: 6px; }
 .icon-caret:hover, .icon-caret.open { color: var(--text); background: var(--border); }
 
-.chart-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; }
+/* the charts of a tab: a grid with 1-pixel lines between them (the grid's own color shows through the gaps) */
+.grid { position: relative; flex: 1; min-width: 0; min-height: 0; display: grid; gap: 1px; background: var(--border); }
+.pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; background-color: var(--chart-bg, var(--bg)); }
+.grid.multi .pane.in-use::after { content: ""; position: absolute; inset: 0; z-index: 12; border: 1px solid var(--accent);
+  pointer-events: none; }
 .chart { position: absolute; inset: 0; }
 /* the picture sits on its own compositor layer (on the GPU when there is one): chart redraws never repaint it */
-.chart-bg { position: absolute; inset: 0; background-position: center; background-repeat: no-repeat; pointer-events: none;
+.pane-bg { position: absolute; inset: 0; background-image: var(--chart-pic, none); background-size: var(--chart-pic-size, cover);
+  opacity: var(--chart-pic-opacity, 1); background-position: center; background-repeat: no-repeat; pointer-events: none;
   will-change: transform; transform: translateZ(0); }
+.divider { position: absolute; z-index: 20; }
+.divider.col { cursor: col-resize; }
+.divider.row { cursor: row-resize; }
+.divider:hover, .divider.dragging { background: rgba(41,98,255,.45); }
+body.resizing-col, body.resizing-col * { cursor: col-resize !important; user-select: none; }
+body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-select: none; }
+
+/* tabs */
+.tabbar { display: flex; align-items: stretch; gap: 2px; height: 32px; padding: 3px 6px 0; background: #0e1119;
+  border-bottom: 1px solid var(--border); user-select: none; }
+.tab-list { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+.tab { display: flex; align-items: center; gap: 6px; max-width: 320px; min-width: 0; padding: 0 6px 0 10px; border-radius: 6px 6px 0 0;
+  color: var(--muted); cursor: default; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tab > * { flex: none; }
+.tab > .tab-sym { flex: 0 1 auto; min-width: 24px; }
+.tab:hover { background: #171b26; color: var(--text); }
+.tab.shown { background: var(--bg); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+.tab-sym { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.tab-arrow { font-size: 9px; }
+.tab-px { color: inherit; }
+.tab-chg { font-size: 12px; }
+.tab-layout { width: 15px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; opacity: .8; }
+.tab-close { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.tab-close:hover { color: var(--text); background: var(--border); }
+.tab-add { align-self: center; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.tab-add:hover { color: var(--text); background: var(--panel); }
+
+/* layout picker */
+.layout-row { display: flex; align-items: center; gap: 4px; padding: 3px 0; }
+.layout-n { width: 34px; }
+.layout-btn { display: grid; place-items: center; width: 40px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.layout-btn:hover { color: var(--text); background: var(--border); }
+.layout-btn.active { color: var(--accent); border-color: var(--accent); }
+.layout-icon { width: 26px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.3; }
 .pop-thumb { width: 48px; height: 28px; border: 1px solid var(--border); border-radius: 3px; background-size: cover; background-position: center; }
 .chart.drawing, .chart.drawing * { cursor: crosshair !important; }
 .chart.over-drawing, .chart.over-drawing * { cursor: pointer !important; }
@@ -125,12 +167,19 @@ input[type=range] { width: 120px; accent-color: var(--accent); cursor: pointer; 
 .tool-row-key { color: var(--muted); font-size: 12px; }
 .link-btn { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 0; }
 .link-btn:hover { color: var(--text); text-decoration: underline; }
-.legend { position: absolute; top: 6px; left: 10px; z-index: 10; pointer-events: none; font-variant-numeric: tabular-nums;
-  white-space: nowrap; text-shadow: 0 0 4px var(--bg); }
+/* the legend stops short of the price scale (a narrow chart in a split layout cuts it there) */
+.legend { position: absolute; top: 6px; left: 10px; right: 84px; z-index: 10; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none; font-variant-numeric: tabular-nums; white-space: nowrap; text-shadow: 0 0 4px var(--bg); }
 .legend .name { font-weight: 600; margin-right: 10px; }
 .legend .k { color: var(--muted); margin-left: 8px; }
-.legend .ma { display: block; margin-top: 2px; font-size: 12px; }
-.statusbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.legend .ma { display: block; margin-top: 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.statusbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px;
+  white-space: nowrap; }
+/* one line: long texts end in … (the whole text is in the tooltip) */
+#status, #hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#status { flex: 0 2 auto; }
+#hint { flex: 0 1 auto; }
+.statusbar .dot, .credit { flex: none; }
 .credit { margin-left: 14px; color: var(--muted); font-size: 11px; text-decoration: none; opacity: .8; }
 .credit:hover { color: var(--text); text-decoration: underline; opacity: 1; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

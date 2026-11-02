@@ -2,8 +2,7 @@
 const COMMANDS: &[&str] = &[
     "list_instruments",
     "get_candles",
-    "start_stream",
-    "watch_symbols",
+    "set_streams",
     "alert_notify",
     "store_load",
     "store_set",

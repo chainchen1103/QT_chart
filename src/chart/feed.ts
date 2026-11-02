@@ -1,11 +1,12 @@
-// Bars for the chart: which symbol and timeframe are on screen, the first load, older history when the chart
-// is scrolled left (up to a cap, to bound memory), live candles, and repair after a gap in the live feed
-// (e.g. the computer slept). `bars` and `times` belong to the feed; everyone else reads them.
+// Bars for one chart: which symbol and timeframe it shows, the first load, older history when the chart is
+// scrolled left (up to a cap, to bound memory), live candles, and repair after a gap in the live feed (e.g.
+// the computer slept). `bars` and `times` belong to the feed; everyone else reads them. Which live candles
+// reach it is decided outside (the workspace streams every chart on screen).
 
-import { getCandles, listInstruments, startStream, type Candle, type Instrument, type StreamStatus } from "../core/api.ts";
+import { getCandles, type Candle } from "../core/api.ts";
 import { fmtFixed } from "../core/format.ts";
-import { readRaw, writeRaw } from "../core/storage.ts";
 import { TIMEFRAMES, type Tf } from "../core/timeframes.ts";
+import type { Catalog } from "./catalog.ts";
 
 const INITIAL_BARS = 500;
 const OLDER_BARS = 500;
@@ -19,7 +20,9 @@ export type FeedEvents = {
   loaded(kind: "first" | "older" | "repair", added: number): void;
   /** A live candle was applied: the newest bar changed, or a new one started. */
   tick(c: Candle, newBar: boolean): void;
-  status(s: StreamStatus): void;
+  /** The first bars of a symbol or timeframe are on the way (true); that load is over, however it went (false). */
+  busy(on: boolean): void;
+  error(text: string): void;
   /** Something worth a line in the status bar for a moment. */
   note(text: string): void;
 };
@@ -27,8 +30,6 @@ export type FeedEvents = {
 export const tfOf = (bar: string): Tf => TIMEFRAMES.find((t) => t.bar === bar) ?? TIMEFRAMES[2];
 
 export class MarketFeed {
-  instruments: Instrument[] = [];
-  private byId = new Map<string, Instrument>();
   instId: string;
   bar: string;
   bars: Candle[] = [];
@@ -37,63 +38,64 @@ export class MarketFeed {
   decimals = 2;
   tick = 0.01;
   private seq = 0; // bumps on every switch, so late answers for the old symbol are dropped
+  /** The bars belong to instId / bar (not while a switch is loading): live candles may be applied. */
+  private ready = false;
   private loadingOlder = false;
   private noMoreHistory = false;
   private repairing = false;
+  private readonly catalog: Catalog;
   private readonly on: FeedEvents;
 
-  constructor(on: FeedEvents) {
+  constructor(catalog: Catalog, on: FeedEvents, instId: string, bar: string) {
+    this.catalog = catalog;
     this.on = on;
-    this.instId = readRaw("instId") ?? "BTC-USDT-SWAP";
-    this.bar = tfOf(readRaw("bar") ?? "15m").bar;
+    this.instId = instId;
+    this.bar = tfOf(bar).bar;
   }
 
   get tf(): Tf {
     return tfOf(this.bar);
   }
 
-  /** The symbol list, most traded first; a saved symbol that is gone falls back to the first one. */
-  async loadInstruments() {
-    this.instruments = await listInstruments();
-    this.byId = new Map(this.instruments.map((i) => [i.instId, i]));
-    if (this.instruments.length && !this.byId.has(this.instId)) this.instId = this.instruments[0].instId;
-  }
-  instrument(id = this.instId): Instrument | undefined {
-    return this.byId.get(id);
-  }
-
   fmtPrice = (v: number): string => fmtFixed(v, this.decimals);
-  /** A price of any symbol, with that symbol's decimals. */
-  fmtPriceOf = (id: string, v: number): string => fmtFixed(v, this.byId.get(id)?.priceDecimals ?? this.decimals);
   roundToTick(p: number): number {
     return this.tick > 0 ? Number((Math.round(p / this.tick) * this.tick).toFixed(this.decimals)) : p;
   }
 
-  /** Show this symbol and timeframe: load its latest bars and start its live stream. */
+  /** Show this symbol and timeframe: load its latest bars (live candles are applied once they are in). */
   async switchTo(instId: string, bar: string) {
     const symbol = instId !== this.instId || !this.bars.length;
     this.instId = instId;
     this.bar = tfOf(bar).bar;
-    writeRaw("instId", this.instId);
-    writeRaw("bar", this.bar);
     const my = ++this.seq;
+    this.ready = false;
     this.noMoreHistory = false;
-    const inst = this.instrument();
-    if (inst) {
-      this.decimals = inst.priceDecimals;
-      this.tick = parseFloat(inst.tickSz) || Math.pow(10, -inst.priceDecimals);
-    }
+    this.setPrecision();
     this.on.switching(symbol);
-    this.on.status({ state: "connecting", detail: "載入 K 線" });
+    this.on.busy(true);
     try {
       const data = await getCandles(this.instId, this.bar, null, INITIAL_BARS);
       if (my !== this.seq) return;
       this.setBars(data);
+      this.ready = true;
       this.on.loaded("first", data.length);
-      await startStream(this.instId, this.bar);
     } catch (e) {
-      if (my === this.seq) this.on.status({ state: "error", detail: `載入失敗：${e}` });
+      if (my === this.seq) this.on.error(`載入 ${instId} 失敗：${e}`);
+    } finally {
+      this.on.busy(false);
     }
+  }
+
+  /** Price decimals and step from the symbol list (again once the list has arrived). */
+  setPrecision() {
+    this.decimals = this.catalog.decimals(this.instId);
+    this.tick = this.catalog.tick(this.instId);
+  }
+
+  /** The chart is gone: answers still on the way are dropped. */
+  dispose() {
+    this.seq++;
+    this.ready = false;
   }
 
   /** Older bars in front, when the chart is scrolled near its left end. */
@@ -117,14 +119,15 @@ export class MarketFeed {
       this.setBars(fresh.concat(this.bars));
       this.on.loaded("older", fresh.length);
     } catch (e) {
-      this.on.status({ state: "error", detail: `載入更早的 K 線失敗：${e}` });
+      if (my === this.seq) this.on.error(`載入更早的 K 線失敗：${e}`);
     } finally {
       this.loadingOlder = false;
     }
   }
 
-  /** A live candle of the symbol and timeframe on screen. */
+  /** A live candle of this symbol and timeframe. */
   live(c: Candle) {
+    if (!this.ready) return;
     const last = this.bars[this.bars.length - 1];
     if (!last || c.time < last.time) return;
     if (c.time > last.time + this.tf.sec * 1.5) {
@@ -153,7 +156,7 @@ export class MarketFeed {
       this.setBars(this.bars.filter((c) => c.time < cut).concat(recent));
       this.on.loaded("repair", 0);
     } catch (e) {
-      this.on.status({ state: "error", detail: `補抓最新 K 線失敗：${e}` });
+      if (my === this.seq) this.on.error(`補抓最新 K 線失敗：${e}`);
     } finally {
       this.repairing = false;
     }

@@ -6,22 +6,19 @@ mod okx;
 mod prefs;
 mod store;
 mod stream;
-mod watch;
 mod window;
 mod ws;
 
-use okx::{Candle, Client, Instrument};
+use okx::{Candle, Client, Instrument, Pair};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use store::Store;
-use stream::StreamManager;
+use stream::Live;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
-use watch::Watcher;
 
 struct AppState {
     client: Client,
-    streams: StreamManager,
-    watcher: Watcher,
+    live: Live,
     /// Where prefs.json lives.
     config_dir: PathBuf,
     store: Store,
@@ -54,24 +51,17 @@ async fn get_candles(
     state.client.candles(&inst_id, &bar, before, count.unwrap_or(500)).await
 }
 
-/// Stream live candles for this symbol and bar (replaces the previous stream).
+/// Live candles ("candle" events) for exactly these symbols and timeframes: the charts on screen, the
+/// symbols with alerts (1m), the tabs. Replaces the previous list; an empty list stops.
 #[tauri::command]
-fn start_stream(app: AppHandle, state: State<'_, AppState>, inst_id: String, bar: String) -> Result<(), String> {
-    check(&inst_id, &bar)?;
-    state.streams.start(app, state.client.clone(), inst_id, bar);
-    Ok(())
-}
-
-/// Stream 1-minute candles of these symbols for the price alerts ("watch_candle" events); an empty list stops.
-#[tauri::command]
-fn watch_symbols(app: AppHandle, state: State<'_, AppState>, inst_ids: Vec<String>) -> Result<(), String> {
-    if inst_ids.len() > watch::MAX_WATCH {
-        return Err(format!("最多同時盯 {} 個幣種", watch::MAX_WATCH));
+fn set_streams(app: AppHandle, state: State<'_, AppState>, pairs: Vec<Pair>) -> Result<(), String> {
+    if pairs.len() > stream::MAX_PAIRS {
+        return Err(format!("最多同時接收 {} 組即時報價", stream::MAX_PAIRS));
     }
-    if let Some(bad) = inst_ids.iter().find(|i| !okx::valid_inst(i)) {
-        return Err(format!("不支援的商品：{bad}"));
+    if let Some(bad) = pairs.iter().find(|p| !p.valid()) {
+        return Err(format!("不支援的商品或週期：{} {}", bad.inst_id, bad.bar));
     }
-    state.watcher.set(app, state.client.clone(), inst_ids);
+    state.live.set(app, state.client.clone(), pairs);
     Ok(())
 }
 
@@ -157,15 +147,14 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             let store = Store::new(app.path().app_data_dir()?.join("store"));
             let prefs = prefs::load(&config_dir);
-            app.manage(AppState { client: Client::new(), streams: StreamManager::default(), watcher: Watcher::default(), config_dir, store });
+            app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store });
             window::create(app.handle(), prefs)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_instruments,
             get_candles,
-            start_stream,
-            watch_symbols,
+            set_streams,
             alert_notify,
             store_load,
             store_set,

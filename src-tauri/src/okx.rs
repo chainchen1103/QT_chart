@@ -35,6 +35,24 @@ pub fn valid_inst(id: &str) -> bool {
     !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// A symbol and a timeframe, e.g. BTC-USDT-SWAP and 15m: one candle channel on the WebSocket.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pair {
+    pub inst_id: String,
+    pub bar: String,
+}
+
+impl Pair {
+    pub fn valid(&self) -> bool {
+        valid_inst(&self.inst_id) && valid_bar(&self.bar)
+    }
+    /// The subscription argument for this channel.
+    pub fn arg(&self) -> serde_json::Value {
+        serde_json::json!({"channel": format!("candle{}", self.bar), "instId": self.inst_id})
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Candle {
     /// Bar start, UTC seconds.
@@ -262,8 +280,8 @@ impl Client {
 /// What a WebSocket text frame contains.
 #[derive(Debug, PartialEq)]
 pub enum WsMsg {
-    /// Candles, and the symbol they belong to (from the frame's "arg").
-    Candles(Option<String>, Vec<Candle>),
+    /// Candles, and the symbol and timeframe they belong to (from the frame's "arg").
+    Candles(Option<Pair>, Vec<Candle>),
     Subscribed,
     Error(String),
     Other,
@@ -294,8 +312,12 @@ pub fn parse_ws(text: &str) -> WsMsg {
             })
             .collect();
         if !cs.is_empty() {
-            let inst = v.get("arg").and_then(|a| a.get("instId")).and_then(|i| i.as_str()).map(str::to_string);
-            return WsMsg::Candles(inst, cs);
+            let pair = v.get("arg").and_then(|a| {
+                let inst_id = a.get("instId")?.as_str()?.to_string();
+                let bar = a.get("channel")?.as_str()?.strip_prefix("candle")?.to_string();
+                Some(Pair { inst_id, bar })
+            });
+            return WsMsg::Candles(pair, cs);
         }
     }
     WsMsg::Other
@@ -341,14 +363,18 @@ mod tests {
         assert!(valid_bar("15m") && valid_bar("1Dutc") && !valid_bar("15M") && !valid_bar("1d"));
         assert!(valid_inst("BTC-USDT-SWAP") && valid_inst("1000PEPE-USDT-SWAP"));
         assert!(!valid_inst("btc-usdt") && !valid_inst("BTC USDT") && !valid_inst("BTC/../x") && !valid_inst(""));
+        let p: Pair = serde_json::from_str(r#"{"instId":"BTC-USDT-SWAP","bar":"4H"}"#).unwrap();
+        assert!(p.valid());
+        assert_eq!(p.arg(), serde_json::json!({"channel": "candle4H", "instId": "BTC-USDT-SWAP"}));
+        assert!(!Pair { inst_id: "BTC-USDT-SWAP".into(), bar: "4h".into() }.valid());
     }
 
     #[test]
     fn parses_websocket_frames() {
         let data = r#"{"arg":{"channel":"candle15m","instId":"ETH-USDT-SWAP"},"data":[["1793520000000","2270.1","2275","2269","2274.5","5000","50","113000","0"]]}"#;
         match parse_ws(data) {
-            WsMsg::Candles(inst, cs) => {
-                assert_eq!(inst.as_deref(), Some("ETH-USDT-SWAP"));
+            WsMsg::Candles(pair, cs) => {
+                assert_eq!(pair, Some(Pair { inst_id: "ETH-USDT-SWAP".into(), bar: "15m".into() }));
                 assert_eq!(cs.len(), 1);
                 assert_eq!(cs[0].close, 2274.5);
             }
