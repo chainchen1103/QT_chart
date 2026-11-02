@@ -27,7 +27,7 @@ export function toggleMaPanel(
   const patch = (id: string, p: Partial<MaConf>) => mas.set(mas.get().map((m) => (m.id === id ? { ...m, ...p } : m)));
   togglePopover(anchor, "below", "均線", (body, rerender) => {
     const list = mas.get();
-    if (!list.length) body.append(el("div", "pop-note", "目前沒有均線。按「新增均線」加一條。"));
+    if (!list.length) body.append(el("div", "pop-note", "目前沒有均線。"));
     for (const m of list) {
       const row = el("div", "pop-row");
       const kind = el("select");
@@ -54,7 +54,6 @@ export function toggleMaPanel(
       labelled(
         checkbox(opts.get().waitClose, "", (v) => opts.set({ ...opts.get(), waitClose: v })),
         "等那根 K 線收完才更新",
-        "勾選：跟 TradingView 預設一樣，只用收完的高週期 K 線，線在高週期收線時才往前走一格，歷史不會變。\n不勾：最新那根高週期 K 線也算進去，線會跟著現價動。",
       ),
     );
     const foot = el("div", "pop-foot");

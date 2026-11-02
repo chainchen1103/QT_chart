@@ -37,7 +37,7 @@ export function performanceSection(io: PerformanceIo): Render {
   return (body) => {
     body.append(el("div", "pop-section", "效能"));
     const r = detectRenderer();
-    const now = el("div", "pop-note", r.gpu ? `目前用顯示卡繪圖（${r.name}）` : r.name ? "目前用軟體繪圖（沒有用到顯示卡）" : "看不出目前用什麼繪圖");
+    const now = el("div", "pop-note", r.gpu ? `目前用顯示卡繪圖（${r.name}）` : r.name ? "目前用軟體繪圖" : "我也看不出目前用什麼繪圖");
     const row = el("div", "pop-row");
     const msg = el("div", "pop-note");
     const box = checkbox(true, "", async (v) => {
@@ -57,7 +57,7 @@ export function performanceSection(io: PerformanceIo): Render {
       .then((on) => (box.checked = on))
       .catch(() => (box.checked = true))
       .finally(() => (box.disabled = false));
-    row.append(labelled(box, "使用顯示卡加速（GPU）", "顯示卡和驅動程式允許時，用顯示卡畫圖；畫面有問題時可以關掉，改用軟體繪圖"));
+    row.append(labelled(box, "使用顯示卡加速", "顯示卡和驅動程式允許時，用顯示卡畫圖；畫面有問題時可以關掉，改用軟體繪圖"));
     body.append(now, row, msg);
   };
 }

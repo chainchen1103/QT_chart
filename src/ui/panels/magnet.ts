@@ -8,8 +8,8 @@ import { togglePopover } from "../popover.ts";
 export function toggleMagnetPanel(anchor: HTMLElement, magnet: { get: () => MagnetSettings; set: (v: MagnetSettings) => void }) {
   togglePopover(anchor, "right", "吸附", (body) => {
     const mg = magnet.get();
-    body.append(el("div", "pop-note", "所有畫線、矩形、Fib、倉位的點，靠近游標那根 K 線的開、高、低、收時，會吸到最近的那個價格。"));
-    body.append(labelled(checkbox(mg.on, "", (v) => magnet.set({ ...magnet.get(), on: v })), "常開（磁鐵按鈕按一下也能切換）"));
+    body.append(el("div", "pop-note", "所有畫線、矩形、Fib、倉位的點，靠近游標那根 K 線的開、高、低、收時，會吸到最近的價格。"));
+    body.append(labelled(checkbox(mg.on, "", (v) => magnet.set({ ...magnet.get(), on: v })), "常開"));
     const keyRow = el("div", "pop-row");
     const keySel = el("select");
     for (const k of MAGNET_KEYS) keySel.append(new Option(k.label, k.key, false, k.key === mg.holdKey));

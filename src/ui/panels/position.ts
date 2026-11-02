@@ -65,7 +65,6 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
         one.update(p);
         later();
       };
-      body.append(el("div", "pop-section", "這個倉位"));
       const capRow = el("div", "pop-row");
       const auto = d.capital == null;
       const cap = numInput(t ? Math.round(t.capital * 100) / 100 : cur.capital, POSITION_LIMITS.capital, { title: "這筆用多少資金算倉位", width: 96, step: "1", int: false }, (v) =>
@@ -76,7 +75,7 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
         lbl("初始資金"),
         cap,
         lbl("U"),
-        labelled(checkbox(auto, "", (v) => upd({ capital: v ? null : Number(cap.value) || cur.capital })), "接續前一個倉位", "勾選：用前一個倉位結算後的資金；沒有前一個時用預設資金"),
+        labelled(checkbox(auto, "", (v) => upd({ capital: v ? null : Number(cap.value) || cur.capital })), "接續前一個倉位", "用前一個倉位結算後的資金"),
       );
       const riskRow = el("div", "pop-row");
       riskRow.append(lbl("風險"), ...riskInputs(d.risk, d.riskMode, (v, m) => upd({ risk: v, riskMode: m })));
@@ -95,7 +94,6 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
           `結果：${OUTCOME_TEXT[t.outcome.status]}` +
             (t.outcome.exit != null ? `　${t.pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(t.pnl))} U，資金變成 ${fmtMoney(t.endCapital)} U` : ""),
         ];
-        if (t.auto && !t.chained) lines.unshift(cur.chain ? "前面沒有倉位，用預設資金" : "預設沒有開接續，用預設資金");
         for (const s of lines) body.append(el("div", "pop-note", s));
         if (pl.capped) body.append(el("div", "pop-msg", "保證金超過資金，數量已減到這個槓桿能開的最大值，實際風險會比設定小"));
       }
@@ -123,7 +121,6 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
       );
     }
 
-    body.append(el("div", "pop-section", "R 線（R = 進場到止損的距離，只畫到止盈為止）"));
     cur.levels.forEach((l, i) => {
       const row = el("div", "pop-row");
       const val = el("input");
@@ -157,7 +154,7 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
       );
       body.append(row);
     });
-    if (!cur.levels.length) body.append(el("div", "pop-note", "沒有 R 線。在下面輸入一個，例如 1。"));
+    if (!cur.levels.length) body.append(el("div", "pop-note", "沒有 R 線。在下面輸入一個。"));
     const addRow = el("div", "pop-row");
     const input = el("input");
     input.type = "text";
@@ -193,7 +190,6 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
     range.max = "100";
     range.step = "5";
     range.value = String(cur.transparency);
-    range.title = "0% 不透明，100% 完全透明";
     const pct = el("span", "pop-lbl", `${cur.transparency}%`);
     range.oninput = () => {
       pct.textContent = `${range.value}%`;

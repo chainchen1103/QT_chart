@@ -43,7 +43,7 @@ function widthSelect(value: number, onChange: (v: number) => void): HTMLSelectEl
 }
 function dashSelect(value: Dash, onChange: (v: Dash) => void): HTMLSelectElement {
   const s = el("select");
-  s.title = "線的樣式";
+  s.title = "樣式";
   for (const d of DASHES) s.append(new Option(d.label, d.key, false, d.key === value));
   s.onchange = () => onChange(s.value as Dash);
   return s;
@@ -78,7 +78,6 @@ export function openDrawingStyle(
       range.max = "100";
       range.step = "5";
       range.value = String(s.transparency);
-      range.title = "0% 不透明，100% 完全透明";
       const pct = el("span", "pop-lbl", `${s.transparency}%`);
       range.oninput = () => {
         pct.textContent = `${range.value}%`;
@@ -106,12 +105,12 @@ export function openDrawingStyle(
     extra?.(body, rerender);
     const foot = el("div", "pop-foot");
     foot.append(
-      el("span", "pop-note", "之後新畫的也會用這個樣式"),
+      el("span", "pop-note"),
       el("span", "spacer"),
       textButton("刪除", "text-btn danger", () => {
         closePopover();
         cb.remove();
-      }, "刪除這個畫線（也可以按 Delete）"),
+      }, "刪除這個畫線"),
     );
     body.append(foot);
   });

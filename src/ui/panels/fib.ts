@@ -23,7 +23,7 @@ export function toggleFibPanel(anchor: HTMLElement, fib: { get: () => FibSetting
     const setLevel = (i: number, p: Partial<FibSettings["levels"][number]>) =>
       setF({ levels: fib.get().levels.map((l, k) => (k === i ? { ...l, ...p } : l)) });
 
-    body.append(el("div", "pop-section", "Fib 數值（勾選的才會畫）"));
+    body.append(el("div", "pop-section", "Fib 數值"));
     f.levels.forEach((l, i) => {
       const row = el("div", "pop-row");
       const on = checkbox(l.on, "顯示／隱藏", (v) => setLevel(i, { on: v }));
@@ -31,7 +31,7 @@ export function toggleFibPanel(anchor: HTMLElement, fib: { get: () => FibSetting
       val.type = "text";
       val.inputMode = "decimal";
       val.value = String(l.value);
-      val.title = "比例，例如 0.618；也可以打 61.8%";
+      val.title = "比例";
       val.onchange = () => {
         const r = parseLevel(val.value, LEVEL_RANGE.min, LEVEL_RANGE.max);
         const dup = "value" in r && fib.get().levels.some((x, k) => k !== i && x.value === r.value);
@@ -54,7 +54,7 @@ export function toggleFibPanel(anchor: HTMLElement, fib: { get: () => FibSetting
       row.append(on, val, color, del);
       body.append(row);
     });
-    if (!f.levels.length) body.append(el("div", "pop-note", "沒有數值。在下面輸入一個，例如 0.618。"));
+    if (!f.levels.length) body.append(el("div", "pop-note", "沒有任何數值，請新增一個"));
 
     // add a level
     const addRow = el("div", "pop-row");
@@ -90,7 +90,7 @@ export function toggleFibPanel(anchor: HTMLElement, fib: { get: () => FibSetting
       labelled(checkbox(f.extend, "", (v) => setF({ extend: v })), "線往右延伸"),
       labelled(checkbox(f.fill, "", (v) => setF({ fill: v })), "背景填色"),
       labelled(checkbox(f.showPrice, "", (v) => setF({ showPrice: v })), "顯示價格"),
-      labelled(checkbox(f.reverse, "", (v) => setF({ reverse: v })), "反轉方向", "預設：第一個點是 1，第二個點是 0"),
+      labelled(checkbox(f.reverse, "", (v) => setF({ reverse: v })), "反轉方向"),
     );
     body.append(opts);
     extra?.(body, rerender);

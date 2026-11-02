@@ -60,9 +60,9 @@ impl Store {
             return Err(format!("不能用這個名字存檔：{key}"));
         }
         if value.len() > MAX_VALUE {
-            return Err("資料太大，沒有存".into());
+            return Err("資料太大，無法保存".into());
         }
-        std::fs::create_dir_all(&self.dir).map_err(|e| format!("建不了存檔資料夾：{e}"))?;
+        std::fs::create_dir_all(&self.dir).map_err(|e| format!("資料夾建立失敗：{e}"))?;
         let tmp = self.dir.join(format!("{key}.{EXT}.tmp"));
         std::fs::write(&tmp, value).map_err(|e| format!("存檔失敗：{e}"))?;
         std::fs::rename(&tmp, self.file(key)).map_err(|e| format!("存檔失敗：{e}"))

@@ -63,7 +63,7 @@ function renderAppearance(io: AppearanceIo, extra?: Render): Render {
       try {
         const data = await pictureToDataUrl(f, io.get().bg);
         if (!io.setImage(data)) {
-          msg.textContent = "圖片太大，存不下；換一張小一點的";
+          msg.textContent = "圖片太大";
           return;
         }
         rerender();
@@ -93,7 +93,6 @@ function renderAppearance(io: AppearanceIo, extra?: Render): Render {
       range.max = "100";
       range.step = "5";
       range.value = String(a.imageTransparency);
-      range.title = "0% 原圖，100% 看不到圖";
       const pct = el("span", "pop-lbl", `${a.imageTransparency}%`);
       range.oninput = () => {
         pct.textContent = `${range.value}%`;
