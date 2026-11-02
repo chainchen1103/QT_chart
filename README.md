@@ -107,7 +107,12 @@
   - K 線上漲、下跌的顏色，成交量和最新價標籤會跟著變；
   - 「恢復預設顏色」不會移除背景圖片；
   - 最下面的「效能」：見「效能與安全」。
-- **記憶：** 幣種、週期、指標和設定、Fib 數值、吸附設定、畫線和樣式、外觀，下次開啟都還在。
+- **記憶：** 幣種、週期、指標和設定、Fib 數值、吸附設定、畫線和樣式、外觀、提醒，下次開啟都還在。
+  - 存成檔案，放在 `%APPDATA%\com.chainchen.qtchart\store`：每個幣種的畫線一個檔（例如 `drawings.BTC-USDT-SWAP.json`），設定、提醒各一個檔；
+  - 一改就存，改完馬上關掉程式、甚至程式當掉也不會掉；寫檔先寫暫存檔再換名字，不會只寫一半；
+  - 開發模式（`npm run tauri dev`）和編譯好的 exe 用同一份；
+  - 想備份或搬到別台電腦，複製整個 `store` 資料夾就好；
+  - 舊版存在 WebView 裡的資料，新版第一次開啟時會自動搬過來。
 
 ## 快捷鍵
 | 按鍵 | 作用 |
@@ -158,14 +163,15 @@ npx tauri build --no-bundle
 - **esbuild 的錯誤：** 新版 npm 預設不跑套件的安裝腳本。執行 `npm install-scripts approve esbuild`，再 `npm install`。
 
 ## 程式結構
-每個資料夾只管一件事，彼此透過小介面溝通：設定是「存檔＋通知」的值（`Setting`），誰用到誰自己訂閱；`src/main.ts` 只負責把各部分接起來。
+每個資料夾只管一件事，彼此透過小介面溝通：設定是「存檔＋通知」的值（`Setting`），誰用到誰自己訂閱；`src/app.ts` 只負責把各部分接起來。
 
 | 位置 | 內容 |
 |---|---|
-| `src/main.ts` | 把下面各部分建起來、接起來（不放功能） |
+| `src/main.ts` | 起點：先讀進存檔，再載入 app.ts |
+| `src/app.ts` | 把下面各部分建起來、接起來（不放功能） |
 | `src/core/api.ts` | 呼叫 Rust 的指令和事件 |
 | `src/core/setting.ts` | `Setting`：讀一次、改了就存、通知訂閱的人 |
-| `src/core/storage.ts` | 存在這台電腦的 local storage（頁面沒有檔案權限） |
+| `src/core/storage.ts` | 存檔：啟動時一次讀進來，之後一改就交給 Rust 寫檔；舊資料從 WebView 搬過來；檔案不能用時改用 WebView 的 local storage |
 | `src/core/format.ts` | 價格、成交量、時間的顯示格式 |
 | `src/core/timeframes.ts` | 週期清單；把一個週期的數值對到圖表的每根 K 線；把即時 K 線併進大週期 |
 | `src/chart/feed.ts` | 圖上的 K 線：幣種和週期、第一次載入、往左載入更早的（最多 20,000 根）、即時更新、斷線後補抓 |
@@ -203,6 +209,7 @@ npx tauri build --no-bundle
 | `src-tauri/src/watch.rs` | 提醒用的報價：所有有提醒的幣種的 1 分 K |
 | `src-tauri/src/window.rs` | 主視窗：GPU 開關、視窗標題、縮到最小時省記憶體 |
 | `src-tauri/src/prefs.rs` | 開視窗前就要知道的設定（GPU），存在 prefs.json |
+| `src-tauri/src/store.rs` | 存檔：每個名字一個檔，寫暫存檔再換名字；只能在 store 資料夾裡、名字和大小都有限制 |
 
 ## 效能與安全
 - **記憶體：**
@@ -215,10 +222,10 @@ npx tauri build --no-bundle
   - 預設在顯示卡和驅動程式允許時用顯示卡畫圖（由 WebView2 自己判斷，有問題的驅動會自動改用軟體繪圖），背景圖片放在獨立的合成圖層；
   - 圖表外觀最下面的「效能」顯示目前是不是用顯示卡在畫，也可以關掉（畫面閃爍、黑屏時），重新開啟程式後生效。設定存在 `%APPDATA%\com.chainchen.qtchart\prefs.json`。
 - **權限（最小權限）：**
-  - 頁面只能呼叫 8 個指令（列在 `src-tauri/build.rs`，在 `src-tauri/capabilities/default.json` 一個一個允許）和收事件，其他 Tauri 功能（檔案、視窗、剪貼簿、外掛的 JS 介面等）都沒開；
+  - 頁面只能呼叫 11 個指令（列在 `src-tauri/build.rs`，在 `src-tauri/capabilities/default.json` 一個一個允許）和收事件，其他 Tauri 功能（檔案、視窗、剪貼簿、外掛的 JS 介面等）都沒開；
   - 內容安全政策（CSP）只允許程式自己的檔案：頁面不能連外網、不能載入外部程式碼；JavaScript 原型凍結，防原型污染；
   - 只有 Rust 端連 OKX 的公開 API（不用金鑰、不能下單）；WebSocket 位址只接受 okx.com；
-  - 寫檔只有 prefs.json；開瀏覽器只能開固定的 tradingview.com；不接受拖放檔案。
+  - 寫檔只在 store 資料夾（名字只能是英數和 . - _，每個檔最大 8 MB）和 prefs.json；開瀏覽器只能開固定的 tradingview.com；不接受拖放檔案。
 
 ## 測試
 - 前端：`npm test`（Fib、時間換算、均線、週期對齊、FVG、Order Block、支撐阻力、收線倒數、倉位計算和結算、提醒、畫線位置和點選、格式，需要 Node 22 以上）。

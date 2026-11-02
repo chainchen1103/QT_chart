@@ -63,3 +63,18 @@ test("Shift: horizontal, vertical, 45°, squares, one axis", async () => {
   assert.equal(lockAxis(30, -10), "h");
   assert.equal(lockAxis(3, -10), "v");
 });
+
+test("old localStorage data carried over to the files", async () => {
+  const { fromLocalStorage } = await import("../src/core/storage.ts");
+  const m = fromLocalStorage([
+    ["qtchart.drawings.BTC-USDT-SWAP", '[{"id":"a"}]'],
+    ["qtchart.instId", "ETH-USDT-SWAP"], // plain text in localStorage, JSON in the files
+    ["qtchart.bgimage", "data:image/jpeg;base64,AAAA"],
+    ["qtchart.fib", "{broken"], // skipped
+    ["qtchart.../x", "1"], // a name the files would refuse
+    ["other.key", "1"], // not ours
+  ]);
+  assert.deepEqual([...m.keys()].sort(), ["bgimage", "drawings.BTC-USDT-SWAP", "instId"]);
+  assert.equal(m.get("instId"), '"ETH-USDT-SWAP"');
+  assert.equal(m.get("drawings.BTC-USDT-SWAP"), '[{"id":"a"}]');
+});

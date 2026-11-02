@@ -43,6 +43,11 @@ export const onCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
 export const watchSymbols = (instIds: string[]) => invoke<void>("watch_symbols", { instIds });
 export const onWatchCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
   listen<CandleEvent>("watch_candle", (e) => cb(e.payload));
+/** Saved data, kept as files by the backend (src-tauri/src/store.rs): all of it at once, or one value. */
+export const storeLoad = () => invoke<Record<string, string>>("store_load");
+export const storeSet = (key: string, value: string) => invoke<void>("store_set", { key, value });
+export const storeRemove = (key: string) => invoke<void>("store_remove", { key });
+
 /** Whether the web view may use the graphics card; a change takes effect at the next start. */
 export const gpuPref = () => invoke<boolean>("gpu_pref");
 export const setGpuPref = (on: boolean) => invoke<void>("set_gpu_pref", { on });

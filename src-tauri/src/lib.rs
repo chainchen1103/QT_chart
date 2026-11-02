@@ -4,13 +4,16 @@
 
 mod okx;
 mod prefs;
+mod store;
 mod stream;
 mod watch;
 mod window;
 mod ws;
 
 use okx::{Candle, Client, Instrument};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use store::Store;
 use stream::StreamManager;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use watch::Watcher;
@@ -21,6 +24,7 @@ struct AppState {
     watcher: Watcher,
     /// Where prefs.json lives.
     config_dir: PathBuf,
+    store: Store,
 }
 
 fn check(inst_id: &str, bar: &str) -> Result<(), String> {
@@ -89,6 +93,23 @@ fn alert_notify(app: AppHandle, window: WebviewWindow, title: String, body: Stri
     n.show().map_err(|e| format!("系統通知失敗：{e}"))
 }
 
+/// Everything saved (settings, drawings, alerts), read once when the page starts.
+#[tauri::command]
+fn store_load(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
+    state.store.load()
+}
+
+/// Save one value right away. Runs on the main thread, so saves land in the order they were made.
+#[tauri::command]
+fn store_set(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+    state.store.set(&key, &value)
+}
+
+#[tauri::command]
+fn store_remove(state: State<'_, AppState>, key: String) -> Result<(), String> {
+    state.store.remove(&key)
+}
+
 /// Whether the web view may use the graphics card (takes effect at the next start).
 #[tauri::command]
 fn gpu_pref(state: State<'_, AppState>) -> bool {
@@ -134,8 +155,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
+            let store = Store::new(app.path().app_data_dir()?.join("store"));
             let prefs = prefs::load(&config_dir);
-            app.manage(AppState { client: Client::new(), streams: StreamManager::default(), watcher: Watcher::default(), config_dir });
+            app.manage(AppState { client: Client::new(), streams: StreamManager::default(), watcher: Watcher::default(), config_dir, store });
             window::create(app.handle(), prefs)?;
             Ok(())
         })
@@ -145,6 +167,9 @@ pub fn run() {
             start_stream,
             watch_symbols,
             alert_notify,
+            store_load,
+            store_set,
+            store_remove,
             gpu_pref,
             set_gpu_pref,
             open_tradingview

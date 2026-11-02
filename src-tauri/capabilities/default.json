@@ -13,6 +13,9 @@
     "allow-start-stream",
     "allow-watch-symbols",
     "allow-alert-notify",
+    "allow-store-load",
+    "allow-store-set",
+    "allow-store-remove",
     "allow-gpu-pref",
     "allow-set-gpu-pref",
     "allow-open-tradingview"

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-store-load"
+description = "Enables the store_load command without any pre-configured scope."
+commands.allow = ["store_load"]
+
+[[permission]]
+identifier = "deny-store-load"
+description = "Denies the store_load command without any pre-configured scope."
+commands.deny = ["store_load"]
