@@ -1,0 +1,22 @@
+// Small line icons (20 × 20, current color) for the drawing tools.
+
+import type { DrawKind } from "./settings";
+
+const svg = (body: string) =>
+  `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${body}</svg>`;
+const dot = (x: number, y: number) => `<circle cx="${x}" cy="${y}" r="1.8" fill="#131722"/>`;
+
+export const ICONS: Record<DrawKind, string> = {
+  fib: svg(`<path d="M3 4h14M3 8h14M3 12h14M3 16h14"/><path d="M4 16 16 4" stroke-dasharray="2 2"/>`),
+  trend: svg(`<path d="M4.5 15.5 15.5 4.5"/>${dot(4.5, 15.5)}${dot(15.5, 4.5)}`),
+  ray: svg(`<path d="M4.5 15.5 18.5 1.5"/>${dot(4.5, 15.5)}${dot(10, 10)}`),
+  info: svg(`<path d="M3.5 16.5 11 9"/>${dot(3.5, 16.5)}${dot(11, 9)}<rect x="12.5" y="2.5" width="5.5" height="5" rx="1"/>`),
+  extended: svg(`<path d="M1.5 18.5 18.5 1.5"/>${dot(7, 13)}${dot(13, 7)}`),
+  angle: svg(`<path d="M4 16 15 5M4 16h12"/><path d="M10 16a6 6 0 0 0-1.8-4.2"/>${dot(4, 16)}`),
+  hline: svg(`<path d="M1.5 10h17"/>${dot(10, 10)}`),
+  hray: svg(`<path d="M5 10h13.5"/>${dot(5, 10)}`),
+  vline: svg(`<path d="M10 1.5v17"/>${dot(10, 10)}`),
+  cross: svg(`<path d="M1.5 10h17M10 1.5v17"/>${dot(10, 10)}`),
+  rect: svg(`<rect x="4" y="5" width="12" height="10"/>${dot(4, 5)}${dot(16, 15)}`),
+  position: svg(`<rect x="4" y="3" width="12" height="14" rx="1"/><path d="M4 11h12"/><path d="M7.5 7.5 10 5l2.5 2.5"/>${dot(4, 11)}`),
+};

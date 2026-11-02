@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QT Chart</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="symbol-box">
+        <input id="symbol" type="text" spellcheck="false" autocomplete="off" placeholder="搜尋幣種，例如 ETH" />
+        <div id="symbol-list" class="symbol-list" hidden></div>
+      </div>
+      <nav id="timeframes" class="timeframes"></nav>
+      <span class="toolbar-sep"></span>
+      <span class="split">
+        <button id="ma-toggle" class="tool-btn split-main" title="顯示／隱藏全部均線">均線</button>
+        <button id="ma-btn" class="tool-btn split-caret" title="均線設定：新增、刪除、週期、顏色、用哪個週期算">▾</button>
+      </span>
+      <span class="split">
+        <button id="fvg-toggle" class="tool-btn split-main" title="顯示／隱藏 FVG">FVG</button>
+        <button id="fvg-btn" class="tool-btn split-caret" title="FVG 設定：用哪個週期、影線或實體、顏色、數量">▾</button>
+      </span>
+      <span class="split">
+        <button id="ob-toggle" class="tool-btn split-main" title="顯示／隱藏 Order Block">OB</button>
+        <button id="ob-btn" class="tool-btn split-caret" title="Order Block 設定：用哪個週期、波段、顏色、數量">▾</button>
+      </span>
+      <span class="split">
+        <button id="sr-toggle" class="tool-btn split-main" title="顯示／隱藏支撐阻力">支撐阻力</button>
+        <button id="sr-btn" class="tool-btn split-caret" title="支撐阻力設定：用哪個週期、波段、顏色、數量">▾</button>
+      </span>
+      <span class="spacer"></span>
+      <span id="quote" class="quote"></span>
+      <button id="alert-btn" class="tool-btn icon-only alert-btn" title="價格提醒：清單、紀錄、聲音和通知（Alt+A：在游標的價格新增）">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+          <path d="M5 13.5V9a5 5 0 0 1 10 0v4.5l1.5 1.5h-13z" /><path d="M8.3 16.6a1.9 1.9 0 0 0 3.4 0" />
+        </svg>
+        <span id="alert-count" class="alert-count"></span>
+      </button>
+      <button id="appearance-btn" class="tool-btn icon-only" title="圖表外觀：背景顏色、背景圖片、K 線顏色（也可以在圖上按右鍵）">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <circle cx="10" cy="10" r="2.6" /><circle cx="10" cy="10" r="5.6" />
+          <path d="M10 1.8v2.6M10 15.6v2.6M1.8 10h2.6M15.6 10h2.6M4.2 4.2l1.8 1.8M14 14l1.8 1.8M4.2 15.8 6 14M14 6l1.8-1.8" />
+        </svg>
+      </button>
+    </header>
+    <div class="workspace">
+      <aside class="tools">
+        <button id="tool-cursor" class="icon-btn" title="游標（Esc）">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3v14M3 10h14" /></svg>
+        </button>
+        <div class="icon-wrap">
+          <button id="tool-line" class="icon-btn" title="線"></button>
+          <button id="tool-line-menu" class="icon-caret" title="選擇線的種類：趨勢線、射線、水平線…">
+            <svg viewBox="0 0 6 6"><path d="M6 0v6H0z" fill="currentColor" /></svg>
+          </button>
+        </div>
+        <button id="tool-fib" class="icon-btn" title="Fib 回撤（Alt+F）：點第一個點、再點第二個點，或按住拖曳">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path d="M3 4h14M3 8h14M3 12h14M3 16h14" /><path d="M4 16 16 4" stroke-dasharray="2 2" />
+          </svg>
+        </button>
+        <button id="tool-rect" class="icon-btn" title="矩形（Alt+Shift+R）：點兩個對角，或按住拖曳；雙擊或右鍵可改顏色、透明度"></button>
+        <div class="icon-wrap">
+          <button id="tool-position" class="icon-btn" title="倉位（Alt+P）：點進場、點止損、點止盈；右下角小三角或按右鍵設定 R 線"></button>
+          <button id="tool-position-menu" class="icon-caret" title="倉位設定：R 線、顏色">
+            <svg viewBox="0 0 6 6"><path d="M6 0v6H0z" fill="currentColor" /></svg>
+          </button>
+        </div>
+        <span class="tools-sep"></span>
+        <div class="icon-wrap">
+          <button id="tool-magnet" class="icon-btn" title="吸附到 K 線開高低收">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M5 3v7a5 5 0 0 0 10 0V3" /><path d="M5 6.5h3M12 6.5h3" />
+            </svg>
+          </button>
+          <button id="tool-magnet-menu" class="icon-caret" title="吸附設定：常開、按住哪個鍵暫時吸附">
+            <svg viewBox="0 0 6 6"><path d="M6 0v6H0z" fill="currentColor" /></svg>
+          </button>
+        </div>
+        <button id="tool-settings" class="icon-btn" title="Fib 數值設定">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 6h14M3 14h14" /><circle cx="7.5" cy="6" r="2" fill="#131722" /><circle cx="12.5" cy="14" r="2" fill="#131722" />
+          </svg>
+        </button>
+        <span class="tools-sep"></span>
+        <button id="tool-clear" class="icon-btn" title="刪除這個幣種的全部畫線（按兩次）">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10" />
+          </svg>
+        </button>
+      </aside>
+      <main class="chart-wrap">
+        <div id="chart-bg" class="chart-bg"></div>
+        <div id="legend" class="legend"></div>
+        <div id="chart" class="chart"></div>
+      </main>
+    </div>
+    <footer class="statusbar">
+      <span id="status-dot" class="dot"></span>
+      <span id="status">啟動中…</span>
+      <span class="spacer"></span>
+      <span id="hint"></span>
+      <a id="credit" class="credit" href="https://www.tradingview.com/" title="圖表引擎是 TradingView 的開源套件，授權要求標示出處；按一下開啟 tradingview.com">圖表：TradingView Lightweight Charts™</a>
+    </footer>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
