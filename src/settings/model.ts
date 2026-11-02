@@ -43,10 +43,10 @@ export const LABEL_ITEMS: { key: keyof ScaleLabels; text: string; title: string 
 export type FibLevel = { value: number; color: string; on: boolean };
 export type FibSettings = { levels: FibLevel[]; extend: boolean; fill: boolean; showPrice: boolean; reverse: boolean };
 
-export type MagnetKey = "Control" | "Shift" | "Alt";
+/** Shift is not offered: it keeps lines horizontal / vertical / 45° and moves on one axis. */
+export type MagnetKey = "Control" | "Alt";
 export const MAGNET_KEYS: { key: MagnetKey; label: string }[] = [
   { key: "Control", label: "Ctrl" },
-  { key: "Shift", label: "Shift" },
   { key: "Alt", label: "Alt" },
 ];
 /** `on`: always snap. Holding `holdKey` snaps only while it is held. */

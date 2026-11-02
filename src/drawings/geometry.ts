@@ -148,3 +148,31 @@ export function parseR(text: string): { value: number } | { error: string } {
   if (r <= 0 || r > 20) return { error: "要在 0 到 20 之間，例如 3" };
   return { value: r };
 }
+
+/**
+ * Shift while drawing: b moved so the line from a runs horizontal, vertical or at 45° on screen (the nearest
+ * of the eight directions), as far along it as b was. `dir`: "h" horizontal, "v" vertical, "d" diagonal.
+ */
+export function snapAngle(ax: number, ay: number, bx: number, by: number): { x: number; y: number; dir: "h" | "v" | "d" } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 && dy === 0) return { x: bx, y: by, dir: "h" };
+  const k = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+  const ux = Math.round(Math.cos((k * Math.PI) / 4)); // -1, 0 or 1 along each axis
+  const uy = Math.round(Math.sin((k * Math.PI) / 4));
+  if (uy === 0) return { x: bx, y: ay, dir: "h" };
+  if (ux === 0) return { x: ax, y: by, dir: "v" };
+  const len = (dx * ux + dy * uy) / 2; // projection onto (ux, uy) / √2, in steps along each axis
+  return { x: ax + ux * len, y: ay + uy * len, dir: "d" };
+}
+
+/** Shift while drawing a rectangle: b moved onto the nearer 45° diagonal through a, so the box is a square. */
+export function snapSquare(ax: number, ay: number, bx: number, by: number): { x: number; y: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const s = Math.max(Math.abs(dx), Math.abs(dy));
+  return { x: ax + (dx < 0 ? -s : s), y: ay + (dy < 0 ? -s : s) };
+}
+
+/** Shift while moving: only across or only up and down, whichever way the mouse went further. */
+export const lockAxis = (dx: number, dy: number): "h" | "v" => (Math.abs(dx) >= Math.abs(dy) ? "h" : "v");

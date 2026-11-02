@@ -50,3 +50,16 @@ test("formatting", () => {
   assert.equal(fmtTick(t as never, 2), "11/2");
   assert.equal(fmtTick(t as never, 3), "16:15");
 });
+
+test("Shift: horizontal, vertical, 45°, squares, one axis", async () => {
+  const { lockAxis, snapAngle, snapSquare } = await import("../src/drawings/geometry.ts");
+  assert.deepEqual(snapAngle(0, 0, 100, 8), { x: 100, y: 0, dir: "h" });
+  assert.deepEqual(snapAngle(0, 0, -6, -90), { x: 0, y: -90, dir: "v" });
+  assert.deepEqual(snapAngle(0, 0, 100, -80), { x: 90, y: -90, dir: "d" }); // up and to the right, 45°
+  assert.deepEqual(snapAngle(10, 10, -50, 80), { x: -55, y: 75, dir: "d" }); // down and to the left
+  assert.deepEqual(snapAngle(5, 5, 5, 5), { x: 5, y: 5, dir: "h" });
+  assert.deepEqual(snapSquare(0, 0, 100, 40), { x: 100, y: 100 });
+  assert.deepEqual(snapSquare(0, 0, -30, 70), { x: -70, y: 70 });
+  assert.equal(lockAxis(30, -10), "h");
+  assert.equal(lockAxis(3, -10), "v");
+});

@@ -22,7 +22,7 @@ import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Candle } from "../core/api.ts";
 import { xOfLogical } from "../chart/coords.ts";
 import { chainPositions, type PositionResult } from "./trade.ts";
-import { clampTarget, indexToTime, positionDir, timeToIndex, type Anchor } from "./geometry.ts";
+import { clampTarget, indexToTime, lockAxis, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
 import { ACCENT, paintOver, paintUnder, type PaintOptions } from "./paint.ts";
 import { isTyping } from "../ui/dom.ts";
@@ -101,6 +101,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private geo: Geo[] = [];
   private mouse: Mouse | null = null;
   private holdDown = false;
+  /** Shift is down: lines go horizontal, vertical or 45°, rectangles square, moves along one axis. */
+  private shiftDown = false;
   private requestUpdate: (() => void) | null = null;
   private priceLabels: ISeriesPrimitiveAxisView[] = [];
   /** Size and outcome of every position (see trade.ts), recomputed with each redraw. */
@@ -122,7 +124,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     window.addEventListener("mouseup", (e) => this.onUp(e), true);
     window.addEventListener("keydown", (e) => this.onKey(e, true));
     window.addEventListener("keyup", (e) => this.onKey(e, false));
-    window.addEventListener("blur", () => this.setHold(false));
+    window.addEventListener("blur", () => {
+      this.setHold(false);
+      this.setShift(false);
+    });
   }
 
   // ------------------------------------------------------------------- primitive interface
@@ -334,7 +339,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const m = this.host.magnet();
     if (m.on) return true;
     if (!e) return this.holdDown;
-    return m.holdKey === "Control" ? e.ctrlKey : m.holdKey === "Shift" ? e.shiftKey : e.altKey;
+    return m.holdKey === "Control" ? e.ctrlKey : e.altKey;
   }
 
   /** Chart point under the mouse; with the magnet, the nearest open/high/low/close of that bar when it is
@@ -358,6 +363,67 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       }
     }
     return { t: indexToTime(times, i, this.host.barSec()), p };
+  }
+
+  /** x of a bar time; the bar time at an x (whole bars). */
+  private xOfTime(t: number): number | null {
+    return xOfLogical(this.host.chart, timeToIndex(this.host.times(), t, this.host.barSec()));
+  }
+  private timeAtX(x: number): number | null {
+    const logical = this.host.chart.timeScale().coordinateToLogical(x);
+    const times = this.host.times();
+    if (logical == null || !times.length) return null;
+    return indexToTime(times, Math.round(logical), this.host.barSec());
+  }
+
+  /**
+   * Shift: the point under the mouse, moved so the line from `from` runs horizontal, vertical or at 45°
+   * (`square`: on the 45° diagonal, a rectangle's corner). Whole bars across; at 45°, exactly as many pixels
+   * up or down as across at the current zoom. The magnet stays out of it.
+   */
+  private constrained(from: Anchor, m: Mouse, square: boolean): Anchor | null {
+    const { series } = this.host;
+    const fx = this.xOfTime(from.t);
+    const fy = series.priceToCoordinate(from.p);
+    if (fx == null || fy == null) return this.pointAt(m.x, m.y, false);
+    const s = square ? { ...snapSquare(fx, fy, m.x, m.y), dir: "d" as const } : snapAngle(fx, fy, m.x, m.y);
+    if (s.dir === "v") {
+      const p = series.coordinateToPrice(s.y);
+      return p == null ? null : { t: from.t, p };
+    }
+    const t = this.timeAtX(s.x);
+    if (t == null) return null;
+    if (s.dir === "h") return { t, p: from.p };
+    const xq = this.xOfTime(t) ?? s.x;
+    const p = series.coordinateToPrice(fy + Math.sign(s.y - fy || 1) * Math.abs(xq - fx));
+    return p == null ? null : { t, p };
+  }
+
+  /** The next point of a drawing being placed: under the mouse (with the magnet), or with Shift held, kept
+   *  horizontal / vertical / 45° from the first point (a square for a rectangle; price only for a position). */
+  private draftPoint(d: Drawing, m: Mouse, snap: boolean, shift: boolean): Anchor | null {
+    if (!shift) return this.pointAt(m.x, m.y, snap);
+    if (d.kind === "position") {
+      const pt = this.pointAt(m.x, m.y, false);
+      return pt && { t: d.b.t, p: pt.p }; // the box keeps its width
+    }
+    return this.constrained(d.a, m, d.kind === "rect");
+  }
+
+  /** Shift while dragging a point: a line stays horizontal / vertical / 45° from its other end, a rectangle
+   *  square around the opposite corner, a one-point drawing moves along one axis only. */
+  private shiftedHandle(d: Drawing, dr: Drag, m: Mouse): Anchor | null {
+    if (TOOL_INFO[d.kind].points === 1) {
+      const pt = this.pointAt(m.x, m.y, false);
+      if (!pt) return null;
+      return lockAxis(m.x - dr.x0, m.y - dr.y0) === "h" ? { t: pt.t, p: dr.orig.a.p } : { t: dr.orig.a.t, p: pt.p };
+    }
+    if (d.kind === "rect") {
+      const o = dr.orig;
+      const opposite: Anchor = dr.part === "a" ? o.b : dr.part === "b" ? o.a : dr.part === "c2" ? { t: o.b.t, p: o.a.p } : { t: o.a.t, p: o.b.p };
+      return this.constrained(opposite, m, true);
+    }
+    return this.constrained(dr.part === "a" ? d.b : d.a, m, false);
   }
 
   private hit(x: number, y: number): Hit | null {
@@ -408,7 +474,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (this.tool !== "cursor") {
       e.preventDefault();
       e.stopPropagation();
-      const pt = this.pointAt(m.x, m.y, this.snapping(e));
+      const pt = this.draft ? this.draftPoint(this.draft, m, this.snapping(e), e.shiftKey) : this.pointAt(m.x, m.y, this.snapping(e));
       if (!pt) return;
       const kind = this.tool;
       if (kind === "position") {
@@ -472,11 +538,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const m = this.local(e);
     this.mouse = m;
     if (this.drag) {
-      this.dragTo(m, this.snapping(e));
+      this.dragTo(m, this.snapping(e), e.shiftKey);
       return;
     }
     if (this.tool !== "cursor") {
-      if (this.draft) this.moveDraft(m, this.snapping(e));
+      if (this.draft) this.moveDraft(m, this.snapping(e), e.shiftKey);
       return;
     }
     const h = m.inside ? this.hit(m.x, m.y) : null;
@@ -502,7 +568,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       const m = this.local(e);
       if (Math.hypot(m.x - this.placing.x0, m.y - this.placing.y0) > 6) {
         // pressed, dragged, released: that's both points (for a position: entry and stop)
-        const pt = this.pointAt(m.x, m.y, this.snapping(e));
+        const pt = this.draftPoint(this.draft, m, this.snapping(e), e.shiftKey);
         if (this.draft.kind === "position") {
           if (pt) this.placePosition(this.draft, pt);
           if (this.draft.b.p !== this.draft.a.p) this.stage = 2;
@@ -550,16 +616,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.host.openSettings(d, e.clientX, e.clientY);
   }
 
-  private moveDraft(m: Mouse, snap: boolean) {
+  private moveDraft(m: Mouse, snap: boolean, shift: boolean) {
     if (!this.draft) return;
-    const pt = this.pointAt(m.x, m.y, snap);
+    const pt = this.draftPoint(this.draft, m, snap, shift);
     if (!pt) return;
     if (this.draft.kind === "position") this.placePosition(this.draft, pt);
     else this.draft.b = pt;
     this.redraw();
   }
 
-  private dragTo(m: Mouse, snap: boolean) {
+  private dragTo(m: Mouse, snap: boolean, shift: boolean) {
     const dr = this.drag;
     if (!dr) return;
     const d = this.find(dr.id);
@@ -571,16 +637,22 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (!cur || !dr.start) return;
       const times = this.host.times();
       const bs = this.host.barSec();
-      const di = Math.round(timeToIndex(times, cur.t, bs) - timeToIndex(times, dr.start.t, bs));
-      const dp = cur.p - dr.start.p;
-      const shift = (a: Anchor): Anchor => ({ t: indexToTime(times, timeToIndex(times, a.t, bs) + di, bs), p: a.p + dp });
+      let di = Math.round(timeToIndex(times, cur.t, bs) - timeToIndex(times, dr.start.t, bs));
+      let dp = cur.p - dr.start.p;
+      if (shift) {
+        // only across (same prices) or only up and down (same times)
+        if (lockAxis(m.x - dr.x0, m.y - dr.y0) === "h") dp = 0;
+        else di = 0;
+      }
+      const move = (a: Anchor): Anchor => ({ t: indexToTime(times, timeToIndex(times, a.t, bs) + di, bs), p: a.p + dp });
       const b0 = d.b.p;
-      d.a = shift(dr.orig.a);
-      d.b = shift(dr.orig.b);
+      d.a = move(dr.orig.a);
+      d.b = move(dr.orig.b);
       if (d.kind === "position") d.target += d.b.p - b0;
     } else if (d.kind === "position") {
-      const pt = this.pointAt(m.x, m.y, snap);
+      let pt = this.pointAt(m.x, m.y, snap && !shift);
       if (!pt) return;
+      if (shift && dr.part === "a") pt = lockAxis(m.x - dr.x0, m.y - dr.y0) === "h" ? { t: pt.t, p: dr.orig.a.p } : { t: dr.orig.a.t, p: pt.p };
       const dir = positionDir(d.a.p, d.b.p);
       const tiny = Math.abs(d.a.p) * 1e-6;
       if (dr.part === "stop") {
@@ -596,7 +668,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         d.a = { t: Math.min(pt.t, this.barsLater(d.b.t, -1)), p: Math.min(Math.max(pt.p, lo + tiny), hi - tiny) };
       }
     } else {
-      const pt = this.pointAt(m.x, m.y, snap);
+      const pt = shift ? this.shiftedHandle(d, dr, m) : this.pointAt(m.x, m.y, snap);
       if (!pt) return;
       if (dr.part === "a") {
         d.a = pt;
@@ -628,6 +700,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   // ------------------------------------------------------------------- keys
   private onKey(e: KeyboardEvent, down: boolean) {
+    if (e.key === "Shift") {
+      this.setShift(down);
+      return;
+    }
     const hold = this.host.magnet().holdKey;
     if (e.key === hold || (hold === "Alt" && e.key === "AltGraph")) {
       if (hold === "Alt") e.preventDefault(); // keep Alt from moving focus to the window menu
@@ -657,8 +733,18 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const m = this.mouse;
     if (!m) return;
     const snap = this.snapping();
-    if (this.drag && this.drag.part !== "body") this.dragTo(m, snap);
-    else if (this.tool !== "cursor" && this.draft) this.moveDraft(m, snap);
+    if (this.drag && this.drag.part !== "body") this.dragTo(m, snap, this.shiftDown);
+    else if (this.tool !== "cursor" && this.draft) this.moveDraft(m, snap, this.shiftDown);
+  }
+
+  /** Shift pressed or released: apply it to the point under the mouse right away. */
+  private setShift(down: boolean) {
+    if (this.shiftDown === down) return;
+    this.shiftDown = down;
+    const m = this.mouse;
+    if (!m) return;
+    if (this.drag) this.dragTo(m, this.snapping(), down);
+    else if (this.tool !== "cursor" && this.draft) this.moveDraft(m, this.snapping(), down);
   }
 
   /** Esc: drop the drawing being placed, leave the tool, or clear the selection. */
@@ -677,15 +763,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const snap = m.on ? "吸附：常開" : `按住 ${magnetKeyLabel(m.holdKey)} 吸附到 K 線開高低收`;
     if (this.tool === "position") {
       if (!this.draft) this.host.hint(`倉位：點進場價；${snap}；Esc 取消`);
-      else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單；${snap}；Esc 取消`);
-      else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線；${snap}；Esc 取消`);
+      else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單；按住 Shift 只改價格；${snap}；Esc 取消`);
+      else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線；按住 Shift 只改價格；${snap}；Esc 取消`);
     } else if (this.tool !== "cursor") {
       const info = TOOL_INFO[this.tool];
+      const shift = this.tool === "rect" ? "按住 Shift 畫正方形" : "按住 Shift 畫水平、垂直或 45° 線";
       if (info.points === 1) this.host.hint(`${info.name}：點一下放置；${snap}；Esc 取消`);
-      else if (this.draft) this.host.hint(`${info.name}：點第二個點；${snap}；Esc 取消`);
-      else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${snap}；Esc 取消`);
+      else if (this.draft) this.host.hint(`${info.name}：點第二個點；${shift}；${snap}；Esc 取消`);
+      else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${shift}；${snap}；Esc 取消`);
     } else if (this.selected) {
-      this.host.hint("拖曳端點調整、拖曳線條移動；Delete 刪除；雙擊或右鍵開設定");
+      this.host.hint("拖曳端點調整、拖曳線條移動，按住 Shift 只水平或垂直；Delete 刪除；雙擊或右鍵開設定");
     } else {
       this.host.hint(null);
     }
