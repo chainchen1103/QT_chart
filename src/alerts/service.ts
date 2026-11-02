@@ -2,7 +2,7 @@
 // Everything outside (storage, the backend, drawings, formatting, how a notice is shown) comes in through
 // AlertDeps, so this file knows nothing about the chart or the DOM.
 
-import type { Drawing, DrawKind, FibSettings } from "../settings.ts";
+import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
 import { describe, evaluate, moveSince, targetShape, tradeSig, type AlertEvent, type Snapshot } from "./engine.ts";
 import {
   cleanAlerts,

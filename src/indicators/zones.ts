@@ -2,7 +2,7 @@
 // Pure functions (no DOM), unit-tested in tests/zones.test.ts. New zones need closed bars only, so they
 // never appear and then vanish; a zone can end on the bar that is still forming (price got there).
 
-import type { Candle } from "./api";
+import type { Candle } from "../core/api.ts";
 
 /** A zone from bar `from` (UTC seconds) running right until `to` (the bar that ended it) or until now. */
 export type Zone = { from: number; to: number | null; top: number; bottom: number; dir: 1 | -1 };

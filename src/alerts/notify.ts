@@ -21,6 +21,7 @@ const MAX_POPUPS = 5;
 export class Notifier {
   private readonly host: NotifierHost;
   private audio: AudioContext | null = null;
+  private idle = 0;
 
   constructor(host: NotifierHost) {
     this.host = host;
@@ -64,10 +65,14 @@ export class Notifier {
     while (box.children.length > MAX_POPUPS) box.lastElementChild?.remove();
   }
 
+  /** The audio context, made at the first click or key press (browsers allow sound only after one) and kept
+   *  suspended between chimes, so the sound device isn't held open the rest of the time. */
   private ctx(): AudioContext | null {
     try {
-      this.audio ??= new AudioContext();
-      if (this.audio.state === "suspended") void this.audio.resume();
+      if (!this.audio) {
+        this.audio = new AudioContext();
+        void this.audio.suspend();
+      }
       return this.audio;
     } catch {
       return null;
@@ -78,19 +83,23 @@ export class Notifier {
   private chime() {
     const ctx = this.ctx();
     if (!ctx) return;
-    const t0 = ctx.currentTime + 0.02;
-    [880, 1320].forEach((hz, k) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = hz;
-      const t = t0 + k * 0.18;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(t);
-      osc.stop(t + 0.17);
+    void ctx.resume().then(() => {
+      const t0 = ctx.currentTime + 0.02;
+      [880, 1320].forEach((hz, k) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = hz;
+        const t = t0 + k * 0.18;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.17);
+      });
+      clearTimeout(this.idle);
+      this.idle = window.setTimeout(() => void ctx.suspend(), 800);
     });
   }
 }

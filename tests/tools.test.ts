@@ -3,9 +3,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { distToSegment, fibPrice, fmtLevel, hexToRgba, indexToTime, parseLevel, timeToIndex } from "../src/fibmath.ts";
-import { ema, movingAverage, sma, warmupBars, wma } from "../src/indicators.ts";
-import { fmtCountdown } from "../src/timeframes.ts";
+import { distToSegment, fibPrice, fmtLevel, hexToRgba, indexToTime, parseLevel, timeToIndex } from "../src/drawings/geometry.ts";
+import { ema, movingAverage, sma, warmupBars, wma } from "../src/indicators/ma.ts";
+import { fmtCountdown } from "../src/core/timeframes.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
 
@@ -100,7 +100,7 @@ test("bar-close countdown text", () => {
 });
 
 test("ray and line distances, time spans, angles", async () => {
-  const { distToRay, distToLine, fmtSpan, screenAngle } = await import("../src/fibmath.ts");
+  const { distToRay, distToLine, fmtSpan, screenAngle } = await import("../src/drawings/geometry.ts");
   close(distToRay(20, 5, 0, 0, 10, 0), 5); // beyond b: still on the ray
   close(distToRay(-3, 4, 0, 0, 10, 0), 5); // behind a: measured to a
   close(distToLine(-30, 4, 0, 0, 10, 0), 4); // the line goes both ways
@@ -115,7 +115,7 @@ test("ray and line distances, time spans, angles", async () => {
 });
 
 test("position: direction, R lines up to the take-profit, reward/risk", async () => {
-  const { positionDir, clampTarget, rewardRisk, rLevels, parseR } = await import("../src/fibmath.ts");
+  const { positionDir, clampTarget, rewardRisk, rLevels, parseR } = await import("../src/drawings/geometry.ts");
   // long: entry 100, stop 98 (R = 2), take-profit 104.5
   assert.equal(positionDir(100, 98), 1);
   assert.equal(positionDir(100, 102), -1);

@@ -1,6 +1,6 @@
 // Moving averages over closes. Output arrays align with the input; null where there aren't enough bars yet.
 
-import type { MaKind } from "./settings";
+import type { MaKind } from "../settings/model.ts";
 
 export function sma(values: number[], n: number): (number | null)[] {
   const out: (number | null)[] = new Array(values.length).fill(null);

@@ -1,8 +1,8 @@
 // Laying a larger timeframe onto the chart's bars, and folding live candles into larger bars.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alignToChart, foldTick, tfSec, TIMEFRAMES } from "../src/timeframes.ts";
-import type { Candle } from "../src/api.ts";
+import { alignToChart, foldTick, tfSec, TIMEFRAMES } from "../src/core/timeframes.ts";
+import type { Candle } from "../src/core/api.ts";
 
 const bar = (time: number, close: number, confirmed = true, extra: Partial<Candle> = {}): Candle => ({
   time, open: close, high: close, low: close, close, volume: 1, confirmed, ...extra,

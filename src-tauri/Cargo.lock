@@ -2898,6 +2898,8 @@ dependencies = [
  "tauri-plugin-notification",
  "tokio",
  "tokio-tungstenite",
+ "webview2-com",
+ "windows-core",
 ]
 
 [[package]]

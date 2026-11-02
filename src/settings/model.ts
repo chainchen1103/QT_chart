@@ -1,9 +1,9 @@
-// Settings saved on this computer (the window's localStorage): moving averages, Fibonacci levels, the magnet,
-// and the drawings on each symbol. Whatever is read back is checked; anything malformed falls back to defaults.
+// What the settings and drawings look like, their defaults, and the checks that turn whatever was saved
+// (possibly old, partial or broken) into valid values. Pure: saving and reading is settings/store.ts.
 
-import type { Anchor } from "./fibmath";
-import type { RiskMode } from "./trade";
-import { TIMEFRAMES } from "./timeframes";
+import type { Anchor } from "../drawings/geometry.ts";
+import type { RiskMode } from "../drawings/trade.ts";
+import { TIMEFRAMES } from "../core/timeframes.ts";
 
 export type MaKind = "SMA" | "EMA" | "WMA";
 export const MA_KINDS: MaKind[] = ["SMA", "EMA", "WMA"];
@@ -202,22 +202,6 @@ const cleanTf = (v: unknown): string => (typeof v === "string" && TIMEFRAMES.som
 const num = (v: unknown, r: { min: number; max: number }, fallback: number, int = true): number =>
   isNum(v) && v >= r.min && v <= r.max ? (int ? Math.round(v) : v) : fallback;
 
-function read(key: string): unknown {
-  try {
-    const s = localStorage.getItem("qtchart." + key);
-    return s == null ? undefined : JSON.parse(s);
-  } catch {
-    return undefined;
-  }
-}
-function write(key: string, v: unknown) {
-  try {
-    localStorage.setItem("qtchart." + key, JSON.stringify(v));
-  } catch {
-    /* storage unavailable: the setting just isn't remembered */
-  }
-}
-
 /** First color in `palette` that `used` doesn't have yet (or the next one in turn). */
 export function nextColor(palette: string[], used: string[]): string {
   const taken = new Set(used.map((c) => c.toLowerCase()));
@@ -241,14 +225,10 @@ export function cleanMas(raw: unknown): MaConf[] | null {
   return out;
 }
 
-export const loadMas = (): MaConf[] => cleanMas(read("mas")) ?? clone(DEFAULT_MAS);
-export const saveMas = (v: MaConf[]) => write("mas", v);
 
 export function cleanMaOptions(raw: unknown): MaOptions {
   return { waitClose: !(isObj(raw) && raw.waitClose === false) };
 }
-export const loadMaOptions = (): MaOptions => cleanMaOptions(read("maopts"));
-export const saveMaOptions = (v: MaOptions) => write("maopts", v);
 
 // ----------------------------------------------------------------------------- FVG, order blocks, switches
 /** Keep valid entries, with unique ids; fields that are off fall back to the defaults. */
@@ -279,8 +259,6 @@ export function cleanFvgs(raw: unknown): FvgConf[] | null {
     down: isColor(r.down) ? r.down : d.down,
   }), "fvg");
 }
-export const loadFvgs = (): FvgConf[] => cleanFvgs(read("fvgs")) ?? [clone(DEFAULT_FVG)];
-export const saveFvgs = (v: FvgConf[]) => write("fvgs", v);
 
 export function cleanObs(raw: unknown): ObConf[] | null {
   const d = DEFAULT_OB;
@@ -296,8 +274,6 @@ export function cleanObs(raw: unknown): ObConf[] | null {
     down: isColor(r.down) ? r.down : d.down,
   }), "ob");
 }
-export const loadObs = (): ObConf[] => cleanObs(read("obs")) ?? [clone(DEFAULT_OB)];
-export const saveObs = (v: ObConf[]) => write("obs", v);
 
 export function cleanSrs(raw: unknown): SrConf[] | null {
   const d = DEFAULT_SR;
@@ -312,19 +288,11 @@ export function cleanSrs(raw: unknown): SrConf[] | null {
     down: isColor(r.down) ? r.down : d.down,
   }), "sr");
 }
-export const loadSrs = (): SrConf[] => cleanSrs(read("srs")) ?? [clone(DEFAULT_SR)];
-export const saveSrs = (v: SrConf[]) => write("srs", v);
 
 export function cleanGroups(raw: unknown): Groups {
   const g = isObj(raw) ? raw : {};
   return { ma: g.ma !== false, fvg: g.fvg === true, ob: g.ob === true, sr: g.sr === true };
 }
-export const loadGroups = (): Groups => {
-  const raw = read("groups");
-  // first run of this version: the old moving-average switch decides the "均線" switch
-  return raw === undefined ? { ...DEFAULT_GROUPS, ma: read("ma") !== 0 } : cleanGroups(raw);
-};
-export const saveGroups = (v: Groups) => write("groups", v);
 
 export function cleanLabels(raw: unknown): ScaleLabels {
   const r = isObj(raw) ? raw : {};
@@ -332,8 +300,6 @@ export function cleanLabels(raw: unknown): ScaleLabels {
   for (const k of Object.keys(out) as (keyof ScaleLabels)[]) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
   return out;
 }
-export const loadLabels = (): ScaleLabels => cleanLabels(read("labels"));
-export const saveLabels = (v: ScaleLabels) => write("labels", v);
 
 // ----------------------------------------------------------------------------- Fibonacci
 export function sortLevels(levels: FibLevel[]): FibLevel[] {
@@ -358,8 +324,6 @@ export function cleanFib(raw: unknown): FibSettings | null {
     reverse: raw.reverse === true,
   };
 }
-export const loadFib = (): FibSettings => cleanFib(read("fib")) ?? clone(DEFAULT_FIB);
-export const saveFib = (v: FibSettings) => write("fib", v);
 
 // ----------------------------------------------------------------------------- magnet
 export function cleanMagnet(raw: unknown): MagnetSettings | null {
@@ -367,8 +331,6 @@ export function cleanMagnet(raw: unknown): MagnetSettings | null {
   const key = MAGNET_KEYS.find((k) => k.key === raw.holdKey);
   return { on: raw.on === true, holdKey: key ? key.key : DEFAULT_MAGNET.holdKey };
 }
-export const loadMagnet = (): MagnetSettings => cleanMagnet(read("magnet")) ?? clone(DEFAULT_MAGNET);
-export const saveMagnet = (v: MagnetSettings) => write("magnet", v);
 export const magnetKeyLabel = (k: MagnetKey) => MAGNET_KEYS.find((x) => x.key === k)?.label ?? k;
 
 // ----------------------------------------------------------------------------- drawings, per symbol
@@ -424,19 +386,15 @@ export function cleanDrawings(raw: unknown): Drawing[] {
   }
   return out;
 }
-export const loadDrawings = (instId: string): Drawing[] => cleanDrawings(read("drawings." + instId));
-export const saveDrawings = (instId: string, list: Drawing[]) => write("drawings." + instId, list);
 
 /** The style each tool last used: new drawings start from it. */
-export function loadDrawStyles(): DrawStyles {
-  const raw = read("drawstyles");
+export function cleanDrawStyles(raw: unknown): DrawStyles {
   const r = isObj(raw) ? raw : {};
   const out: DrawStyles = {};
   for (const k of LINE_KINDS) if (isObj(r[k])) out[k] = cleanLineStyle(r[k]);
   if (isObj(r.rect)) out.rect = cleanRectStyle(r.rect);
   return out;
 }
-export const saveDrawStyles = (v: DrawStyles) => write("drawstyles", v);
 
 // ----------------------------------------------------------------------------- chart appearance
 export type ImageFit = "cover" | "contain" | "stretch";
@@ -466,28 +424,6 @@ export function cleanAppearance(raw: unknown): Appearance {
     imageFit: IMAGE_FITS.some((f) => f.key === r.imageFit) ? (r.imageFit as ImageFit) : d.imageFit,
   };
 }
-export const loadAppearance = (): Appearance => cleanAppearance(read("appearance"));
-export const saveAppearance = (v: Appearance) => write("appearance", v);
-
-/** The background picture, as a data URL ("" = none). Kept apart because it is large. */
-export function loadBgImage(): string {
-  try {
-    const s = localStorage.getItem("qtchart.bgimage") ?? "";
-    return s.startsWith("data:image/") ? s : "";
-  } catch {
-    return "";
-  }
-}
-/** False when it could not be saved (storage full). */
-export function saveBgImage(dataUrl: string): boolean {
-  try {
-    if (dataUrl) localStorage.setItem("qtchart.bgimage", dataUrl);
-    else localStorage.removeItem("qtchart.bgimage");
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // ----------------------------------------------------------------------------- position tool
 export function cleanPosition(raw: unknown): PositionSettings {
@@ -516,5 +452,3 @@ export function cleanPosition(raw: unknown): PositionSettings {
     chain: r.chain !== false,
   };
 }
-export const loadPosition = (): PositionSettings => cleanPosition(read("position"));
-export const savePosition = (v: PositionSettings) => write("position", v);

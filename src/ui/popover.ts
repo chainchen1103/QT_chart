@@ -11,6 +11,9 @@ export function closePopover() {
 
 export type Render = (body: HTMLElement, rerender: () => void) => void;
 
+/** Fired on a popover's body when it closes: `body.addEventListener(POPOVER_CLOSED, stop)`. */
+export const POPOVER_CLOSED = "popover-closed";
+
 /**
  * Open a popover next to `anchor` (below it, or to its right), or close it if it is already open there.
  * `render` fills the body and is given a function that redraws the body after structural changes.
@@ -63,6 +66,7 @@ function showPopover(anchor: HTMLElement | null, left: number, top: number, titl
   anchor?.classList.add("open");
   const me = { anchor, close };
   function close() {
+    body.dispatchEvent(new Event(POPOVER_CLOSED)); // whatever the body listens to can stop now
     box.remove();
     document.removeEventListener("mousedown", onDown, true);
     document.removeEventListener("keydown", onKey, true);

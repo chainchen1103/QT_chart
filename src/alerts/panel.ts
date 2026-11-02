@@ -1,9 +1,9 @@
 // Alert windows: the list with the log and options, a new price alert at a point, and the alert section in a
 // drawing's settings. Changes go straight to the AlertService; the windows redraw when it changes.
 
-import type { Drawing } from "../settings.ts";
+import type { Drawing } from "../settings/model.ts";
 import { checkbox, el, flagBad, labelled, lbl, textButton } from "../ui/dom.ts";
-import { closePopover, popoverAt, togglePopover, type Render } from "../ui/popover.ts";
+import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type Repeat, type TradeStage } from "./model.ts";
 import { STAGE_TEXT, type AlertService } from "./service.ts";
 
@@ -89,10 +89,10 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     if (!listening) {
       listening = true;
       const stop = ui.service.subscribe(() => {
-        if (!body.isConnected) return void stop();
         const typing = document.activeElement && body.contains(document.activeElement) && document.activeElement !== document.body;
         if (!typing) rerender();
       });
+      body.addEventListener(POPOVER_CLOSED, stop, { once: true });
     }
     const s = ui.service;
     const inst = ui.instId();

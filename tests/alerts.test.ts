@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { barStart, describe, evaluate, levelHit, moveSince, shapeAt, tradeStep, type Move } from "../src/alerts/engine.ts";
 import { cleanAlerts, condsFor, type Alert } from "../src/alerts/model.ts";
-import type { Drawing, FibSettings } from "../src/settings.ts";
+import type { Drawing, FibSettings } from "../src/settings/model.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
 const name = (k: string) => ({ trend: "趨勢線", hline: "水平線", ray: "射線", hray: "水平射線" })[k] ?? k;

@@ -7,7 +7,7 @@
 // After that the first bar to reach the stop or the take-profit decides; when one bar reaches both, or the
 // fill bar reaches the stop, the stop counts (the worse case). Fees and funding are not included.
 
-import type { Candle } from "./api";
+import type { Candle } from "../core/api.ts";
 
 export type RiskMode = "pct" | "amount";
 

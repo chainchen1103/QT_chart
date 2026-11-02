@@ -11,9 +11,9 @@ import type {
   Time,
 } from "lightweight-charts";
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
-import { xOfLogical } from "../coords.ts";
-import { timeToIndex } from "../fibmath.ts";
-import type { Drawing } from "../settings.ts";
+import { xOfLogical } from "../chart/coords.ts";
+import { timeToIndex } from "../drawings/geometry.ts";
+import type { Drawing } from "../settings/model.ts";
 import type { Alert } from "./model.ts";
 
 export type AlertLayerHost = {

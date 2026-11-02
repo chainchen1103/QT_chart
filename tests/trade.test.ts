@@ -1,8 +1,8 @@
 // Position sizing, outcome of a position on bars, and capital carried from one position to the next.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chainPositions, fmtQty, planTrade, settleTrade, tradePnl } from "../src/trade.ts";
-import type { Candle } from "../src/api.ts";
+import { chainPositions, fmtQty, planTrade, settleTrade, tradePnl } from "../src/drawings/trade.ts";
+import type { Candle } from "../src/core/api.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
 const bar = (time: number, low: number, high: number, closePx = (low + high) / 2): Candle => ({

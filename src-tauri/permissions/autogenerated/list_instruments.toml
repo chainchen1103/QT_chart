@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-instruments"
+description = "Enables the list_instruments command without any pre-configured scope."
+commands.allow = ["list_instruments"]
+
+[[permission]]
+identifier = "deny-list-instruments"
+description = "Denies the list_instruments command without any pre-configured scope."
+commands.deny = ["list_instruments"]

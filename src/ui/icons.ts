@@ -1,6 +1,6 @@
 // Small line icons (20 × 20, current color) for the drawing tools.
 
-import type { DrawKind } from "./settings";
+import type { DrawKind } from "../settings/model.ts";
 
 const svg = (body: string) =>
   `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${body}</svg>`;

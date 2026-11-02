@@ -12,9 +12,9 @@ import type {
   Time,
 } from "lightweight-charts";
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
-import type { Candle } from "./api";
-import type { ScaleLabels } from "./settings";
-import { fmtCountdown } from "./timeframes";
+import type { Candle } from "../core/api.ts";
+import type { ScaleLabels } from "../settings/model.ts";
+import { fmtCountdown } from "../core/timeframes.ts";
 
 export type ScaleLabelHost = {
   chart: IChartApi;

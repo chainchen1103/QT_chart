@@ -1,7 +1,7 @@
 // Timeframes, and how a series from one timeframe is laid onto the bars of another.
 // Pure functions (no DOM), unit-tested in tests/timeframes.test.ts.
 
-import type { Candle } from "./api";
+import type { Candle } from "./api.ts";
 
 export type Tf = { bar: string; label: string; sec: number };
 

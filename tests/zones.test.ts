@@ -1,8 +1,8 @@
 // Fair value gaps and order blocks on small hand-made bar series.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findFvgs, findLevels, findOrderBlocks, pickZones } from "../src/zones.ts";
-import type { Candle } from "../src/api.ts";
+import { findFvgs, findLevels, findOrderBlocks, pickZones } from "../src/indicators/zones.ts";
+import type { Candle } from "../src/core/api.ts";
 
 let t = 0;
 const k = (open: number, high: number, low: number, close: number, confirmed = true): Candle => ({

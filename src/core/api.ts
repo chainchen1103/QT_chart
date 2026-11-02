@@ -35,7 +35,6 @@ export const getCandles = (instId: string, bar: string, before: number | null, c
 export const openTradingView = () => invoke<void>("open_tradingview");
 
 export const startStream = (instId: string, bar: string) => invoke<void>("start_stream", { instId, bar });
-export const stopStream = () => invoke<void>("stop_stream");
 
 export const onCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
   listen<CandleEvent>("candle", (e) => cb(e.payload));
@@ -44,6 +43,10 @@ export const onCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
 export const watchSymbols = (instIds: string[]) => invoke<void>("watch_symbols", { instIds });
 export const onWatchCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
   listen<CandleEvent>("watch_candle", (e) => cb(e.payload));
+/** Whether the web view may use the graphics card; a change takes effect at the next start. */
+export const gpuPref = () => invoke<boolean>("gpu_pref");
+export const setGpuPref = (on: boolean) => invoke<void>("set_gpu_pref", { on });
+
 /** An alert went off: taskbar flash when in the background, plus a Windows notification when `system`. */
 export const alertNotify = (title: string, body: string, system: boolean, sound: boolean) =>
   invoke<void>("alert_notify", { title, body, system, sound });

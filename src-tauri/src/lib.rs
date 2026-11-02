@@ -1,18 +1,26 @@
-//! QT Chart backend: market data from OKX for the chart window.
+//! QT Chart backend: market data from OKX for the chart window, alert notifications, and the window itself.
+//! The page can call only the commands below, and only those listed in capabilities/default.json
+//! (build.rs declares them; anything else is refused).
 
 mod okx;
+mod prefs;
 mod stream;
 mod watch;
+mod window;
+mod ws;
 
 use okx::{Candle, Client, Instrument};
+use std::path::PathBuf;
 use stream::StreamManager;
-use tauri::{AppHandle, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 use watch::Watcher;
 
 struct AppState {
     client: Client,
     streams: StreamManager,
     watcher: Watcher,
+    /// Where prefs.json lives.
+    config_dir: PathBuf,
 }
 
 fn check(inst_id: &str, bar: &str) -> Result<(), String> {
@@ -50,11 +58,6 @@ fn start_stream(app: AppHandle, state: State<'_, AppState>, inst_id: String, bar
     Ok(())
 }
 
-#[tauri::command]
-fn stop_stream(state: State<'_, AppState>) {
-    state.streams.stop();
-}
-
 /// Stream 1-minute candles of these symbols for the price alerts ("watch_candle" events); an empty list stops.
 #[tauri::command]
 fn watch_symbols(app: AppHandle, state: State<'_, AppState>, inst_ids: Vec<String>) -> Result<(), String> {
@@ -84,6 +87,19 @@ fn alert_notify(app: AppHandle, window: WebviewWindow, title: String, body: Stri
         n = n.sound("Default");
     }
     n.show().map_err(|e| format!("系統通知失敗：{e}"))
+}
+
+/// Whether the web view may use the graphics card (takes effect at the next start).
+#[tauri::command]
+fn gpu_pref(state: State<'_, AppState>) -> bool {
+    prefs::load(&state.config_dir).gpu
+}
+
+#[tauri::command]
+fn set_gpu_pref(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    let mut p = prefs::load(&state.config_dir);
+    p.gpu = on;
+    prefs::save(&state.config_dir, &p)
 }
 
 /// Open https://www.tradingview.com/ in the default browser. The chart library's licence asks for a link to
@@ -116,14 +132,21 @@ fn open_tradingview() -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .manage(AppState { client: Client::new(), streams: StreamManager::default(), watcher: Watcher::default() })
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir()?;
+            let prefs = prefs::load(&config_dir);
+            app.manage(AppState { client: Client::new(), streams: StreamManager::default(), watcher: Watcher::default(), config_dir });
+            window::create(app.handle(), prefs)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_instruments,
             get_candles,
             start_stream,
-            stop_stream,
             watch_symbols,
             alert_notify,
+            gpu_pref,
+            set_gpu_pref,
             open_tradingview
         ])
         .run(tauri::generate_context!())

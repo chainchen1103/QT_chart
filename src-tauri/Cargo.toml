@@ -15,14 +15,20 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = "0.12"
 tokio = { version = "1", features = ["macros", "time", "sync"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tauri-plugin-notification = "2"
 
+# Windows only: ask WebView2 to use less memory while the window is minimized (window.rs)
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = "s"
+panic = "abort"
 strip = true

@@ -65,7 +65,9 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 
 .chart-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .chart { position: absolute; inset: 0; }
-.chart-bg { position: absolute; inset: 0; background-position: center; background-repeat: no-repeat; pointer-events: none; }
+/* the picture sits on its own compositor layer (on the GPU when there is one): chart redraws never repaint it */
+.chart-bg { position: absolute; inset: 0; background-position: center; background-repeat: no-repeat; pointer-events: none;
+  will-change: transform; transform: translateZ(0); }
 .pop-thumb { width: 48px; height: 28px; border: 1px solid var(--border); border-radius: 3px; background-size: cover; background-position: center; }
 .chart.drawing, .chart.drawing * { cursor: crosshair !important; }
 .chart.over-drawing, .chart.over-drawing * { cursor: pointer !important; }

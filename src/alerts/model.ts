@@ -1,6 +1,6 @@
 // Price alerts: what is stored, and the checks that make stored data safe to use. Pure (no DOM, no Tauri).
 
-import type { DrawKind } from "../settings.ts";
+import type { DrawKind } from "../settings/model.ts";
 
 /** touch: the price reaches the level from either side; up / down: it crosses it in that direction. */
 export type LevelCond = "touch" | "up" | "down";

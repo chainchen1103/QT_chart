@@ -2,13 +2,13 @@
 // chart's timeframe (the default) or on a timeframe of its own; SourceStore supplies the bars.
 
 import { LineSeries, LineType, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
-import type { Candle } from "./api";
-import { movingAverage, warmupBars } from "./indicators";
-import type { FvgConf, Groups, MaConf, MaOptions, ObConf, ScaleLabels, SrConf } from "./settings";
-import { SourceStore } from "./sources";
-import { alignToChart, tfLabel, tfSec } from "./timeframes";
-import { ZoneLayer, type DrawZone } from "./zonelayer";
-import { findFvgs, findLevels, findOrderBlocks, pickZones, type Zone } from "./zones";
+import type { Candle } from "../core/api.ts";
+import { movingAverage, warmupBars } from "./ma.ts";
+import type { FvgConf, Groups, MaConf, MaOptions, ObConf, ScaleLabels, SrConf } from "../settings/model.ts";
+import { SourceStore } from "./sources.ts";
+import { alignToChart, tfLabel, tfSec } from "../core/timeframes.ts";
+import { ZoneLayer, type DrawZone } from "./zonelayer.ts";
+import { findFvgs, findLevels, findOrderBlocks, pickZones, type Zone } from "./zones.ts";
 
 /** ok; loading (bars on the way); lower (timeframe smaller than the chart's: not shown); error. */
 export type IndState = "ok" | "loading" | "lower" | "error";
@@ -77,11 +77,12 @@ export class Overlays {
   resyncOthers() {
     this.sources.dropExcept(this.bar);
   }
-  /** A live candle, after the chart has applied it to the shared `candles`. */
-  tick(c: Candle) {
+  /** A live candle, after the chart has applied it to the shared `candles`. `draw` false (window hidden): only
+   *  keep the other timeframes' bars current; setData redraws everything later. */
+  tick(c: Candle, draw = true) {
     if (!this.times.length || c.time > this.times[this.times.length - 1]) this.times.push(c.time);
     this.sources.tick(c, this.bar);
-    this.refresh(false);
+    if (draw) this.refresh(false);
   }
 
   // ------------------------------------------------------------------- legend

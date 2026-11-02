@@ -11,13 +11,31 @@
   },
   "app": {
     "windows": [
-      { "title": "QT Chart", "width": 1400, "height": 860, "minWidth": 720, "minHeight": 480 }
+      {
+        "label": "main",
+        "create": false,
+        "title": "QT Chart",
+        "width": 1400,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 480
+      }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": null,
+      "freezePrototype": true
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

@@ -1,14 +1,13 @@
 //! Prices for the alerts: 1-minute candles of every symbol that has an alert switched on, over one OKX
-//! WebSocket; if it keeps failing, the REST endpoint is polled every 3 seconds for a while. Kept apart from the
-//! chart's stream, so alerts keep working whatever the chart shows. Event to the window: "watch_candle".
+//! WebSocket; if it keeps failing, the REST endpoint is polled every 3 seconds for a while (ws.rs). Kept apart
+//! from the chart's stream, so alerts keep working whatever the chart shows. Event to the window: "watch_candle".
 
 use crate::okx::{self, Client, WsMsg};
 use crate::stream::CandleEvent;
-use futures_util::{SinkExt, StreamExt};
+use crate::ws;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// At most this many symbols are watched at once.
 pub const MAX_WATCH: usize = 50;
@@ -50,52 +49,23 @@ fn send(app: &AppHandle, inst_id: &str, cs: Vec<okx::Candle>) {
 }
 
 async fn run(app: AppHandle, client: Client, ids: Vec<String>) {
-    let mut failures = 0u32;
-    loop {
-        match session(&app, &ids).await {
-            Ok(()) => failures = 0,
-            Err(_) => failures += 1,
-        }
-        if failures >= 3 {
-            poll_for(&app, &client, &ids, Duration::from_secs(300)).await;
-            failures = 0;
-        } else {
-            tokio::time::sleep(Duration::from_secs(1 << failures.min(4))).await;
-        }
-    }
-}
-
-async fn session(app: &AppHandle, ids: &[String]) -> Result<(), String> {
-    let (ws, _) = tokio::time::timeout(Duration::from_secs(10), connect_async(okx::ws_url()))
-        .await
-        .map_err(|_| "連線逾時".to_string())?
-        .map_err(|e| e.to_string())?;
-    let (mut tx, mut rx) = ws.split();
     let args: Vec<serde_json::Value> = ids.iter().map(|id| serde_json::json!({"channel": "candle1m", "instId": id})).collect();
-    let sub = serde_json::json!({"op": "subscribe", "args": args});
-    tx.send(Message::Text(sub.to_string().into())).await.map_err(|e| e.to_string())?;
-    let mut ping = tokio::time::interval(Duration::from_secs(20));
-    ping.tick().await; // the first tick fires at once
-    loop {
-        tokio::select! {
-            next = tokio::time::timeout(Duration::from_secs(45), rx.next()) => {
-                let Some(msg) = next.map_err(|_| "45 秒沒有收到資料".to_string())? else { return Ok(()) };
-                match msg.map_err(|e| e.to_string())? {
-                    Message::Text(t) => match okx::parse_ws(t.as_str()) {
-                        WsMsg::Candles(Some(inst), cs) => send(app, &inst, cs),
-                        WsMsg::Error(e) => return Err(e),
-                        _ => {}
-                    },
-                    Message::Ping(p) => tx.send(Message::Pong(p)).await.map_err(|e| e.to_string())?,
-                    Message::Close(_) => return Ok(()),
-                    _ => {}
+    let session = || {
+        let (app, args) = (app.clone(), args.clone());
+        async move {
+            ws::session(&args, |m| {
+                if let WsMsg::Candles(Some(inst), cs) = m {
+                    send(&app, &inst, cs);
                 }
-            }
-            _ = ping.tick() => {
-                tx.send(Message::Text("ping".into())).await.map_err(|e| e.to_string())?;
-            }
+            })
+            .await
         }
-    }
+    };
+    let poll = |how_long| {
+        let (app, client, ids) = (app.clone(), client.clone(), ids.clone());
+        async move { poll_for(&app, &client, &ids, how_long).await }
+    };
+    ws::keep_alive(session, poll).await;
 }
 
 async fn poll_for(app: &AppHandle, client: &Client, ids: &[String], how_long: Duration) {

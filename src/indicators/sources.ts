@@ -2,8 +2,8 @@
 // The chart's own timeframe is seeded from the chart's bars; older bars (warm-up) and other timeframes are
 // fetched from OKX when needed. Live candles from the chart are folded into all of them.
 
-import { getCandles, type Candle } from "./api";
-import { foldTick, tfSec } from "./timeframes";
+import { getCandles, type Candle } from "../core/api.ts";
+import { foldTick, tfSec } from "../core/timeframes.ts";
 
 type Entry = { bars: Candle[]; loading: boolean; exhausted: boolean; error: string | null; retryAt: number };
 

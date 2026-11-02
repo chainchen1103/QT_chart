@@ -95,12 +95,13 @@
   - 如果網路擋掉 OKX 的 8443 埠，會自動改成每 2 秒查一次，5 分鐘後再試 WebSocket；
   - 下方狀態列會顯示目前用的是哪一種。
 - **歷史資料：** 往左拖會自動載入更早的 K 線，每次 500 根。
-- **圖表外觀：** 按右上角的齒輪，或在圖上空白處按右鍵：
+- **圖表外觀：** 按右上角的齒輪，或在圖上空白處按右鍵選「圖表外觀…」：
   - 背景顏色；
   - 背景圖片：選一張圖，會縮到最多 1920×1200 存在這台電腦；可以調透明度、選填滿／完整顯示／拉伸；
   - 格線和文字顏色；
   - K 線上漲、下跌的顏色，成交量和最新價標籤會跟著變；
-  - 「恢復預設顏色」不會移除背景圖片。
+  - 「恢復預設顏色」不會移除背景圖片；
+  - 最下面的「效能」：見「效能與安全」。
 - **記憶：** 幣種、週期、指標和設定、Fib 數值、吸附設定、畫線和樣式、外觀，下次開啟都還在。
 
 ## 快捷鍵
@@ -146,43 +147,75 @@ npx tauri build --no-bundle
 - **`panicked at ... rust.rs:1145 ... unwrap() on a None value`：** Rust 沒裝完整，通常是 `rustup update` 被中斷。重跑 `rustup update` 並等它跑完，再用 `rustc -vV` 確認：輸出裡要有一行 `host: x86_64-pc-windows-msvc`。還是不行的話，先 `rustup toolchain uninstall stable`，再 `rustup toolchain install stable`。
 - **`'tauri' 不是內部或外部命令`：** 還沒執行 `npm install`，或不在 `qtchart` 資料夾裡。
 - **Windows 通知的來源寫「Windows PowerShell」：** 直接開 `target\release\qtchart.exe`（沒有安裝）時，Windows 不認得這個程式，通知會借 PowerShell 的名字顯示；用 `npx tauri build` 做安裝檔裝起來，就會顯示 QT Chart。把 exe 複製到別的資料夾執行，Windows 可能不顯示通知，請用捷徑。
+- **畫面閃爍、黑屏或花掉：** 圖表外觀（右上角齒輪）→ 效能，取消「使用顯示卡加速」，重新開啟程式。
 - **沒有跳 Windows 通知：** 檢查 Windows 的「通知」設定和「勿打擾」；程式內的訊息和聲音不受影響。
 - **esbuild 的錯誤：** 新版 npm 預設不跑套件的安裝腳本。執行 `npm install-scripts approve esbuild`，再 `npm install`。
 
 ## 程式結構
+每個資料夾只管一件事，彼此透過小介面溝通：設定是「存檔＋通知」的值（`Setting`），誰用到誰自己訂閱；`src/main.ts` 只負責把各部分接起來。
+
 | 位置 | 內容 |
 |---|---|
-| `src/main.ts` | 圖表、工具列、圖例、即時更新、往左載入歷史 |
-| `src/overlays.ts` | 指標：均線線條、FVG／OB 方框，以及各自用哪個週期 |
-| `src/sources.ts` | 各週期的 K 線：圖表週期用圖上的資料，其他週期和暖機資料向 OKX 抓，即時 K 線併進去 |
-| `src/timeframes.ts` | 週期清單；把一個週期的數值對到圖表的每根 K 線；把即時 K 線併進大週期 |
-| `src/zones.ts` | FVG、Order Block、支撐阻力的偵測 |
-| `src/zonelayer.ts` | FVG、Order Block 方框和支撐阻力線的繪製 |
-| `src/scalelabels.ts` | 價格標尺上的收線倒數、畫面內最高最低價 |
-| `src/drawings.ts` | 畫線工具：Fib 回撤、各種線、矩形、倉位的繪製、滑鼠操作、吸附、軸上的標籤 |
-| `src/trade.ts` | 倉位計算：數量、保證金、用 K 線結算、資金接續 |
-| `src/icons.ts` | 畫線工具的小圖示 |
-| `src/panels.ts` | 均線、FVG、OB、支撐阻力、Fib、吸附、價格標籤、畫線樣式、圖表外觀、倉位的設定視窗 |
+| `src/main.ts` | 把下面各部分建起來、接起來（不放功能） |
+| `src/core/api.ts` | 呼叫 Rust 的指令和事件 |
+| `src/core/setting.ts` | `Setting`：讀一次、改了就存、通知訂閱的人 |
+| `src/core/storage.ts` | 存在這台電腦的 local storage（頁面沒有檔案權限） |
+| `src/core/format.ts` | 價格、成交量、時間的顯示格式 |
+| `src/core/timeframes.ts` | 週期清單；把一個週期的數值對到圖表的每根 K 線；把即時 K 線併進大週期 |
+| `src/chart/feed.ts` | 圖上的 K 線：幣種和週期、第一次載入、往左載入更早的（最多 20,000 根）、即時更新、斷線後補抓 |
+| `src/chart/view.ts` | 圖表本身：K 線和成交量、時間軸、顏色和背景圖片、程式庫自己畫的標籤 |
+| `src/chart/legend.ts` | 左上角圖例、右上角報價和視窗標題、狀態列 |
+| `src/chart/scalelabels.ts` | 價格標尺上的收線倒數、畫面內最高最低價 |
+| `src/chart/coords.ts` | K 線位置換成畫面座標 |
+| `src/indicators/ma.ts` | 均線計算（SMA、EMA、WMA）和暖機根數 |
+| `src/indicators/zones.ts` | FVG、Order Block、支撐阻力的偵測 |
+| `src/indicators/sources.ts` | 各週期的 K 線：圖表週期用圖上的資料，其他週期和暖機資料向 OKX 抓，即時 K 線併進去 |
+| `src/indicators/overlays.ts` | 指標：均線線條、FVG／OB 方框、支撐阻力，以及各自用哪個週期 |
+| `src/indicators/zonelayer.ts` | FVG、Order Block 方框和支撐阻力線的繪製 |
+| `src/drawings/layer.ts` | 畫線工具的狀態和滑鼠、鍵盤操作、吸附、軸上的標籤 |
+| `src/drawings/geo.ts` | 畫線在畫面上的位置、滑鼠指到哪裡（不需要圖表就能測試） |
+| `src/drawings/paint.ts` | 畫線的繪製：Fib、各種線、矩形、倉位和標籤 |
+| `src/drawings/geometry.ts` | Fib 價位、時間和 K 線位置的換算、距離、R 線 |
+| `src/drawings/trade.ts` | 倉位計算：數量、保證金、用 K 線結算、資金接續 |
 | `src/alerts/model.ts` | 提醒的資料、條件、存檔檢查 |
 | `src/alerts/engine.ts` | 什麼時候響：兩次報價之間走過的價格、畫線在某個時間的價位、倉位的進場和出場 |
 | `src/alerts/service.ts` | 提醒清單、收報價、響、紀錄、要盯哪些幣種 |
 | `src/alerts/notify.ts` | 右下角訊息、聲音、Windows 通知 |
 | `src/alerts/layer.ts` | 圖上的提醒線和小鈴鐺 |
 | `src/alerts/panel.ts` | 提醒清單、新增提醒、畫線設定裡的提醒 |
-| `src/ui/dom.ts`、`src/ui/popover.ts` | 設定視窗共用的小元件和彈出視窗 |
-| `src/storage.ts` | 存設定（這台電腦的 local storage） |
-| `src/settings.ts` | 設定和畫線的保存與檢查 |
-| `src/fibmath.ts` | Fib 價位、時間和 K 線位置的換算 |
-| `src/indicators.ts` | 均線計算（SMA、EMA、WMA）和暖機根數 |
-| `src/coords.ts` | K 線位置換成畫面座標 |
-| `src/api.ts` | 呼叫 Rust 的指令和事件 |
+| `src/settings/model.ts` | 設定和畫線的格式、預設值、讀回來時的檢查 |
+| `src/settings/store.ts` | 所有存下來的設定、每個幣種的畫線、背景圖片 |
+| `src/ui/toolbar.ts` | 上方工具列：幣種搜尋、週期、指標開關 |
+| `src/ui/tools.ts` | 左邊畫線工具列，和畫線的設定視窗 |
+| `src/ui/menus.ts` | 右鍵選單、Alt+A |
+| `src/ui/panels/*.ts` | 各個設定視窗：均線、FVG／OB／支撐阻力、Fib、吸附、價格標籤、畫線樣式、圖表外觀、效能、倉位 |
+| `src/ui/dom.ts`、`src/ui/popover.ts`、`src/ui/icons.ts` | 共用的小元件、彈出視窗、圖示 |
+| `src-tauri/src/lib.rs` | 給頁面呼叫的指令（只有這幾個，見下面「權限」） |
 | `src-tauri/src/okx.rs` | OKX 公開 API：幣種清單、K 線（自動翻頁）、WebSocket 訊息解析 |
-| `src-tauri/src/stream.rs` | 圖表的即時推送：WebSocket，失敗時自動改用輪詢 |
-| `src-tauri/src/watch.rs` | 提醒用的報價：所有有提醒的幣種的 1 分 K，失敗時改用輪詢 |
-| `src-tauri/src/lib.rs` | 給前端呼叫的指令（含提醒的 Windows 通知、工作列閃爍） |
+| `src-tauri/src/ws.rs` | 一次 WebSocket 連線，和斷線重試、改用輪詢的規則 |
+| `src-tauri/src/stream.rs` | 圖表的即時推送 |
+| `src-tauri/src/watch.rs` | 提醒用的報價：所有有提醒的幣種的 1 分 K |
+| `src-tauri/src/window.rs` | 主視窗：GPU 開關、視窗標題、縮到最小時省記憶體 |
+| `src-tauri/src/prefs.rs` | 開視窗前就要知道的設定（GPU），存在 prefs.json |
+
+## 效能與安全
+- **記憶體：**
+  - 一個幣種最多載入 20,000 根 K 線，再往左就不載入；
+  - 視窗縮到最小時圖不重畫（報價、提醒照常），打開時一次補畫；
+  - Windows 上視窗縮到最小時，請 WebView2 用低記憶體模式（丟掉快取），打開時恢復；
+  - 背景圖片縮到 1920×1200 以內，用 blob 網址顯示，不在樣式裡另存一份很長的圖片字串；
+  - 提醒的聲音裝置平常是暫停的，響完 0.8 秒就放掉；設定視窗關掉時取消訂閱。
+- **GPU：**
+  - 預設在顯示卡和驅動程式允許時用顯示卡畫圖（由 WebView2 自己判斷，有問題的驅動會自動改用軟體繪圖），背景圖片放在獨立的合成圖層；
+  - 圖表外觀最下面的「效能」顯示目前是不是用顯示卡在畫，也可以關掉（畫面閃爍、黑屏時），重新開啟程式後生效。設定存在 `%APPDATA%\com.chainchen.qtchart\prefs.json`。
+- **權限（最小權限）：**
+  - 頁面只能呼叫 8 個指令（列在 `src-tauri/build.rs`，在 `src-tauri/capabilities/default.json` 一個一個允許）和收事件，其他 Tauri 功能（檔案、視窗、剪貼簿、外掛的 JS 介面等）都沒開；
+  - 內容安全政策（CSP）只允許程式自己的檔案：頁面不能連外網、不能載入外部程式碼；JavaScript 原型凍結，防原型污染；
+  - 只有 Rust 端連 OKX 的公開 API（不用金鑰、不能下單）；WebSocket 位址只接受 okx.com；
+  - 寫檔只有 prefs.json；開瀏覽器只能開固定的 tradingview.com；不接受拖放檔案。
 
 ## 測試
-- 前端：`npm test`（Fib、時間換算、均線、週期對齊、FVG、Order Block、支撐阻力、收線倒數、倉位計算和結算、提醒，需要 Node 22 以上）。
+- 前端：`npm test`（Fib、時間換算、均線、週期對齊、FVG、Order Block、支撐阻力、收線倒數、倉位計算和結算、提醒、畫線位置和點選、格式，需要 Node 22 以上）。
 - Rust：`cd src-tauri` 之後執行 `cargo test`。
 
 WebSocket 的位址可以用環境變數 `QTCHART_WS_URL` 改成 OKX 的其他主機，例如 `wss://wsaws.okx.com:8443/ws/v5/business`；正式版只接受 `wss://` 開頭的 okx.com 位址，開發版也能指向本機的測試伺服器。不設定就用 OKX 預設的位址。

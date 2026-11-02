@@ -7,9 +7,9 @@
 // timeframe the alert was made on, continued past their last point (as TradingView does); rectangles and Fib
 // levels from their left edge on, whatever their width; positions from their entry time on.
 
-import { fibPrice, fmtLevel, positionDir, rewardRisk, type Anchor } from "../fibmath.ts";
-import type { Drawing, DrawKind, FibSettings } from "../settings.ts";
-import { tfSec } from "../timeframes.ts";
+import { fibPrice, fmtLevel, positionDir, rewardRisk, type Anchor } from "../drawings/geometry.ts";
+import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
+import { tfSec } from "../core/timeframes.ts";
 import { oneShot, REARM_SEC, type Alert, type BoxCond, type LevelCond, type TradeStage } from "./model.ts";
 
 export type Snapshot = { time: number; high: number; low: number; close: number };
