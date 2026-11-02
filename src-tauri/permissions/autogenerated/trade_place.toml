@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trade-place"
+description = "Enables the trade_place command without any pre-configured scope."
+commands.allow = ["trade_place"]
+
+[[permission]]
+identifier = "deny-trade-place"
+description = "Denies the trade_place command without any pre-configured scope."
+commands.deny = ["trade_place"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trade-cancel"
+description = "Enables the trade_cancel command without any pre-configured scope."
+commands.allow = ["trade_cancel"]
+
+[[permission]]
+identifier = "deny-trade-cancel"
+description = "Denies the trade_cancel command without any pre-configured scope."
+commands.deny = ["trade_cancel"]

@@ -92,6 +92,9 @@ export type PositionInput = {
   /** null: take the capital the previous position ended with (or the default when there is none). */
   capital: number | null;
   risk: number; riskMode: RiskMode; leverage: number;
+  /** Starts from the default capital whatever came before (still running while the default is the
+   *  trading account's real equity: earlier positions on the chart are only what-ifs). */
+  fresh?: boolean;
 };
 export type PositionResult = {
   capital: number;
@@ -114,7 +117,7 @@ export function chainPositions(
   let prevEnd: number | null = null;
   for (const p of sorted) {
     const auto = p.capital == null;
-    const chained = auto && chain && prevEnd != null;
+    const chained = auto && chain && prevEnd != null && !p.fresh;
     const capital: number = p.capital ?? (chained && prevEnd != null ? prevEnd : defaultCapital);
     const plan = planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage);
     const outcome = settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target);

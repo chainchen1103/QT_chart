@@ -20,6 +20,10 @@ export type Instrument = {
   last: number;
   change24h: number; // fraction, e.g. 0.012 = +1.2%
   volUsdt24h: number;
+  ctVal: number; // coins in one contract (orders are in contracts)
+  lotSz: string; // contract step, e.g. "0.01"
+  minSz: string; // fewest contracts per order
+  maxLever: number;
 };
 
 /** A symbol and a timeframe: one live candle channel. */
@@ -45,6 +49,35 @@ export const onCandle = (cb: (e: CandleEvent) => void): Promise<UnlistenFn> =>
 export const storeLoad = () => invoke<Record<string, string>>("store_load");
 export const storeSet = (key: string, value: string) => invoke<void>("store_set", { key, value });
 export const storeRemove = (key: string) => invoke<void>("store_remove", { key });
+
+// ----------------------------------------------------------------------------- trading (src-tauri/src/trade.rs)
+/** Is an OKX API key set? `hint`: its first and last characters (the secret never comes back). */
+export type KeyStatus = { set: boolean; demo: boolean; hint: string };
+export type Account = { demo: boolean; equity: number; avail: number; posMode: string; acctLv: string };
+export type OrderReq = {
+  instId: string;
+  side: "buy" | "sell";
+  ordType: "limit" | "post_only" | "market";
+  px: string | null;
+  sz: string; // contracts
+  tdMode: "isolated" | "cross";
+  lever: number;
+  tp: string | null;
+  sl: string; // always
+  clOrdId: string;
+};
+export type Placed = { ordId: string; clOrdId: string };
+export type OrderInfo = {
+  state: string; px: string; sz: string; avgPx: string; accFillSz: string; ordType: string; side: string; cTime: string;
+};
+export const tradeStatus = () => invoke<KeyStatus>("trade_status");
+export const tradeSetKeys = (key: string, secret: string, passphrase: string, demo: boolean) =>
+  invoke<Account>("trade_set_keys", { key, secret, passphrase, demo });
+export const tradeClearKeys = () => invoke<void>("trade_clear_keys");
+export const tradeAccount = () => invoke<Account>("trade_account");
+export const tradePlace = (order: OrderReq) => invoke<Placed>("trade_place", { order });
+export const tradeOrder = (instId: string, ordId: string) => invoke<OrderInfo>("trade_order", { instId, ordId });
+export const tradeCancel = (instId: string, ordId: string) => invoke<void>("trade_cancel", { instId, ordId });
 
 /** Whether the web view may use the graphics card; a change takes effect at the next start. */
 export const gpuPref = () => invoke<boolean>("gpu_pref");

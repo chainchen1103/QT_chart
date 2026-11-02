@@ -14,7 +14,12 @@ import { fmtMoney, fmtQty, type PositionResult, type RiskMode } from "../../draw
 import { checkbox, colorInput, el, flagBad, labelled, lbl, numInput, textButton } from "../dom.ts";
 import { closePopover, popoverAt, togglePopover, type Render } from "../popover.ts";
 
-export type PositionIo = { get: () => PositionSettings; set: (v: PositionSettings) => void };
+export type PositionIo = {
+  get: () => PositionSettings;
+  set: (v: PositionSettings) => void;
+  /** The trading account's equity (null or missing: no API set). */
+  apiEquity?: () => number | null;
+};
 /** One position opened from the chart: its own capital, risk and leverage, and how it turned out. */
 export type OnePosition = {
   drawing: PositionDrawing;
@@ -100,11 +105,19 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
     } else {
       body.append(el("div", "pop-section", "新倉位的預設"));
       const capRow = el("div", "pop-row");
-      capRow.append(
-        lbl("初始資金"),
-        numInput(cur.capital, POSITION_LIMITS.capital, { title: "第一個倉位（或不接續時）用的資金", width: 96, step: "1", int: false }, (v) => set({ capital: v })),
-        lbl("U"),
-      );
+      const eq = io.apiEquity?.() ?? null;
+      const fromApi = eq != null && cur.capitalFromApi;
+      const capBox = numInput(fromApi ? Math.round(eq * 100) / 100 : cur.capital, POSITION_LIMITS.capital, { title: "第一個倉位（或不接續時）用的資金", width: 96, step: "1", int: false }, (v) => set({ capital: v }));
+      capBox.disabled = fromApi;
+      capRow.append(lbl("初始資金"), capBox, lbl("U"));
+      if (eq != null) {
+        capRow.append(
+          labelled(checkbox(cur.capitalFromApi, "", (v) => {
+            set({ capitalFromApi: v });
+            rerender();
+          }), "用 OKX 帳戶權益", "有設定 API 時，初始資金帶入帳戶的 USDT 權益"),
+        );
+      }
       const riskRow = el("div", "pop-row");
       riskRow.append(lbl("風險"), ...riskInputs(cur.risk, cur.riskMode, (v, m) => set({ risk: v, riskMode: m })));
       const levRow = el("div", "pop-row");

@@ -40,16 +40,21 @@ function showPopover(anchor: HTMLElement | null, left: number, top: number, titl
   const body = el("div", "pop-body");
   box.append(head, body);
   document.body.append(box);
+  /** As close to (left, top) as fits in the window; again whenever its size changes (a redraw, a message). */
+  const place = () => {
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+    box.style.left = `${Math.max(8, Math.min(left, window.innerWidth - w - 8))}px`;
+    box.style.top = `${Math.max(8, Math.min(top, window.innerHeight - h - 8))}px`;
+  };
   const rerender = () => {
     body.replaceChildren();
     render(body, rerender);
   };
   rerender();
-
-  const w = box.offsetWidth;
-  const h = box.offsetHeight;
-  box.style.left = `${Math.max(8, Math.min(left, window.innerWidth - w - 8))}px`;
-  box.style.top = `${Math.max(8, Math.min(top, window.innerHeight - h - 8))}px`;
+  place();
+  const resized = new ResizeObserver(place);
+  resized.observe(box);
 
   const onDown = (e: MouseEvent) => {
     const t = e.target as Node;
@@ -67,6 +72,7 @@ function showPopover(anchor: HTMLElement | null, left: number, top: number, titl
   const me = { anchor, close };
   function close() {
     body.dispatchEvent(new Event(POPOVER_CLOSED)); // whatever the body listens to can stop now
+    resized.disconnect();
     box.remove();
     document.removeEventListener("mousedown", onDown, true);
     document.removeEventListener("keydown", onKey, true);

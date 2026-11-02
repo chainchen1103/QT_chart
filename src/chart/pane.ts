@@ -19,6 +19,7 @@ import { el } from "../ui/dom.ts";
 import { PaneMenus } from "../ui/menus.ts";
 import type { StatusBar } from "../ui/statusbar.ts";
 import type { Tools } from "../ui/tools.ts";
+import type { OrderTarget, Trading } from "../trade/trading.ts";
 import type { Catalog } from "./catalog.ts";
 import { MarketFeed } from "./feed.ts";
 import { Legend } from "./legend.ts";
@@ -31,6 +32,7 @@ export type PaneShared = {
   alerts: AlertService;
   status: StatusBar;
   tools: Tools;
+  trading: Trading;
   /** Open the appearance window at a screen point. */
   appearanceAt(x: number, y: number): void;
 };
@@ -58,6 +60,8 @@ export class ChartPane {
   readonly menus: PaneMenus;
   /** The alert windows opened from this chart work on its symbol. */
   readonly alertUi: AlertUi;
+  /** This chart's positions and their orders, for the trading parts. */
+  readonly orders: OrderTarget;
   private readonly overlays: Overlays;
   private readonly scaleLabels: ScaleLabelLayer;
   private readonly alertLayer: AlertLayer;
@@ -71,6 +75,7 @@ export class ChartPane {
   private drawingsFor = ""; // symbol whose drawings are on screen
   private hovering = false; // the crosshair is on a bar: the legend shows that bar
   private stale = false; // live bars came while the window was hidden: redraw once it shows again
+  private dead = false;
 
   /** Made inside `parent` (the grid) at grid `area`, showing `cell`; start() loads it. */
   constructor(parent: HTMLElement, area: string, cell: Cell, shared: PaneShared, events: PaneEvents) {
@@ -167,6 +172,9 @@ export class ChartPane {
       fib: () => settings.fib.get(),
       magnet: () => settings.magnet.get(),
       position: () => settings.position.get(),
+      capital: () => shared.trading.capital(),
+      orderTag: (d) => shared.trading.tag(d, feed.bars[feed.bars.length - 1]?.time ?? null, feed.fmtPrice),
+      orderClicked: (d, x, y) => shared.trading.click(this.orders, d, x, y),
       styleFor: (k) => (k === "rect" ? settings.drawStyles.get().rect ?? DEFAULT_RECT_STYLE : settings.drawStyles.get()[k] ?? DEFAULT_LINE_STYLE),
       changed: (list) => {
         if (!this.drawingsFor) return;
@@ -187,6 +195,15 @@ export class ChartPane {
       },
     });
     candles.attachPrimitive(this.drawings);
+    this.orders = {
+      alive: () => !this.dead,
+      instId: () => feed.instId,
+      last: () => feed.bars[feed.bars.length - 1]?.close ?? null,
+      fmtPrice: feed.fmtPrice,
+      trade: (id) => this.drawings.tradeOf(id),
+      positions: () => this.drawings.positions(),
+      setOrder: (id, o) => this.drawings.setOrder(id, o),
+    };
 
     this.alertLayer = new AlertLayer({
       chart,
@@ -292,6 +309,7 @@ export class ChartPane {
   }
 
   destroy() {
+    this.dead = true;
     clearTimeout(this.zoomTimer);
     for (const off of this.offs) off();
     this.feed.dispose();

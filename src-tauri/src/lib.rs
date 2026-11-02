@@ -6,6 +6,7 @@ mod okx;
 mod prefs;
 mod store;
 mod stream;
+mod trade;
 mod window;
 mod ws;
 
@@ -15,6 +16,7 @@ use std::path::PathBuf;
 use store::Store;
 use stream::Live;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
+use trade::{Account, KeyStatus, OrderInfo, OrderReq, Placed, Trader};
 
 struct AppState {
     client: Client,
@@ -22,6 +24,7 @@ struct AppState {
     /// Where prefs.json lives.
     config_dir: PathBuf,
     store: Store,
+    trader: Trader,
 }
 
 fn check(inst_id: &str, bar: &str) -> Result<(), String> {
@@ -100,6 +103,45 @@ fn store_remove(state: State<'_, AppState>, key: String) -> Result<(), String> {
     state.store.remove(&key)
 }
 
+/// Is an OKX API key set (and its first and last characters)? The secret itself never comes back to the page.
+#[tauri::command]
+fn trade_status(state: State<'_, AppState>) -> KeyStatus {
+    state.trader.status()
+}
+
+/// Check the key on the account, then keep it (encrypted). Returns the account.
+#[tauri::command]
+async fn trade_set_keys(state: State<'_, AppState>, key: String, secret: String, passphrase: String, demo: bool) -> Result<Account, String> {
+    state.trader.set_keys(key, secret, passphrase, demo).await
+}
+
+#[tauri::command]
+fn trade_clear_keys(state: State<'_, AppState>) -> Result<(), String> {
+    state.trader.clear()
+}
+
+/// USDT equity, what is free, the position mode.
+#[tauri::command]
+async fn trade_account(state: State<'_, AppState>) -> Result<Account, String> {
+    state.trader.account().await
+}
+
+/// Open a position: set the leverage, then a limit / post-only / market order with its stop-loss attached.
+#[tauri::command]
+async fn trade_place(state: State<'_, AppState>, order: OrderReq) -> Result<Placed, String> {
+    state.trader.place(order).await
+}
+
+#[tauri::command]
+async fn trade_order(state: State<'_, AppState>, inst_id: String, ord_id: String) -> Result<OrderInfo, String> {
+    state.trader.order(&inst_id, &ord_id).await
+}
+
+#[tauri::command]
+async fn trade_cancel(state: State<'_, AppState>, inst_id: String, ord_id: String) -> Result<(), String> {
+    state.trader.cancel(&inst_id, &ord_id).await
+}
+
 /// Whether the web view may use the graphics card (takes effect at the next start).
 #[tauri::command]
 fn gpu_pref(state: State<'_, AppState>) -> bool {
@@ -145,9 +187,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
-            let store = Store::new(app.path().app_data_dir()?.join("store"));
+            let data_dir = app.path().app_data_dir()?;
+            let store = Store::new(data_dir.join("store"));
+            // outside the store folder: the page can't read it back
+            let trader = Trader::new(data_dir.join("okx-api.bin"));
             let prefs = prefs::load(&config_dir);
-            app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store });
+            app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store, trader });
             window::create(app.handle(), prefs)?;
             Ok(())
         })
@@ -159,6 +204,13 @@ pub fn run() {
             store_load,
             store_set,
             store_remove,
+            trade_status,
+            trade_set_keys,
+            trade_clear_keys,
+            trade_account,
+            trade_place,
+            trade_order,
+            trade_cancel,
             gpu_pref,
             set_gpu_pref,
             open_tradingview

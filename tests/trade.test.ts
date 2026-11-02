@@ -93,6 +93,16 @@ test("pnl and capital carried to the next position", () => {
   );
   close(free.get("b")!.capital, 1000);
   assert.equal(free.get("b")!.chained, false);
+  // a running position sized from the real account doesn't take an earlier what-if's result
+  const live = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 600, entry: 100, stop: 98, target: 104, capital: null, ...base },
+      { id: "b", entryT: 180, endT: 600, entry: 102, stop: 98, target: 110, capital: null, ...base, fresh: true },
+    ],
+    bars, s, 1234.56, true,
+  );
+  close(live.get("b")!.capital, 1234.56);
+  assert.equal(live.get("b")!.chained, false);
   close(tradePnl(planTrade(100, 98, 104, 1000, 1, "pct", 10), 100, { status: "pending", exit: null, exitT: null }), 0);
   assert.equal(fmtQty(0.039123), "0.0391");
   assert.equal(fmtQty(12.3456), "12.346");

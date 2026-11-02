@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trade-clear-keys"
+description = "Enables the trade_clear_keys command without any pre-configured scope."
+commands.allow = ["trade_clear_keys"]
+
+[[permission]]
+identifier = "deny-trade-clear-keys"
+description = "Denies the trade_clear_keys command without any pre-configured scope."
+commands.deny = ["trade_clear_keys"]

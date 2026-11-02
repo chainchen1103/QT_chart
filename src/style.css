@@ -180,6 +180,26 @@ input[type=range] { width: 120px; accent-color: var(--accent); cursor: pointer; 
 #status { flex: 0 2 auto; }
 #hint { flex: 0 1 auto; }
 .statusbar .dot, .credit { flex: none; }
+
+/* ---------------------------------------------------------------- trading (OKX API) */
+.account-btn { flex: none; margin-left: 6px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.account-btn:hover, .account-btn.open { color: var(--text); border-color: var(--accent); }
+.account-btn.live { color: #f7a600; border-color: rgba(247,166,0,.5); } /* real money */
+.account-btn.demo { color: #7ea3ff; border-color: rgba(41,98,255,.5); }
+.account-btn.failed { color: var(--down); border-color: var(--down); }
+.trade-env { margin: 4px 0 6px; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.trade-env.live { background: rgba(242,54,69,.15); color: #ff6b6b; }
+.trade-env.demo { background: rgba(41,98,255,.15); color: #7ea3ff; }
+.trade-warn { max-width: 400px; padding: 2px 0; color: #f7a600; font-size: 12px; }
+.order-pop, .trade-form { max-width: 440px; }
+.order-side { font-weight: 700; }
+.pop-row input.trade-key { width: 340px; padding: 5px 7px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font: inherit; outline: none; }
+.pop-row input.trade-key:focus { border-color: var(--accent); }
+.text-btn.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.text-btn.danger-solid { background: #d32f2f; border-color: #d32f2f; color: #ffffff; }
+.text-btn.primary:hover, .text-btn.danger-solid:hover { filter: brightness(1.12); }
 .credit { margin-left: 14px; color: var(--muted); font-size: 11px; text-decoration: none; opacity: .8; }
 .credit:hover { color: var(--text); text-decoration: underline; opacity: 1; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

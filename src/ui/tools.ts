@@ -10,7 +10,7 @@ import { ICONS } from "./icons.ts";
 import { openDrawingStyle, toggleToolMenu } from "./panels/drawing.ts";
 import { toggleFibPanel } from "./panels/fib.ts";
 import { toggleMagnetPanel } from "./panels/magnet.ts";
-import { positionPanelAt, togglePositionPanel } from "./panels/position.ts";
+import { positionPanelAt, togglePositionPanel, type PositionIo } from "./panels/position.ts";
 import type { Render } from "./popover.ts";
 
 export type ToolsDeps = {
@@ -20,6 +20,8 @@ export type ToolsDeps = {
   /** Status-bar hint; null restores the default. */
   hint(text: string | null): void;
   instId(): string;
+  /** The trading account's equity (null: no API set). */
+  apiEquity(): number | null;
 };
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -71,7 +73,7 @@ export class Tools {
       return;
     }
     if (d.kind === "position") {
-      positionPanelAt(x, y, settings.position, {
+      positionPanelAt(x, y, this.positionIo(), {
         drawing: d,
         trade: () => drawings.tradeOf(d.id),
         update: (p) => drawings.updatePosition(d.id, p),
@@ -108,7 +110,7 @@ export class Tools {
     $("tool-rect").onclick = toggle("rect");
     $("tool-position").innerHTML = ICONS.position;
     $("tool-position").onclick = toggle("position");
-    const positionMenu = () => togglePositionPanel($("tool-position-menu"), settings.position);
+    const positionMenu = () => togglePositionPanel($("tool-position-menu"), this.positionIo());
     $("tool-position-menu").onclick = positionMenu;
     onRight($("tool-position"), positionMenu);
     $("tool-line").onclick = () => drawings.setTool(drawings.getTool() === this.lastLine ? "cursor" : this.lastLine);
@@ -123,6 +125,12 @@ export class Tools {
     $("tool-clear").onclick = () => this.clearAll();
     this.paintTools("cursor");
     this.paintMagnet(settings.magnet.get().on);
+  }
+
+  /** The position settings, and the account's equity when an API is set (it can be the starting capital). */
+  private positionIo(): PositionIo {
+    const p = this.d.settings.position;
+    return { get: () => p.get(), set: (v) => p.set(v), apiEquity: this.d.apiEquity };
   }
 
   /** Delete every drawing of the symbol: the first press arms the button for 3 seconds, the second deletes. */

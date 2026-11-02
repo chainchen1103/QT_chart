@@ -2,10 +2,15 @@
 // and labels over them. Pure drawing from the geometry in geo.ts; nothing here changes any state.
 
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
-import type { Dash, FibSettings, PositionSettings } from "../settings/model.ts";
+import type { Dash, FibSettings, PositionDrawing, PositionSettings } from "../settings/model.ts";
 import type { Geo } from "./geo.ts";
 import { fmtSpan, hexToRgba, positionDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
+
+/** The button at the right of a position: 下單, or the order placed from it. */
+export type OrderTag = { text: string; bg: string };
+/** Where something clickable was painted (chart pixels), and the drawing it belongs to. */
+export type HotSpot = { id: string; x: number; y: number; w: number; h: number };
 
 export type PaintOptions = {
   fib: FibSettings;
@@ -16,6 +21,7 @@ export type PaintOptions = {
   times: number[];
   barSec: number;
   trades: ReadonlyMap<string, PositionResult>;
+  orderTag(d: PositionDrawing): OrderTag | null;
 };
 
 const FONT = "11px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
@@ -72,7 +78,9 @@ export function paintUnder(target: CanvasRenderingTarget2D, geo: readonly Geo[],
 }
 
 /** Lines, borders, labels and handles over the candles. */
-export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], o: PaintOptions) {
+/** Lines, handles and labels over the candles; returns where the order buttons were painted. */
+export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], o: PaintOptions): HotSpot[] {
+  const spots: HotSpot[] = [];
   target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
     const W = bitmapSize.width;
     const H = bitmapSize.height;
@@ -194,9 +202,10 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
       if (g.d.kind === "fib") fibLabels(ctx, g, mediaSize.height);
       else if (g.d.kind === "info") infoBox(ctx, g, mediaSize.width, mediaSize.height, o);
       else if (g.d.kind === "angle") angleLabel(ctx, g);
-      else if (g.d.kind === "position") positionLabels(ctx, g, o);
+      else if (g.d.kind === "position") positionLabels(ctx, g, o, spots, mediaSize.width);
     }
   });
+  return spots;
 }
 
 function fibLines(ctx: CanvasRenderingContext2D, g: Geo, hr: number, vr: number) {
@@ -265,8 +274,10 @@ function infoBox(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: n
   lines.forEach((s, k) => ctx.fillText(s, x + pad, y + pad + k * lh));
 }
 
-/** Position: take-profit, stop and entry labels, and the R lines' names. */
-function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions) {
+/** Position: take-profit, stop and entry labels, the result, the order button, and the R lines' names. The
+ *  info, the result and the order button stay on screen when the box runs past the right edge (a position
+ *  drawn at the newest bar usually does). */
+function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, spots: HotSpot[], width: number) {
   const d = g.d;
   const p = g.pos;
   if (d.kind !== "position" || !p) return;
@@ -279,10 +290,10 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions) 
   const dir = positionDir(d.a.p, d.b.p);
   const rr = rewardRisk(d.a.p, d.b.p, d.target);
   const t = o.trades.get(d.id);
-  /** A box of text lines; `align` says which side of x the box goes. Returns the box's right edge. */
-  const tag = (lines: string[], x: number, y: number, bg: string, align: "center" | "left" = "center", fg = "#ffffff") => {
-    const w = Math.max(...lines.map((s) => ctx.measureText(s).width)) + 10;
-    const h = lines.length * 15 + 3;
+  const size = (lines: string[]) => ({ w: Math.max(...lines.map((s) => ctx.measureText(s).width)) + 10, h: lines.length * 15 + 3 });
+  /** A box of text lines; `align` says which side of x the box goes. Returns the box. */
+  const box = (lines: string[], x: number, y: number, bg: string, align: "center" | "left" = "center", fg = "#ffffff") => {
+    const { w, h } = size(lines);
     const left = align === "center" ? x - w / 2 : x;
     ctx.fillStyle = bg;
     ctx.fillRect(left, y - h / 2, w, h);
@@ -290,7 +301,11 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions) 
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     lines.forEach((s, k) => ctx.fillText(s, left + 5, y - h / 2 + 9 + k * 15));
-    return left + w;
+    return { x: left, y: y - h / 2, w, h };
+  };
+  const tag = (...a: Parameters<typeof box>) => {
+    const b = box(...a);
+    return b.x + b.w;
   };
   const mid = (p.x0 + p.x1) / 2;
   const show = ps.showPrices;
@@ -303,17 +318,13 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions) 
   if (!t) return;
   const pl = t.plan;
   const side = dir === 1 ? "多單" : "空單";
-  const infoRight = tag(
-    [
-      `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${pl.capped ? "（保證金不夠，已減量）" : ""}`,
-      `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
-    ],
-    p.x0 + 4,
-    p.entryY,
-    "rgba(30,34,45,0.92)",
-    "left",
-    pl.capped ? "#f7a600" : "#ffffff",
-  );
+  const infoLines = [
+    `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${pl.capped ? "（保證金不夠，已減量）" : ""}`,
+    `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
+  ];
+  const infoX = Math.max(0, Math.min(p.x0 + 4, width - 4 - size(infoLines).w));
+  const info = box(infoLines, infoX, p.entryY, "rgba(30,34,45,0.92)", "left", pl.capped ? "#f7a600" : "#ffffff");
+  const infoRight = info.x + info.w;
   const result: Record<string, [string, string]> = {
     tp: [`止盈出場 ${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
     sl: [`止損出場 ${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
@@ -324,7 +335,26 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions) 
     nodata: ["K 線不夠，無法結算", "rgba(54,58,69,0.95)"],
   };
   const [text, bg] = result[t.outcome.status];
-  tag([text], Math.max(p.x1, infoRight) + 6, p.entryY, bg, "left"); // past the info box when that is wider than the position
+  const order = o.orderTag(d);
+  const total = size([text]).w + (order ? 4 + size([order.text]).w : 0);
+  let x = Math.max(p.x1, infoRight) + 6; // past the info box when that is wider than the position
+  let y = p.entryY;
+  if (x + total > width - 4) {
+    // past the right edge: pull them back on screen, after the info box, or under it when there is no room
+    x = width - 4 - total;
+    if (x < infoRight + 6) {
+      x = Math.max(0, Math.min(info.x, width - 4 - total));
+      y = info.y + info.h + 11;
+    }
+  }
+  const resultRight = tag([text], x, y, bg, "left");
+  if (order) {
+    const b = box([order.text], resultRight + 4, y, order.bg, "left");
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    spots.push({ id: d.id, ...b });
+  }
   ctx.font = FONT;
   ctx.textAlign = "right";
   ctx.textBaseline = "bottom";

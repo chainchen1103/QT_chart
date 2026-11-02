@@ -17,6 +17,20 @@ pub fn ws_url() -> String {
     }
 }
 
+/// Where orders and account requests go (trade.rs). Debug builds accept QTCHART_TRADE_URL (a local test
+/// server); release builds always use OKX.
+pub fn trade_base() -> String {
+    if cfg!(debug_assertions) {
+        if let Ok(u) = std::env::var("QTCHART_TRADE_URL") {
+            let u = u.trim().trim_end_matches('/').to_string();
+            if !u.is_empty() {
+                return u;
+            }
+        }
+    }
+    REST.to_string()
+}
+
 /// wss:// on an okx.com host.
 fn is_okx_ws(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("wss://") else { return false };
@@ -76,6 +90,11 @@ pub struct Instrument {
     pub last: f64,
     pub change_24h: f64,
     pub vol_usdt_24h: f64,
+    /// Coins in one contract (orders are in contracts), the contract step and minimum, the highest leverage.
+    pub ct_val: f64,
+    pub lot_sz: String,
+    pub min_sz: String,
+    pub max_lever: u32,
 }
 
 /// One OKX candle row: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm] (strings).
@@ -121,6 +140,14 @@ struct RawInstrument {
     tick_sz: String,
     #[serde(default)]
     state: String,
+    #[serde(default)]
+    ct_val: String,
+    #[serde(default)]
+    lot_sz: String,
+    #[serde(default)]
+    min_sz: String,
+    #[serde(default)]
+    lever: String,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +245,10 @@ impl Client {
                     last,
                     change_24h: if open > 0.0 { last / open - 1.0 } else { 0.0 },
                     vol_usdt_24h: vol * last,
+                    ct_val: i.ct_val.parse().unwrap_or(0.0),
+                    lot_sz: i.lot_sz.clone(),
+                    min_sz: i.min_sz.clone(),
+                    max_lever: i.lever.parse().unwrap_or(0),
                 }
             })
             .collect();

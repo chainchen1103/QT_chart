@@ -2,6 +2,7 @@
 // drawings of each symbol, and the background picture.
 
 import { setting } from "../core/setting.ts";
+import { cleanOrderPrefs } from "../trade/model.ts";
 import { readJson, readRaw, writeJson, writeRaw } from "../core/storage.ts";
 import {
   clone,
@@ -43,6 +44,8 @@ export function loadSettings() {
     drawStyles: setting("drawstyles", cleanDrawStyles),
     appearance: setting("appearance", cleanAppearance),
     position: setting("position", cleanPosition),
+    /** The order window's last choices (type, margin mode, take-profit on or off). */
+    orderPrefs: setting("orderprefs", cleanOrderPrefs),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;

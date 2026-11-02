@@ -8,6 +8,7 @@
 //   indicators/ moving averages, FVG / order blocks / support-resistance, and the bars of other timeframes
 //   drawings/  drawing tools: state and mouse (layer), geometry (geo), painting (paint), position sizing (trade)
 //   alerts/    price and drawing alerts
+//   trade/     orders on OKX with the user's own API key: the account, the order windows, order sizing
 //   settings/  what is saved and its checks (model), and the saved values themselves (store)
 //   ui/        the toolbars, menus, status bar and settings windows
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
@@ -24,6 +25,9 @@ import { Notifier } from "./alerts/notify.ts";
 import { toggleAlertManager, type AlertUi } from "./alerts/panel.ts";
 import { AlertService } from "./alerts/service.ts";
 import { toggleLayoutPicker } from "./layout/picker.ts";
+import { TradeAccount } from "./trade/account.ts";
+import { paintAccountButton } from "./trade/panel.ts";
+import { Trading } from "./trade/trading.ts";
 import { TabBar } from "./layout/tabbar.ts";
 import { Workspace } from "./layout/workspace.ts";
 import { TOOL_INFO } from "./settings/model.ts";
@@ -83,12 +87,24 @@ function paintAlertButton() {
   $("alert-btn").classList.toggle("on", on > 0);
 }
 
+// ----------------------------------------------------------------------------- orders (OKX API)
+const account = new TradeAccount();
+const trading = new Trading({
+  acct: account,
+  catalog,
+  position: settings.position,
+  prefs: settings.orderPrefs,
+  button: $("account-btn"),
+  note: (text) => status.note(text),
+});
+
 // ----------------------------------------------------------------------------- toolbars and windows
 const tools: Tools = new Tools({
   drawings: () => workspace.inUse().drawings,
   settings,
   hint: (t) => status.hint(t),
   instId: () => workspace.inUse().feed.instId,
+  apiEquity: () => account.equity(),
 });
 const toolbar = new Toolbar({
   catalog,
@@ -128,7 +144,7 @@ const tabBar = new TabBar({
 const workspace: Workspace = new Workspace(
   {
     grid: $("grid"),
-    shared: { catalog, settings, alerts, status, tools, appearanceAt: (x, y) => appearanceAt(x, y, appearanceIo, performance) },
+    shared: { catalog, settings, alerts, status, tools, trading, appearanceAt: (x, y) => appearanceAt(x, y, appearanceIo, performance) },
     hub,
     inUseChanged: (p) => {
       toolbar.paintTimeframes();
@@ -159,6 +175,14 @@ alerts.subscribe(() => {
   for (const p of workspace.charts()) p.redrawAlerts();
   paintAlertButton();
 });
+account.subscribe(() => {
+  paintAccountButton($("account-btn"), account);
+  for (const p of workspace.charts()) p.drawings.redraw(); // the capital may come from the account now
+});
+// orders still open on the charts on screen: ask OKX every few seconds
+window.setInterval(() => {
+  if (!document.hidden) void trading.poll(workspace.charts().map((p) => p.orders));
+}, 4000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) for (const p of workspace.charts()) p.shown();
 });
@@ -169,6 +193,7 @@ document.addEventListener("mousedown", (e) => {
 $("layout-btn").onclick = () => toggleLayoutPicker($("layout-btn"), () => workspace.layout(), (id) => workspace.setLayout(id));
 $("appearance-btn").onclick = () => toggleAppearancePanel($("appearance-btn"), appearanceIo, performance);
 $("alert-btn").onclick = () => toggleAlertManager($("alert-btn"), alertUi);
+$("account-btn").onclick = () => trading.openAccount();
 $("credit").onclick = (e) => {
   e.preventDefault();
   openTradingView().catch((err) => status.error(String(err)));
@@ -176,6 +201,7 @@ $("credit").onclick = (e) => {
 
 applyAppearance();
 paintAlertButton();
+paintAccountButton($("account-btn"), account);
 status.hint(null);
 workspace.start(); // the charts load their bars while the symbol list is on its way
 
@@ -183,6 +209,7 @@ async function start() {
   await onStatus((s) => status.setStream(s));
   await onCandle(route);
   alerts.start();
+  void account.start();
   try {
     await catalog.load();
     workspace.catalogReady();

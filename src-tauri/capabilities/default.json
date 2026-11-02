@@ -15,6 +15,13 @@
     "allow-store-load",
     "allow-store-set",
     "allow-store-remove",
+    "allow-trade-status",
+    "allow-trade-set-keys",
+    "allow-trade-clear-keys",
+    "allow-trade-account",
+    "allow-trade-place",
+    "allow-trade-order",
+    "allow-trade-cancel",
     "allow-gpu-pref",
     "allow-set-gpu-pref",
     "allow-open-tradingview"

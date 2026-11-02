@@ -67,10 +67,17 @@ export type RectDrawing = { id: string; kind: "rect"; a: Anchor; b: Anchor; styl
 /**
  * A trade: a = entry (bar time, price); b.p = stop-loss price, b.t = where the box ends; target = take-profit.
  * capital null = start with what the previous position ended with (or the default capital).
+ * order: the real order placed from it on OKX, with its last known state.
  */
 export type PositionDrawing = {
   id: string; kind: "position"; a: Anchor; b: Anchor; target: number;
   capital: number | null; risk: number; riskMode: RiskMode; leverage: number;
+  order?: PositionOrder;
+};
+/** An order placed from a position. `state`: OKX's (live, partially_filled, filled, canceled, mmp_canceled). */
+export type PositionOrder = {
+  ordId: string; clOrdId: string; demo: boolean; side: "buy" | "sell"; ordType: "limit" | "post_only" | "market";
+  px: number | null; sz: number; at: number; state: string; avgPx: number | null; fillSz: number;
 };
 export type Drawing = FibDrawing | LineDrawing | RectDrawing | PositionDrawing;
 
@@ -96,6 +103,8 @@ export type PositionSettings = {
   levels: RLevel[]; profit: string; loss: string; transparency: number; showPrices: boolean;
   /** Defaults for new positions; `chain`: a position starts with what the previous one ended with. */
   capital: number; risk: number; riskMode: RiskMode; leverage: number; chain: boolean;
+  /** With an OKX API set, the starting capital is the account's equity instead of `capital`. */
+  capitalFromApi: boolean;
 };
 export const POSITION_LIMITS = {
   capital: { min: 0.01, max: 1e12 },
@@ -118,6 +127,7 @@ export const DEFAULT_POSITION: PositionSettings = {
   riskMode: "pct",
   leverage: 10,
   chain: true,
+  capitalFromApi: true,
 };
 export const MAX_R_LEVELS = 12;
 export const LINE_KINDS: LineKind[] = ["trend", "ray", "info", "extended", "angle", "hline", "hray", "vline", "cross"];
@@ -374,17 +384,44 @@ export function cleanDrawings(raw: unknown): Drawing[] {
       if (!isNum(d.target) || b.p === a.p) continue;
       const def = DEFAULT_POSITION;
       const riskMode: RiskMode = d.riskMode === "amount" ? "amount" : "pct";
+      const order = cleanOrder(d.order);
       out.push({
         id, kind, a, b, target: d.target,
         capital: d.capital === null || d.capital === undefined ? null : num(d.capital, POSITION_LIMITS.capital, def.capital, false),
         risk: num(d.risk, POSITION_LIMITS[riskMode], def.risk, false),
         riskMode,
         leverage: num(d.leverage, POSITION_LIMITS.leverage, def.leverage, false),
+        ...(order ? { order } : {}),
       });
     }
     else out.push({ id, kind: kind as LineKind, a, b: TOOL_INFO[kind as LineKind].points === 1 ? { ...a } : b, style: cleanLineStyle(d.style) });
   }
   return out;
+}
+
+/** OKX's order states, plus unknown (not asked yet) and missing (OKX no longer finds it). */
+const ORDER_STATES = new Set(["live", "partially_filled", "filled", "canceled", "mmp_canceled", "unknown", "missing"]);
+/** A saved order record, or undefined when it is missing or not usable. */
+export function cleanOrder(raw: unknown): PositionOrder | undefined {
+  if (!isObj(raw)) return undefined;
+  const id = (v: unknown, re: RegExp) => typeof v === "string" && re.test(v);
+  if (!id(raw.ordId, /^\d{1,32}$/) || !id(raw.clOrdId, /^[A-Za-z0-9]{1,32}$/)) return undefined;
+  if (raw.side !== "buy" && raw.side !== "sell") return undefined;
+  const ordType = raw.ordType === "market" || raw.ordType === "post_only" ? raw.ordType : "limit";
+  const pos = (v: unknown) => (isNum(v) && v > 0 ? v : null);
+  return {
+    ordId: raw.ordId as string,
+    clOrdId: raw.clOrdId as string,
+    demo: raw.demo === true,
+    side: raw.side,
+    ordType,
+    px: pos(raw.px),
+    sz: pos(raw.sz) ?? 0,
+    at: isNum(raw.at) ? raw.at : 0,
+    state: typeof raw.state === "string" && ORDER_STATES.has(raw.state) ? raw.state : "unknown",
+    avgPx: pos(raw.avgPx),
+    fillSz: isNum(raw.fillSz) && raw.fillSz >= 0 ? raw.fillSz : 0,
+  };
 }
 
 /** The style each tool last used: new drawings start from it. */
@@ -450,5 +487,6 @@ export function cleanPosition(raw: unknown): PositionSettings {
     riskMode: r.riskMode === "amount" ? "amount" : "pct",
     leverage: num(r.leverage, POSITION_LIMITS.leverage, d.leverage, false),
     chain: r.chain !== false,
+    capitalFromApi: r.capitalFromApi !== false,
   };
 }

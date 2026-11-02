@@ -25,7 +25,7 @@ import { xOfLogical } from "../chart/coords.ts";
 import { chainPositions, type PositionResult } from "./trade.ts";
 import { clampTarget, indexToTime, lockAxis, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
-import { ACCENT, paintOver, paintUnder, type PaintOptions } from "./paint.ts";
+import { ACCENT, paintOver, paintUnder, type HotSpot, type OrderTag, type PaintOptions } from "./paint.ts";
 import { isTyping } from "../ui/dom.ts";
 import {
   clone,
@@ -38,6 +38,7 @@ import {
   type LineStyle,
   type MagnetSettings,
   type PositionDrawing,
+  type PositionOrder,
   type PositionSettings,
   type RectStyle,
 } from "../settings/model.ts";
@@ -64,6 +65,12 @@ export type DrawingHost = {
   fib(): FibSettings;
   magnet(): MagnetSettings;
   position(): PositionSettings;
+  /** The starting capital of positions: the default one, or the trading account's equity (`live`). */
+  capital(): { amount: number; live: boolean };
+  /** The button at the right of a position (null: none). */
+  orderTag(d: PositionDrawing): OrderTag | null;
+  /** That button was clicked, at screen point (x, y). */
+  orderClicked(d: PositionDrawing, x: number, y: number): void;
   /** The style a new drawing of this kind starts with. */
   styleFor(kind: Exclude<DrawKind, "fib" | "position">): LineStyle | RectStyle;
   /** The list changed (added, moved, restyled, deleted): save it. */
@@ -111,11 +118,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private timeLabels: ISeriesPrimitiveAxisView[] = [];
   /** The chart in use: the one the keys go to. */
   private active = true;
+  /** Order buttons as last painted. */
+  private spots: HotSpot[] = [];
   private readonly offs: (() => void)[] = [];
 
   private readonly views: IPrimitivePaneView[] = [
     { zOrder: () => "bottom", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => paintUnder(t, this.geo, this.paintOptions()) }) },
-    { zOrder: () => "normal", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => paintOver(t, this.geo, this.paintOptions()) }) },
+    { zOrder: () => "normal", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => (this.spots = paintOver(t, this.geo, this.paintOptions())) }) },
   ];
   private readonly host: DrawingHost;
 
@@ -186,6 +195,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private computeTrades(): Map<string, PositionResult> {
     const ps = this.host.position();
+    const cap = this.host.capital();
+    const bars = this.host.bars();
+    const newest = bars.length ? bars[bars.length - 1].time : Infinity;
     const items = this.draft ? [...this.list, this.draft] : this.list;
     const inputs = [];
     for (const d of items) {
@@ -193,9 +205,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       inputs.push({
         id: d.id, entryT: d.a.t, endT: d.b.t, entry: d.a.p, stop: d.b.p, target: d.target,
         capital: d.capital, risk: d.risk, riskMode: d.riskMode, leverage: d.leverage,
+        fresh: cap.live && d.b.t >= newest, // a position still running sizes from the real account
       });
     }
-    return chainPositions(inputs, this.host.bars(), this.host.barSec(), ps.capital, ps.chain);
+    return chainPositions(inputs, bars, this.host.barSec(), cap.amount, ps.chain);
   }
 
   // ------------------------------------------------------------------- public
@@ -226,6 +239,19 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
   count(): number {
     return this.list.length;
+  }
+  /** The positions (the objects themselves: read only). */
+  positions(): PositionDrawing[] {
+    return this.list.filter((d): d is PositionDrawing => d.kind === "position");
+  }
+  /** The order placed from a position (undefined forgets it); saved at once. */
+  setOrder(id: string, order: PositionOrder | undefined) {
+    const d = this.find(id);
+    if (!d || d.kind !== "position") return;
+    if (order) d.order = order;
+    else delete d.order;
+    this.host.changed(this.list);
+    this.redraw();
   }
   find(id: string): Drawing | undefined {
     return this.list.find((d) => d.id === id);
@@ -309,6 +335,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       times: this.host.times(),
       barSec: this.host.barSec(),
       trades: this.trades,
+      orderTag: (d) => this.host.orderTag(d),
     };
   }
 
@@ -453,6 +480,17 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     return this.constrained(dr.part === "a" ? d.b : d.a, m, false);
   }
 
+  private spotAt(x: number, y: number): PositionDrawing | null {
+    for (let k = this.spots.length - 1; k >= 0; k--) {
+      const s = this.spots[k];
+      if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
+        const d = this.find(s.id);
+        return d?.kind === "position" ? d : null;
+      }
+    }
+    return null;
+  }
+
   private hit(x: number, y: number): Hit | null {
     return hitTest(this.geo, x, y, this.host.chart.timeScale().width(), this.draft);
   }
@@ -541,6 +579,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       }
       return;
     }
+    const spot = this.spotAt(m.x, m.y);
+    if (spot) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.host.orderClicked(spot, e.clientX, e.clientY);
+      return;
+    }
     const h = this.hit(m.x, m.y);
     if (!h) {
       if (this.selected) {
@@ -574,7 +619,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
     const h = m.inside ? this.hit(m.x, m.y) : null;
     const id = h ? h.id : null;
-    this.host.el.classList.toggle("over-drawing", !!h);
+    this.host.el.classList.toggle("over-drawing", !!h || (m.inside && !!this.spotAt(m.x, m.y)));
     if (id !== this.hovered) {
       this.hovered = id;
       this.redraw();
