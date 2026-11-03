@@ -1,7 +1,7 @@
 // Position sizing, outcome of a position on bars, and capital carried from one position to the next.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chainPositions, fmtQty, planTrade, settleTrade, tradePnl } from "../src/drawings/trade.ts";
+import { chainPositions, checkPrices, fmtQty, planTrade, settleTrade, tradePnl } from "../src/drawings/trade.ts";
 import type { Candle } from "../src/core/api.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
@@ -106,4 +106,15 @@ test("pnl and capital carried to the next position", () => {
   close(tradePnl(planTrade(100, 98, 104, 1000, 1, "pct", 10), 100, { status: "pending", exit: null, exitT: null }), 0);
   assert.equal(fmtQty(0.039123), "0.0391");
   assert.equal(fmtQty(12.3456), "12.346");
+});
+
+test("typed prices: above 0, stop and take-profit on either side of the entry", () => {
+  assert.equal(checkPrices({ entry: 100, stop: 98, target: 104 }), null); // long
+  assert.equal(checkPrices({ entry: 100, stop: 102, target: 97 }), null); // short
+  assert.match(checkPrices({ entry: 100, stop: 98, target: 99 }) ?? "", /兩邊/); // both below
+  assert.match(checkPrices({ entry: 100, stop: 101, target: 104 }) ?? "", /兩邊/); // both above
+  assert.match(checkPrices({ entry: 100, stop: 100, target: 104 }) ?? "", /止損不能等於進場價/);
+  assert.match(checkPrices({ entry: 100, stop: 98, target: 100 }) ?? "", /止盈不能等於進場價/);
+  assert.match(checkPrices({ entry: 0, stop: -2, target: 4 }) ?? "", /大於 0/);
+  assert.match(checkPrices({ entry: NaN, stop: 98, target: 104 }) ?? "", /大於 0/);
 });

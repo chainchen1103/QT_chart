@@ -1,7 +1,10 @@
-// The position tool: R lines, colors, defaults for new positions, and one position's capital, risk and leverage.
-// Each change is applied and saved at once through the callbacks; nothing waits for an OK button.
+// The position tool: R lines, colors, defaults for new positions, and one position's prices (entry, stop-loss,
+// take-profit), capital, risk and leverage. Each change is applied and saved at once through the callbacks;
+// nothing waits for an OK button. Typed prices that don't make a position together yet (a long's entry moved
+// above its stop before the stop is typed) wait, marked, until they do.
 
-import { parseR } from "../../drawings/geometry.ts";
+import { fmtChange } from "../../core/format.ts";
+import { parseR, positionDir, rewardRisk } from "../../drawings/geometry.ts";
 import {
   clone,
   DEFAULT_POSITION,
@@ -10,7 +13,7 @@ import {
   type PositionDrawing,
   type PositionSettings,
 } from "../../settings/model.ts";
-import { fmtMoney, fmtQty, type PositionResult, type RiskMode } from "../../drawings/trade.ts";
+import { checkPrices, fmtMoney, fmtQty, type PositionPrices, type PositionResult, type RiskMode } from "../../drawings/trade.ts";
 import { checkbox, colorInput, el, flagBad, labelled, lbl, numInput, textButton } from "../dom.ts";
 import { closePopover, popoverAt, togglePopover, type Render } from "../popover.ts";
 
@@ -20,13 +23,103 @@ export type PositionIo = {
   /** The trading account's equity (null or missing: no API set). */
   apiEquity?: () => number | null;
 };
-/** One position opened from the chart: its own capital, risk and leverage, and how it turned out. */
+/** One position opened from the chart: its own prices, capital, risk and leverage, and how it turned out. */
 export type OnePosition = {
   drawing: PositionDrawing;
   trade: () => PositionResult | undefined;
   update: (p: Partial<Pick<PositionDrawing, "capital" | "risk" | "riskMode" | "leverage">>) => void;
+  setPrices: (p: PositionPrices) => void;
+  /** A price on the symbol's price step, and as plain digits for a box. */
+  roundPrice: (p: number) => number;
+  priceText: (p: number) => string;
   remove: () => void;
 };
+
+type PriceKey = keyof PositionPrices;
+const PRICE_ROWS: { key: PriceKey; name: string; title: string }[] = [
+  { key: "entry", name: "進場", title: "進場價：當成掛單，K 線碰到就成交" },
+  { key: "stop", name: "止損", title: "止損價：多單在進場價下面，空單在上面" },
+  { key: "target", name: "止盈", title: "止盈價：多單在進場價上面，空單在下面" },
+];
+/** Prices typed but not applied yet (they don't make a position with the others). */
+type Typed = Partial<Record<PriceKey, string>>;
+
+/**
+ * Entry, stop-loss and take-profit boxes. A typed price is put on the price step and applied once the three
+ * make a position; until then it stays in its box, red, with what is wrong below. Beside each box (while no
+ * price waits): the direction, how far the stop and take-profit are from the entry, and how many R the
+ * take-profit is.
+ */
+function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLElement[] {
+  const d = one.drawing;
+  const now: PositionPrices = { entry: d.a.p, stop: d.b.p, target: d.target };
+  const boxes = new Map<PriceKey, HTMLInputElement>();
+  const infos: HTMLElement[] = [];
+  const msg = el("div", "pop-msg");
+  /** The prices with the typed ones in place: what to apply, or what is wrong. */
+  const merged = (): { prices: PositionPrices } | { error: string } => {
+    const p = { ...now };
+    for (const { key } of PRICE_ROWS) {
+      const s = typed[key];
+      if (s == null) continue;
+      const v = Number(s);
+      if (s.trim() === "" || !Number.isFinite(v) || v <= 0) return { error: "價格要是大於 0 的數字" };
+      p[key] = one.roundPrice(v);
+    }
+    const error = checkPrices(p);
+    return error ? { error } : { prices: p };
+  };
+  const mark = () => {
+    for (const [k, b] of boxes) b.classList.toggle("bad", typed[k] != null);
+    const waiting = Object.keys(typed).length > 0;
+    for (const s of infos) s.hidden = waiting; // they describe the position as it is, about to change
+    const m = waiting ? merged() : null;
+    msg.textContent = m && "error" in m ? `${m.error}。紅框的價格還沒套用。` : "";
+  };
+  const pct = (p: number) => fmtChange((p - now.entry) / now.entry);
+  const info: Record<PriceKey, string> = {
+    entry: positionDir(now.entry, now.stop) === 1 ? "多單" : "空單",
+    stop: pct(now.stop),
+    target: `${pct(now.target)}　${rewardRisk(now.entry, now.stop, now.target).toFixed(2)} R`,
+  };
+  const rows: HTMLElement[] = [];
+  for (const { key, name, title } of PRICE_ROWS) {
+    const box = el("input", "pos-price");
+    box.type = "number";
+    box.step = "any";
+    box.min = "0";
+    box.title = title;
+    box.dataset.key = key;
+    box.value = typed[key] ?? one.priceText(now[key]);
+    box.onkeydown = (e) => {
+      if (e.key === "Enter") box.blur();
+    };
+    box.onchange = () => {
+      typed[key] = box.value;
+      const m = merged();
+      if ("error" in m) {
+        mark();
+        return;
+      }
+      for (const k of Object.keys(typed)) delete typed[k as PriceKey];
+      one.setPrices(m.prices);
+      applied();
+    };
+    boxes.set(key, box);
+    const note = lbl(info[key]);
+    infos.push(note);
+    const row = el("div", "pop-row");
+    row.append(lbl(name), box, note);
+    rows.push(row);
+  }
+  mark();
+  rows.push(msg);
+  const o = d.order;
+  if (o && o.state !== "canceled" && o.state !== "mmp_canceled" && o.state !== "missing") {
+    rows.push(el("div", "pop-note", "這個倉位已經下單：這裡改的是圖上的價格，OKX 上的委託和止盈止損不會跟著改"));
+  }
+  return rows;
+}
 
 const OUTCOME_TEXT: Record<string, string> = {
   tp: "止盈出場",
@@ -58,6 +151,7 @@ function riskInputs(value: number, mode: RiskMode, onChange: (v: number, m: Risk
 }
 
 export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Render {
+  const typed: Typed = {}; // kept across redraws of this window
   return (body, rerender) => {
     const cur = io.get();
     const set = (p: Partial<PositionSettings>) => io.set({ ...io.get(), ...p });
@@ -70,11 +164,13 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         one.update(p);
         later();
       };
+      body.append(...priceRows(one, typed, later));
       const capRow = el("div", "pop-row");
       const auto = d.capital == null;
       const cap = numInput(t ? Math.round(t.capital * 100) / 100 : cur.capital, POSITION_LIMITS.capital, { title: "這筆用多少資金算倉位", width: 96, step: "1", int: false }, (v) =>
         upd({ capital: v }),
       );
+      cap.dataset.key = "capital";
       cap.disabled = auto;
       capRow.append(
         lbl("初始資金"),
@@ -83,13 +179,14 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         labelled(checkbox(auto, "", (v) => upd({ capital: v ? null : Number(cap.value) || cur.capital })), "接續前一個倉位", "用前一個倉位結算後的資金"),
       );
       const riskRow = el("div", "pop-row");
-      riskRow.append(lbl("風險"), ...riskInputs(d.risk, d.riskMode, (v, m) => upd({ risk: v, riskMode: m })));
+      const [riskBox, riskUnit] = riskInputs(d.risk, d.riskMode, (v, m) => upd({ risk: v, riskMode: m }));
+      riskBox.dataset.key = "risk";
+      riskUnit.dataset.key = "riskMode";
+      riskRow.append(lbl("風險"), riskBox, riskUnit);
       const levRow = el("div", "pop-row");
-      levRow.append(
-        lbl("槓桿"),
-        numInput(d.leverage, POSITION_LIMITS.leverage, { title: "1～125 倍", width: 64, step: "1", int: false }, (v) => upd({ leverage: v })),
-        lbl("倍"),
-      );
+      const lev = numInput(d.leverage, POSITION_LIMITS.leverage, { title: "1～125 倍", width: 64, step: "1", int: false }, (v) => upd({ leverage: v }));
+      lev.dataset.key = "leverage";
+      levRow.append(lbl("槓桿"), lev, lbl("倍"));
       body.append(capRow, riskRow, levRow);
       if (t) {
         const pl = t.plan;

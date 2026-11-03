@@ -77,6 +77,9 @@ export class Tools {
         drawing: d,
         trade: () => drawings.tradeOf(d.id),
         update: (p) => drawings.updatePosition(d.id, p),
+        setPrices: (p) => drawings.setPrices(d.id, p),
+        roundPrice: (p) => drawings.roundPrice(p),
+        priceText: (p) => drawings.priceText(p),
         remove: () => drawings.remove(d.id),
       }, alert);
       return;

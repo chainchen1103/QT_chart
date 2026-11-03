@@ -198,6 +198,8 @@ export class ChartPane {
         return c ? [c.open, c.high, c.low, c.close] : null;
       },
       fmtPrice: feed.fmtPrice,
+      roundPrice: (p) => feed.roundToTick(p),
+      priceText: (p) => p.toFixed(feed.decimals),
       fmtTime: (t) => fmtChartTime(toChartTime(t), daily(), seconds()),
       fib: () => settings.fib.get(),
       magnet: () => settings.magnet.get(),
@@ -387,8 +389,10 @@ export class ChartPane {
     this.scaleLabels.refresh();
   }
 
-  /** The latest bars, at the saved zoom (bar spacing) when there is one. */
+  /** The latest bars, at the saved zoom (bar spacing) when there is one, with the prices fitted to them (a
+   *  price scale dragged by hand would still show the old symbol's prices). */
   private showLatest() {
+    this.view.fitPrices();
     if (this.zoom == null) {
       this.view.showLatest();
       return;

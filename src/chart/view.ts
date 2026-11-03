@@ -119,6 +119,18 @@ export class ChartView {
     this.candles.applyOptions({ priceFormat: { type: "custom", minMove, formatter: fmt } });
   }
 
+  /** Price scales back to fitting the bars on screen. Dragging a price scale, or the chart up and down, turns
+   *  that off; left off, a scale keeps the old symbol's prices and the new symbol's bars fall outside it. */
+  fitPrices() {
+    for (const pane of this.chart.panes()) {
+      try {
+        pane.priceScale("right").applyOptions({ autoScale: true });
+      } catch {
+        // a pane without a right price scale: nothing to fit
+      }
+    }
+  }
+
   /** Show the last `n` bars with some room on the right (first load). */
   showLatest(n = 160) {
     const len = this.bars.length;

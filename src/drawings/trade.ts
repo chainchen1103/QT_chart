@@ -81,6 +81,22 @@ export function settleTrade(bars: Candle[], barSec: number, entryT: number, endT
   return ended ? { status: "expired", exit: close, exitT: last ? last.time : null } : { status: "open", exit: close, exitT: null };
 }
 
+/** Entry, stop-loss and take-profit of a position. */
+export type PositionPrices = { entry: number; stop: number; target: number };
+
+/**
+ * What keeps three prices from making a position (null: nothing does): each one above 0, the stop on one side
+ * of the entry and the take-profit on the other (below and above it for a long, the other way round for a
+ * short).
+ */
+export function checkPrices(p: PositionPrices): string | null {
+  if (![p.entry, p.stop, p.target].every((v) => Number.isFinite(v) && v > 0)) return "價格要是大於 0 的數字";
+  if (p.stop === p.entry) return "止損不能等於進場價";
+  if (p.target === p.entry) return "止盈不能等於進場價";
+  if ((p.stop < p.entry) === (p.target < p.entry)) return "止損和止盈要在進場價的兩邊：多單止損在下、止盈在上，空單相反";
+  return null;
+}
+
 /** Profit or loss of an outcome for this plan (0 before a fill). */
 export function tradePnl(plan: TradePlan, entry: number, o: TradeOutcome): number {
   if (o.exit == null) return 0;

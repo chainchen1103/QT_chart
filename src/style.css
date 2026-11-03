@@ -274,7 +274,7 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .alert-count:empty { display: none; }
 .alert-pop { width: 468px; }
 .alert-pop .pop-row input.alert-note, .pop-row input.alert-note { width: 152px; }
-.pop-row input.alert-price { width: 112px; }
+.pop-row input.alert-price, .pop-row input.pos-price { width: 112px; }
 .alert-list { display: flex; flex-direction: column; gap: 2px; max-height: 256px; overflow-y: auto; }
 .alert-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; border-radius: var(--r-ctl); }
 .alert-row:hover { background: var(--raised); }

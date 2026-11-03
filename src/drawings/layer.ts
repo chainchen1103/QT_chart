@@ -22,7 +22,7 @@ import type {
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Candle } from "../core/api.ts";
 import { xOfLogical } from "../chart/coords.ts";
-import { chainPositions, type PositionResult } from "./trade.ts";
+import { chainPositions, type PositionPrices, type PositionResult } from "./trade.ts";
 import { clampTarget, indexToTime, lockAxis, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
 import { ACCENT, paintOver, paintUnder, type HotSpot, type OrderTag, type PaintOptions } from "./paint.ts";
@@ -60,6 +60,10 @@ export type DrawingHost = {
   /** [open, high, low, close] of the bar at a logical index, for the magnet. */
   ohlcAt(i: number): number[] | null;
   fmtPrice(p: number): string;
+  /** A price on the symbol's price step. */
+  roundPrice(p: number): number;
+  /** A price as plain digits with the symbol's decimals, for a number box ("68123.5"). */
+  priceText(p: number): string;
   /** A bar time (UTC seconds) as the time axis shows it. */
   fmtTime(t: number): string;
   fib(): FibSettings;
@@ -288,6 +292,22 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     Object.assign(d, p);
     this.host.changed(this.list);
     this.redraw();
+  }
+  /** Entry, stop-loss and take-profit of one position, typed in its settings (checked there); saved at once. */
+  setPrices(id: string, p: PositionPrices) {
+    const d = this.find(id);
+    if (!d || d.kind !== "position") return;
+    d.a = { ...d.a, p: p.entry };
+    d.b = { ...d.b, p: p.stop };
+    d.target = p.target;
+    this.host.changed(this.list);
+    this.redraw();
+  }
+  roundPrice(p: number): number {
+    return this.host.roundPrice(p);
+  }
+  priceText(p: number): string {
+    return this.host.priceText(p);
   }
   /** Settings changed (Fib levels, magnet key): redraw and refresh the hint. */
   refresh() {
@@ -843,6 +863,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (info.points === 1) this.host.hint(`${info.name}：點一下放置；${snap}；Esc 取消`);
       else if (this.draft) this.host.hint(`${info.name}：點第二個點；${shift}；${snap}；Esc 取消`);
       else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${shift}；${snap}；Esc 取消`);
+    } else if (this.selected && this.find(this.selected)?.kind === "position") {
+      this.host.hint("拖曳進場、止損、止盈或右邊的把手調整，拖曳框移動；雙擊或右鍵直接輸入價格、資金和風險；Delete 刪除");
     } else if (this.selected) {
       this.host.hint("拖曳端點調整、拖曳線條移動，按住 Shift 只水平或垂直；Delete 刪除；雙擊或右鍵開設定");
     } else {

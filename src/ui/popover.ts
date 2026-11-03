@@ -48,8 +48,16 @@ function showPopover(anchor: HTMLElement | null, left: number, top: number, titl
     box.style.top = `${Math.max(8, Math.min(top, window.innerHeight - h - 8))}px`;
   };
   const rerender = () => {
+    // the box in use stays in use across a redraw (found again by its data-key), so Tab goes on from it
+    const act = document.activeElement;
+    const key = act instanceof HTMLElement && body.contains(act) ? act.dataset.key : undefined;
     body.replaceChildren();
     render(body, rerender);
+    const again = key ? body.querySelector<HTMLElement>(`[data-key="${key}"]`) : null;
+    if (again) {
+      again.focus();
+      if (again instanceof HTMLInputElement) again.select();
+    }
   };
   rerender();
   place();
