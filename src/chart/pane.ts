@@ -12,6 +12,7 @@ import { drawingAlertSection, type AlertUi } from "../alerts/panel.ts";
 import type { AlertService } from "../alerts/service.ts";
 import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
+import { PineHost } from "../indicators/pine/host.ts";
 import type { Cell } from "../layout/model.ts";
 import { DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, type Drawing } from "../settings/model.ts";
 import { loadDrawings, saveDrawings, type Settings } from "../settings/store.ts";
@@ -62,6 +63,8 @@ export class ChartPane {
   readonly alertUi: AlertUi;
   /** This chart's positions and their orders, for the trading parts. */
   readonly orders: OrderTarget;
+  /** The Pine scripts on this chart. */
+  readonly pine: PineHost;
   private readonly overlays: Overlays;
   private readonly scaleLabels: ScaleLabelLayer;
   private readonly alertLayer: AlertLayer;
@@ -126,6 +129,25 @@ export class ChartPane {
         srs: settings.srs.get(),
         labels: settings.labels.get(),
       }),
+      changed: () => {
+        if (!this.hovering) this.legend.render();
+      },
+    });
+
+    this.pine = new PineHost({
+      chart,
+      candles,
+      legendBox: this.el,
+      bars: () => feed.bars,
+      times: () => feed.times,
+      barSec: () => feed.tf.sec,
+      toChartTime,
+      fmtPrice: feed.fmtPrice,
+      tick: () => feed.tick,
+      scripts: settings.pine,
+      instId: () => feed.instId,
+      bar: () => feed.bar,
+      barColors: (c) => this.view.setBarColors(c),
       changed: () => {
         if (!this.hovering) this.legend.render();
       },
@@ -217,7 +239,7 @@ export class ChartPane {
     candles.attachPrimitive(this.alertLayer);
 
     // ------------------------------------------------------------------- text and menus
-    this.legend = new Legend(feed, this.overlays, legendBox);
+    this.legend = new Legend(feed, this.overlays, legendBox, (i, box) => this.pine.legend(i, box));
     this.menus = new PaneMenus({
       el: chartEl,
       view: this.view,
@@ -306,6 +328,7 @@ export class ChartPane {
   /** The window shows again: catch up on what came while it was hidden. */
   shown() {
     if (this.stale) this.redrawAll();
+    this.pine.shown();
   }
 
   destroy() {
@@ -314,6 +337,7 @@ export class ChartPane {
     for (const off of this.offs) off();
     this.feed.dispose();
     this.overlays.destroy();
+    this.pine.destroy();
     this.drawings.destroy();
     const { candles } = this.view;
     candles.detachPrimitive(this.scaleLabels);
@@ -371,8 +395,10 @@ export class ChartPane {
       this.drawingsFor = "";
       this.drawings.setDrawings([]); // the old symbol's drawings go away until the new bars are in
       this.overlays.setSymbol(this.feed.instId);
+      this.pine.setSymbol(this.feed.instId);
     }
     this.overlays.setBar(this.feed.bar);
+    this.pine.setBar(this.feed.bar);
     this.view.setPriceFormat(this.feed.tick, this.feed.fmtPrice);
     this.ev.switched(this);
   }
@@ -400,11 +426,13 @@ export class ChartPane {
     if (document.hidden) {
       // minimized: keep the bars current but skip the drawing work until the window shows again
       this.overlays.tick(c, false);
+      this.pine.tick(c, false);
       this.stale = true;
       return;
     }
     this.view.update(c);
     this.overlays.tick(c);
+    this.pine.tick(c);
     if (!this.hovering) this.legend.render();
     this.ev.priced(this);
   }
@@ -413,6 +441,7 @@ export class ChartPane {
     this.stale = false;
     this.view.setBars(this.feed.bars);
     this.overlays.setData(this.feed.bars);
+    this.pine.setData();
     this.legend.render();
     this.ev.priced(this);
   }

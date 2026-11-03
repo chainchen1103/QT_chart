@@ -8,6 +8,8 @@
 //   indicators/ moving averages, FVG / order blocks / support-resistance, and the bars of other timeframes
 //   drawings/  drawing tools: state and mouse (layer), geometry (geo), painting (paint), position sizing (trade)
 //   alerts/    price and drawing alerts
+//   pine/      Pine Script: parser, interpreter, built-ins and the strategy backtester (indicators/pine/ puts
+//              the results on the charts)
 //   trade/     orders on OKX with the user's own API key: the account, the order windows, order sizing
 //   settings/  what is saved and its checks (model), and the saved values themselves (store)
 //   ui/        the toolbars, menus, status bar and settings windows
@@ -33,6 +35,7 @@ import { Workspace } from "./layout/workspace.ts";
 import { TOOL_INFO } from "./settings/model.ts";
 import { loadBgImage, loadDrawings, loadSettings, saveBgImage } from "./settings/store.ts";
 import { setupMenus } from "./ui/menus.ts";
+import { togglePineManager, type PineUi } from "./ui/panels/pine.ts";
 import { appearanceAt, toggleAppearancePanel, type AppearanceIo } from "./ui/panels/appearance.ts";
 import { performanceSection } from "./ui/panels/performance.ts";
 import { StatusBar } from "./ui/statusbar.ts";
@@ -162,6 +165,20 @@ setupMenus(
   () => workspace.inUse().menus,
 );
 
+// ----------------------------------------------------------------------------- Pine scripts
+const pineUi: PineUi = {
+  scripts: settings.pine,
+  host: () => workspace.inUse().pine,
+  chartName: () => {
+    const f = workspace.inUse().feed;
+    return `${f.instId} · ${f.tf.label}`;
+  },
+  note: (text) => status.note(text),
+};
+function paintPineButton() {
+  $("pine-btn").classList.toggle("on", settings.pine.get().some((s) => s.on));
+}
+
 /** A live candle: to the charts showing that symbol and timeframe, the alerts (1-minute bars), the tabs. */
 function route(e: CandleEvent) {
   for (const p of workspace.charts()) if (p.feed.instId === e.instId && p.feed.bar === e.bar) p.feed.live(e.candle);
@@ -171,6 +188,7 @@ function route(e: CandleEvent) {
 
 // ----------------------------------------------------------------------------- settings and buttons
 settings.appearance.watch(applyAppearance);
+settings.pine.watch(paintPineButton);
 alerts.subscribe(() => {
   for (const p of workspace.charts()) p.redrawAlerts();
   paintAlertButton();
@@ -194,6 +212,7 @@ $("layout-btn").onclick = () => toggleLayoutPicker($("layout-btn"), () => worksp
 $("appearance-btn").onclick = () => toggleAppearancePanel($("appearance-btn"), appearanceIo, performance);
 $("alert-btn").onclick = () => toggleAlertManager($("alert-btn"), alertUi);
 $("account-btn").onclick = () => trading.openAccount();
+$("pine-btn").onclick = () => togglePineManager($("pine-btn"), pineUi);
 $("credit").onclick = (e) => {
   e.preventDefault();
   openTradingView().catch((err) => status.error(String(err)));
@@ -202,6 +221,7 @@ $("credit").onclick = (e) => {
 applyAppearance();
 paintAlertButton();
 paintAccountButton($("account-btn"), account);
+paintPineButton();
 status.hint(null);
 workspace.start(); // the charts load their bars while the symbol list is on its way
 

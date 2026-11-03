@@ -39,7 +39,7 @@ fn is_okx_ws(url: &str) -> bool {
 }
 
 /// Bar sizes the app offers (OKX names; daily and weekly bars on UTC boundaries).
-pub const BARS: &[&str] = &["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "1Dutc", "1Wutc"];
+pub const BARS: &[&str] = &["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "6Hutc", "12Hutc", "1Dutc", "1Wutc"];
 
 pub fn valid_bar(bar: &str) -> bool {
     BARS.contains(&bar)

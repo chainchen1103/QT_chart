@@ -31,6 +31,8 @@ export class ChartView {
   readonly candles: ISeriesApi<"Candlestick">;
   readonly volume: ISeriesApi<"Histogram">;
   private bars: Candle[] = [];
+  /** Candle colors set by Pine scripts (barcolor), by bar; null: the usual up / down colors. */
+  private barColors: (string | null)[] | null = null;
   private readonly o: ChartViewOptions;
 
   constructor(o: ChartViewOptions) {
@@ -62,7 +64,11 @@ export class ChartView {
     volume?.setStretchFactor(0.15);
   }
 
-  private bar = (c: Candle) => ({ time: toChartTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close });
+  private bar = (c: Candle, i: number) => {
+    const color = this.barColors?.[i];
+    const b = { time: toChartTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close };
+    return color ? { ...b, color, wickColor: color, borderColor: color } : b;
+  };
   private vol = (c: Candle) => {
     const a = this.o.appearance.get();
     return { time: toChartTime(c.time), value: c.volume, color: hexToRgba(c.close >= c.open ? a.up : a.down, 0.5) };
@@ -76,8 +82,25 @@ export class ChartView {
   }
   /** The newest bar changed, or a new one started. */
   update(c: Candle) {
-    this.candles.update(this.bar(c));
+    this.candles.update(this.bar(c, this.bars.length - 1));
     this.volume.update(this.vol(c));
+  }
+
+  /** Candle colors from Pine scripts' barcolor() (null: none). Redraws only what changed. */
+  setBarColors(colors: (string | null)[] | null) {
+    const old = this.barColors;
+    const n = this.bars.length;
+    if (!old && !colors) return;
+    this.barColors = colors;
+    if (old && colors && old.length === colors.length && colors.length === n) {
+      let k = 0;
+      while (k < n - 1 && old[k] === colors[k]) k++;
+      if (k >= n - 1) {
+        if (n && old[n - 1] !== colors[n - 1]) this.candles.update(this.bar(this.bars[n - 1], n - 1));
+        return;
+      }
+    }
+    this.candles.setData(this.bars.map(this.bar));
   }
 
   /** Price step and formatting of the symbol on screen (the volume pane keeps its own K / M format). */

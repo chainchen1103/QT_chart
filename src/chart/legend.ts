@@ -18,11 +18,14 @@ export class Legend {
   private readonly feed: MarketFeed;
   private readonly overlays: Overlays;
   private readonly box: HTMLElement;
+  /** More lines (Pine scripts) for bar i. */
+  private readonly extra: (i: number, box: HTMLElement) => void;
 
-  constructor(feed: MarketFeed, overlays: Overlays, box: HTMLElement) {
+  constructor(feed: MarketFeed, overlays: Overlays, box: HTMLElement, extra: (i: number, box: HTMLElement) => void = () => {}) {
     this.feed = feed;
     this.overlays = overlays;
     this.box = box;
+    this.extra = extra;
   }
 
   /** The bar at time t (UTC seconds), or the newest bar. */
@@ -73,6 +76,7 @@ export class Legend {
       }
       box.append(line);
     }
+    this.extra(i, box);
   }
 
 }

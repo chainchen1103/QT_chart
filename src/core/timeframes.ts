@@ -16,7 +16,16 @@ export const TIMEFRAMES: Tf[] = [
   { bar: "1Wutc", label: "週", sec: 604800 },
 ];
 
-export const findTf = (bar: string): Tf | undefined => TIMEFRAMES.find((t) => t.bar === bar);
+/** Timeframes not offered as buttons but loaded for Pine scripts' request.security() (OKX bar names). */
+export const EXTRA_TIMEFRAMES: Tf[] = [
+  { bar: "3m", label: "3分", sec: 180 },
+  { bar: "30m", label: "30分", sec: 1800 },
+  { bar: "2H", label: "2時", sec: 7200 },
+  { bar: "6Hutc", label: "6時", sec: 21600 },
+  { bar: "12Hutc", label: "12時", sec: 43200 },
+];
+
+export const findTf = (bar: string): Tf | undefined => TIMEFRAMES.find((t) => t.bar === bar) ?? EXTRA_TIMEFRAMES.find((t) => t.bar === bar);
 export const tfSec = (bar: string): number => findTf(bar)?.sec ?? 0;
 export const tfLabel = (bar: string): string => findTf(bar)?.label ?? bar;
 

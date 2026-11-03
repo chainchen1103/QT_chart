@@ -84,6 +84,16 @@
   - 掛單價會馬上成交、保證金超過可用、離現價太遠時會提醒；張數不到最小單位、槓桿超過上限、帳戶是現貨模式時不能送出；OKX 拒單時會在視窗裡寫原因；
   - 送出後倉位右邊顯示訂單狀態：掛單中、部分成交、已成交（均價）、已撤單，每 4 秒問一次 OKX；按它可以看細節、撤單；撤掉之後可以重新下；
   - 送出後在圖上移動倉位不會改到交易所的單，要改請撤單再重新下；不含手續費。
+- **Pine Script（工具列的「Pine」）：** 把 TradingView 的指標或策略原始碼貼進來，畫在每個圖表上。
+  - 新增：按「Pine」→「新增腳本」貼上原始碼，或「從檔案匯入」（.pine、.txt）；編輯器有行號，打錯字會馬上標出第幾行、哪裡錯（點錯誤訊息跳到那一行），Ctrl+S 儲存並套用；
+  - 清單：每個腳本可以開關、改參數（腳本裡的 `input`，改了馬上重算）、編輯、刪除（按兩次）；也顯示它在目前的圖表上算了多久、有沒有錯；
+  - 支援 Pine v4、v5、v6：變數和歷史值 `x[1]`、`var`、函式（各自記住每個呼叫位置的狀態）、`if`／`switch`／`for`／`for…in`／`while`、`type` 自訂型別、`method`、`enum`、tuple、陣列、map、矩陣（常用的部分），`ta.*` 指標（SMA、EMA、RMA、WMA、RSI、MACD、布林、ATR、SuperTrend、DMI、SAR、樞紐點、VWAP… 照 TradingView 的公式算，有單元測試對照）、`math.*`、`str.*`、`color.*`、時間函式；
+  - 畫出來：`plot`（線、階梯線、柱狀、面積、圓點，每根 K 線各自的顏色和位移）、`plotshape`、`plotchar`、`plotarrow`、`plotcandle`、`hline`、`fill`（含漸層）、`bgcolor`、`barcolor`，和 `line`、`label`、`box`、`table`、`linefill`、`polyline` 畫線物件；`overlay=false` 的腳本在下方開一個自己的窗格，圖例在窗格左上角，關掉腳本窗格就收起來；
+  - `request.security`：同一個商品、比圖表大的週期（例如 15 分圖上看 4 小時、日線），會另外抓那個週期的 K 線並在那個週期上算，和 TradingView 一樣等那根大 K 線收線才更新（`lookahead_on`、`gaps_on` 也照做），也支援 Heikin-Ashi；其他商品、比圖表小的週期回傳 na 並在圖例提醒；
+  - 策略回測：`strategy.entry`／`order`／`exit`（止盈、止損、移動止損）／`close`／`cancel`，照 TradingView 的成交規則（收線下單、下一根開盤成交；限價、停損照 K 線開→高／低→收的路徑成交，跳空就用開盤價；反手、加碼次數、手續費、滑價、`process_orders_on_close`）。圖上標出每次進出場；「績效」顯示淨利、勝率、獲利因子、最大回撤、權益曲線和每筆交易；回測範圍是圖上已載入的 K 線；
+  - 即時：每次 K 線載入、參數改變都重算；即時報價最多每秒重算一次（腳本越慢間隔越長），收線時馬上重算。策略在還沒收的 K 線上不下單（和 TradingView 預設一樣）；
+  - 安全：腳本由程式自己的直譯器執行，不是當成 JavaScript 跑，只能做計算和畫圖，碰不到下單、API 金鑰、檔案或網路；跑太久（例如無窮迴圈）會自動停止；
+  - 不支援：`import` 程式庫、其他商品的資料、`request.financial` 等外部資料、`alert()`（不會響）、`indicator(timeframe=…)`；不支援的地方會在第幾行寫出原因。
 - **價格提醒：** 右上角的鈴鐺打開提醒清單；數字是開著的提醒數。
   - 新增價格提醒：在價格標尺或圖上按右鍵選「在 … 新增提醒」，或按 Alt+A（用十字線所在的價格），或在清單上面直接填價格；
   - 條件：觸及（從哪一邊碰到都算）、向上突破、向下跌破；次數：只提醒一次（響過就關掉），或每次（一直開著，最多每分鐘響一次）；可以加備註；
@@ -235,6 +245,17 @@ npx tauri build --no-bundle
 | `src/trade/account.ts` | 交易帳戶：有沒有設定 API、帳戶權益、下單／查單／撤單 |
 | `src/trade/trading.ts` | 圖上的下單按鈕顯示什麼、按了開哪個視窗、倉位的資金、每 4 秒查一次掛著的單 |
 | `src/trade/panel.ts` | API 設定、下單確認視窗、訂單細節和撤單 |
+| `src/pine/lexer.ts`、`parser.ts`、`ast.ts` | Pine Script：斷字（縮排區塊、續行）、語法樹，錯誤帶行號 |
+| `src/pine/compile.ts` | Pine 直譯器：把語法樹變成函式（不用 eval）；變數、歷史值、每個呼叫位置各自的狀態、request.security、跑完整段 K 線 |
+| `src/pine/runtime.ts` | 執行時的值（na、顏色、tuple、自訂型別、enum）、週期換算、K 線資料 |
+| `src/pine/lib/*.ts` | 內建函式：`ta.*`、`math.*`、`str.*`、`color.*`、時間、陣列、map、矩陣 |
+| `src/pine/outputs.ts` | 腳本畫的東西（plot、shape、fill、bgcolor、line、label、box、table…）、input、indicator／strategy 設定 |
+| `src/pine/strategy.ts` | 策略回測：TradingView 式的成交模擬、交易紀錄、績效、`strategy.*` 變數 |
+| `src/pine/index.ts` | 給其他部分用的入口：載入（含錯誤行號）、執行、request.security 要的其他週期 |
+| `src/indicators/pine/host.ts` | 一個圖表上的 Pine 腳本：什麼時候重算、抓其他週期的 K 線 |
+| `src/indicators/pine/view.ts` | 一個腳本的 plot 線、自己的窗格、圖例 |
+| `src/indicators/pine/layer.ts` | 畫出背景色、填色、形狀、標籤、線、方框、表格、策略的進出場標記 |
+| `src/ui/panels/pine.ts`、`src/ui/modal.ts` | Pine 清單、編輯器、參數、回測績效視窗 |
 | `src/settings/model.ts` | 設定和畫線的格式、預設值、讀回來時的檢查 |
 | `src/settings/store.ts` | 所有存下來的設定、每個幣種的畫線、背景圖片 |
 | `src/ui/toolbar.ts` | 上方工具列：幣種搜尋、週期、指標開關 |
@@ -271,7 +292,7 @@ npx tauri build --no-bundle
   - 寫檔只在 store 資料夾（名字只能是英數和 . - _，每個檔最大 8 MB）和 prefs.json；開瀏覽器只能開固定的 tradingview.com；不接受拖放檔案。
 
 ## 測試
-- 前端：`npm test`（Fib、時間換算、均線、週期對齊、FVG、Order Block、支撐阻力、收線倒數、倉位計算和結算、提醒、畫線位置和點選、格式、分頁和版面、即時訂閱清單、倉位換成訂單，需要 Node 22 以上）。
+- 前端：`npm test`（Fib、時間換算、均線、週期對齊、FVG、Order Block、支撐阻力、收線倒數、倉位計算和結算、提醒、畫線位置和點選、格式、分頁和版面、即時訂閱清單、倉位換成訂單、Pine 的語法、歷史值和函式狀態、`ta.*` 對照參考算法、request.security 對齊、策略成交，需要 Node 22 以上）。
 - Rust：`cd src-tauri` 之後執行 `cargo test`（包含簽章、時間格式、訂單檢查、金鑰檔）。
 - 下單流程可以先用 OKX 的模擬盤 API 試；開發版也能用環境變數 `QTCHART_TRADE_URL` 指向本機的假 OKX 伺服器（正式版一律連 OKX）。
 
@@ -283,4 +304,4 @@ WebSocket 的位址可以用環境變數 `QTCHART_WS_URL` 改成 OKX 的其他�
 - 詳見 `THIRD-PARTY-NOTICES.md`。
 
 ## 之後可以加的
-分割畫面的十字線和時間同步、K 線回放；在圖上拖曳掛著的單直接改價、分批止盈（例如 1R、2R 各出一半）。
+分割畫面的十字線和時間同步、K 線回放；在圖上拖曳掛著的單直接改價、分批止盈（例如 1R、2R 各出一半）；Pine 的 `alert()` 接上提醒、`request.security` 其他商品。

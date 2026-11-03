@@ -490,3 +490,27 @@ export function cleanPosition(raw: unknown): PositionSettings {
     capitalFromApi: r.capitalFromApi !== false,
   };
 }
+
+// ----------------------------------------------------------------------------- Pine scripts
+/** A Pine script the user added: its source, on or off, and the inputs changed from their defaults (by key). */
+export type PineScript = { id: string; name: string; source: string; on: boolean; inputs: Record<string, string | number | boolean> };
+export const MAX_PINE_SCRIPTS = 30;
+export const MAX_PINE_SOURCE = 200_000;
+
+export function cleanPine(raw: unknown): PineScript[] {
+  const out: PineScript[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const s of raw) {
+    if (out.length >= MAX_PINE_SCRIPTS) break;
+    if (!isObj(s) || typeof s.id !== "string" || !s.id || typeof s.source !== "string" || s.source.length > MAX_PINE_SOURCE) continue;
+    if (out.some((x) => x.id === s.id)) continue;
+    const inputs: PineScript["inputs"] = {};
+    if (isObj(s.inputs))
+      for (const [k, v] of Object.entries(s.inputs)) {
+        if (k.length > 200) continue;
+        if (typeof v === "string" ? v.length <= 1000 : typeof v === "boolean" || isNum(v)) inputs[k] = v as string | number | boolean;
+      }
+    out.push({ id: s.id, name: typeof s.name === "string" ? s.name.slice(0, 120) : "", source: s.source, on: s.on !== false, inputs });
+  }
+  return out;
+}

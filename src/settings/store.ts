@@ -17,6 +17,7 @@ import {
   cleanMaOptions,
   cleanMas,
   cleanObs,
+  cleanPine,
   cleanPosition,
   cleanSrs,
   DEFAULT_FIB,
@@ -46,6 +47,8 @@ export function loadSettings() {
     position: setting("position", cleanPosition),
     /** The order window's last choices (type, margin mode, take-profit on or off). */
     orderPrefs: setting("orderprefs", cleanOrderPrefs),
+    /** Pine scripts added by the user (every chart runs the ones switched on). */
+    pine: setting("pine", cleanPine),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;
