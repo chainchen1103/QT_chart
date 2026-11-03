@@ -17,6 +17,24 @@ pub fn ws_url() -> String {
     }
 }
 
+/// The private WebSocket (the account's own pushes, sync.rs); a demo key goes to OKX's demo-trading host.
+/// Debug builds accept QTCHART_PRIVATE_WS_URL (a local test server).
+pub fn private_ws_url(demo: bool) -> String {
+    if cfg!(debug_assertions) {
+        if let Ok(u) = std::env::var("QTCHART_PRIVATE_WS_URL") {
+            let u = u.trim().to_string();
+            if !u.is_empty() {
+                return u;
+            }
+        }
+    }
+    if demo {
+        "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999".to_string()
+    } else {
+        "wss://ws.okx.com:8443/ws/v5/private".to_string()
+    }
+}
+
 /// Where orders and account requests go (trade.rs). Debug builds accept QTCHART_TRADE_URL (a local test
 /// server); release builds always use OKX.
 pub fn trade_base() -> String {

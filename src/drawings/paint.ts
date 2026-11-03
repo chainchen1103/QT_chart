@@ -4,9 +4,10 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Dash, FibSettings, PositionDrawing, PositionSettings } from "../settings/model.ts";
 import type { Geo } from "./geo.ts";
-import { fmtSpan, hexToRgba, positionDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
+import { fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
 import { signed } from "../core/format.ts";
+import type { LiveInfo } from "../trade/sync.ts";
 import { MONO_FONT, THEME } from "../ui/theme.ts";
 
 /** The button at the right of a position: 下單, or the order placed from it. */
@@ -25,6 +26,8 @@ export type PaintOptions = {
   barSec: number;
   trades: ReadonlyMap<string, PositionResult>;
   orderTag(d: PositionDrawing): OrderTag | null;
+  /** A position on OKX: what OKX says of it (size, average, unrealized PnL, or how it ended). */
+  live(d: PositionDrawing): LiveInfo | null;
 };
 
 const FONT = `11px ${MONO_FONT}`;
@@ -63,10 +66,15 @@ export function paintUnder(target: CanvasRenderingTarget2D, geo: readonly Geo[],
         const e = Math.round(g.pos.entryY * vr);
         const t = Math.round(g.pos.targetY * vr);
         const sl = Math.round(g.pos.stopY * vr);
-        ctx.fillStyle = hexToRgba(ps.profit, alpha);
-        ctx.fillRect(x0, Math.min(e, t), x1 - x0, Math.abs(t - e));
-        ctx.fillStyle = hexToRgba(ps.loss, alpha);
-        ctx.fillRect(x0, Math.min(e, sl), x1 - x0, Math.abs(sl - e));
+        const lossSide = d.dir == null || (d.a.p - d.b.p) * d.dir > 0;
+        if (!d.okx?.noTp) {
+          ctx.fillStyle = hexToRgba(ps.profit, alpha);
+          ctx.fillRect(x0, Math.min(e, t), x1 - x0, Math.abs(t - e));
+        }
+        if (!d.okx?.noSl && lossSide) {
+          ctx.fillStyle = hexToRgba(ps.loss, alpha);
+          ctx.fillRect(x0, Math.min(e, sl), x1 - x0, Math.abs(sl - e));
+        }
       } else if (d.kind === "rect") {
         const s = d.style;
         if (s.transparency >= 100) continue;
@@ -163,10 +171,10 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
           const sc = t?.scale;
           const dim = sc && sc.step < sc.count ? 0.4 : 1; // an earlier part: a later add's stop and take-profit rule
           for (const l of g.pos.levels) hl(l.y, hexToRgba(ps.profit, 0.9 * dim), "dash");
-          hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
-          hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
+          if (!d.okx?.noTp) hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
+          if (!d.okx?.noSl) hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
           hl(g.pos.entryY, "#b2b5be", "solid");
-          if (g.pos.exit && t) {
+          if (g.pos.exit && t && !o.live(d)) { // on OKX: how it really went is in the labels
             const color = t.outcome.status === "tp" ? ps.profit : t.outcome.status === "sl" ? ps.loss : "#b2b5be";
             ctx.beginPath();
             ctx.arc(g.pos.exit.x * hr, g.pos.exit.y * vr, 5 * hr, 0, Math.PI * 2);
@@ -294,7 +302,7 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
     const x = ((v - d.a.p) / d.a.p) * 100;
     return `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}%`;
   };
-  const dir = positionDir(d.a.p, d.b.p);
+  const dir = posDir(d);
   const rr = rewardRisk(d.a.p, d.b.p, d.target);
   const t = o.trades.get(d.id);
   const size = (lines: string[]) => ({ w: Math.max(...lines.map((s) => ctx.measureText(s).width)) + 10, h: lines.length * 15 + 3 });
@@ -314,12 +322,46 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
     const b = box(...a);
     return b.x + b.w;
   };
-  const mid = (p.x0 + p.x1) / 2;
+  const mid = (Math.max(p.x0, 0) + Math.min(p.x1, width)) / 2; // the middle of what is on screen (an open OKX position runs on)
   const show = ps.showPrices;
   const money = (v: number) => `${v >= 0 ? "+" : "−"}${fmtMoney(Math.abs(v))} U`;
   // labels sit just outside the box, past the take-profit and the stop
   const outward = (y: number, sign: number) => y + sign * 13;
   const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
+  const live = o.live(d);
+  const gray = "rgba(45,45,48,0.95)";
+  if (d.okx) {
+    // drawn from OKX: its stops when set (what they make or lose now), size, average, and the PnL now or at the end
+    const k = d.okx;
+    const v = live ?? { coins: k.coins, avg: d.a.p, lever: k.lever, upl: null, closed: k.closed ?? null, demo: k.demo };
+    const vs = (x: number) => {
+      const r = ((x - v.avg) / v.avg) * 100;
+      return `${r >= 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}%`;
+    };
+    const open = !v.closed;
+    if (!k.noTp) tag([`止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`], mid, outward(p.targetY, up), ps.profit);
+    if (!k.noSl) tag([`止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`], mid, outward(p.stopY, -up), ps.loss);
+    const lines = [
+      `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
+      `均價 ${fp(v.avg)}${k.noSl ? "  沒有設止損" : ""}${k.noTp ? "  沒有設止盈" : ""}`,
+    ];
+    const bx = box(lines, Math.max(0, Math.min(p.x0 + 4, width - 4 - size(lines).w)), p.entryY, "rgba(25,25,27,0.92)", "left");
+    const [text, bg] = v.closed
+      ? [`已平倉${v.closed.px ? ` @ ${fp(v.closed.px)}  ${money(v.closed.pnl)}` : ""}`, v.closed.px ? (v.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
+      : [v.upl != null ? `持倉中 ${money(v.upl)}` : "持倉中", gray];
+    const w = size([text]).w;
+    let x = Math.max(p.x1, bx.x + bx.w) + 6;
+    let y = p.entryY;
+    if (x + w > width - 4) {
+      x = width - 4 - w;
+      if (x < bx.x + bx.w + 6) {
+        x = Math.max(0, Math.min(bx.x, width - 4 - w));
+        y = bx.y + bx.h + 11;
+      }
+    }
+    tag([text], x, y, bg, "left");
+    return;
+  }
   const sc = t?.scale ?? null;
   const earlier = !!sc && sc.step < sc.count; // a later add's stop and take-profit are the ones in force
   // the risk and reward the R and money are of: the whole position for the last add, else this one
@@ -358,7 +400,6 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   const infoRight = info.x + info.w;
   const pnl = sc ? sc.pnl : t.pnl;
   const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
-  const gray = "rgba(45,45,48,0.95)";
   const result: Record<string, [string, string]> = {
     tp: [`止盈出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
     sl: [`止損出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
@@ -368,7 +409,16 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
     unfilled: ["沒有成交", gray],
     nodata: ["K 線不夠，無法結算", gray],
   };
-  const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : result[t.outcome.status];
+  // on OKX: what OKX says wins over the what-if
+  const real: [string, string] | null =
+    live && !earlier
+      ? live.closed
+        ? [`OKX 已平倉${live.closed.px ? ` @ ${fp(live.closed.px)}  ${money(live.closed.pnl)}` : ""}`, live.closed.px ? (live.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
+        : live.upl != null
+          ? [`OKX 持倉中 ${money(live.upl)}`, gray]
+          : null
+      : null;
+  const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : real ?? result[t.outcome.status];
   const order = o.orderTag(d);
   const total = size([text]).w + (order ? 4 + size([order.text]).w : 0);
   let x = Math.max(p.x1, infoRight) + 6; // past the info box when that is wider than the position

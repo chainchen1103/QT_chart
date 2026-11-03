@@ -8,6 +8,7 @@ import {
   clone,
   cleanAppearance,
   cleanBars,
+  cleanSync,
   cleanDrawings,
   cleanDrawStyles,
   cleanFib,
@@ -55,6 +56,8 @@ export function loadSettings() {
     timeframes: setting("timeframes", cleanTimeframes),
     /** How many bars a chart keeps. */
     bars: setting("bars", cleanBars),
+    /** Following the OKX account (positions and their stops) on the charts. */
+    okxSync: setting("okxsync", cleanSync),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;

@@ -22,6 +22,9 @@
     "allow-trade-place",
     "allow-trade-order",
     "allow-trade-cancel",
+    "allow-trade-sync",
+    "allow-trade-closed-positions",
+    "allow-trade-amend-stops",
     "allow-gpu-pref",
     "allow-set-gpu-pref",
     "allow-open-tradingview"

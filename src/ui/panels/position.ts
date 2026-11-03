@@ -4,7 +4,7 @@
 // above its stop before the stop is typed) wait, marked, until they do.
 
 import { fmtChange } from "../../core/format.ts";
-import { parseR, positionDir, rewardRisk } from "../../drawings/geometry.ts";
+import { parseR, posDir, rewardRisk } from "../../drawings/geometry.ts";
 import {
   clone,
   DEFAULT_POSITION,
@@ -29,6 +29,8 @@ export type OnePosition = {
   trade: () => PositionResult | undefined;
   update: (p: Partial<Pick<PositionDrawing, "capital" | "risk" | "riskMode" | "leverage">>) => void;
   setPrices: (p: PositionPrices) => void;
+  /** On OKX now: the entry is OKX's; moved stops are sent to OKX after a confirmation. */
+  isLive?: () => boolean;
   /** A price on the symbol's price step, and as plain digits for a box. */
   roundPrice: (p: number) => number;
   priceText: (p: number) => string;
@@ -66,7 +68,7 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
       if (s.trim() === "" || !Number.isFinite(v) || v <= 0) return { error: "價格要是大於 0 的數字" };
       p[key] = one.roundPrice(v);
     }
-    const error = checkPrices(p);
+    const error = checkPrices(p, d.dir);
     return error ? { error } : { prices: p };
   };
   const mark = () => {
@@ -80,7 +82,7 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
   // the last add of a position built up by adds: its stop and take-profit are the whole position's
   const sc = one.trade()?.scale;
   const whole = sc && sc.step === sc.count ? sc : null;
-  const side = positionDir(now.entry, now.stop) === 1 ? "多單" : "空單";
+  const side = posDir(d) === 1 ? "多單" : "空單";
   const info: Record<PriceKey, string> = {
     entry: whole ? `${side}加倉` : side,
     stop: pct(now.stop),
@@ -89,12 +91,21 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
       : `${pct(now.target)}　${rewardRisk(now.entry, now.stop, now.target).toFixed(2)} R`,
   };
   const rows: HTMLElement[] = [];
+  const live = one.isLive?.() ?? false;
+  const k = d.okx;
+  const fixed: Partial<Record<PriceKey, string>> = {
+    ...(live || k ? { entry: "進場照 OKX（成交均價），不能改" } : {}),
+    ...(k?.noSl ? { stop: "OKX 上沒有止損單；要設請到 OKX" } : {}),
+    ...(k?.noTp ? { target: "OKX 上沒有止盈單；要設請到 OKX" } : {}),
+    ...(k?.closed ? { stop: "已平倉", target: "已平倉" } : {}),
+  };
   for (const { key, name, title } of PRICE_ROWS) {
     const box = el("input", "pos-price");
     box.type = "number";
     box.step = "any";
     box.min = "0";
-    box.title = title;
+    box.title = fixed[key] ?? title;
+    box.disabled = fixed[key] != null;
     box.dataset.key = key;
     box.value = typed[key] ?? one.priceText(now[key]);
     box.onkeydown = (e) => {
@@ -171,6 +182,16 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         later();
       };
       body.append(...priceRows(one, typed, later));
+      if (d.okx) {
+        // read from OKX: its size is OKX's, not worked out from a risk
+        const k = d.okx;
+        body.append(
+          el("div", "pop-note", `OKX 持倉${k.demo ? "（模擬盤）" : ""}：${k.side === "long" ? "多單" : "空單"}，開倉 ${new Date(k.cTime).toLocaleString("zh-TW", { hour12: false })}`),
+          el("div", "pop-note", k.closed
+            ? `已平倉${k.closed.px ? `：均價 ${one.priceText(k.closed.px)}，已實現 ${k.closed.pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(k.closed.pnl))} U` : "（OKX 查不到平倉紀錄）"}`
+            : "不是從這裡開的倉位，數量、均價和盈虧照 OKX。持倉還開著時刪掉，下次同步會再畫回來。"),
+        );
+      }
       const capRow = el("div", "pop-row");
       const auto = d.capital == null;
       const cap = numInput(t ? Math.round(t.capital * 100) / 100 : cur.capital, POSITION_LIMITS.capital, { title: "這筆用多少資金算倉位", width: 96, step: "1", int: false }, (v) =>
@@ -193,8 +214,8 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       const lev = numInput(d.leverage, POSITION_LIMITS.leverage, { title: "1～125 倍", width: 64, step: "1", int: false }, (v) => upd({ leverage: v }));
       lev.dataset.key = "leverage";
       levRow.append(lbl("槓桿"), lev, lbl("倍"));
-      body.append(capRow, riskRow, levRow);
-      if (t) {
+      if (!d.okx) body.append(capRow, riskRow, levRow);
+      if (t && !d.okx) {
         const pl = t.plan;
         const sc = t.scale;
         const money = (v: number) => `${v >= 0 ? "+" : "−"}${fmtMoney(Math.abs(v))} U`;

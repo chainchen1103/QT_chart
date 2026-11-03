@@ -73,11 +73,41 @@ export type PositionDrawing = {
   id: string; kind: "position"; a: Anchor; b: Anchor; target: number;
   capital: number | null; risk: number; riskMode: RiskMode; leverage: number;
   order?: PositionOrder;
+  /** Drawn from a position on the OKX account (not opened from the chart). */
+  okx?: OkxPos;
+  /** Long (1) or short (-1) for good: set once it is on OKX, where its stop may be moved past the entry. */
+  dir?: 1 | -1;
 };
 /** An order placed from a position. `state`: OKX's (live, partially_filled, filled, canceled, mmp_canceled). */
 export type PositionOrder = {
   ordId: string; clOrdId: string; demo: boolean; side: "buy" | "sell"; ordType: "limit" | "post_only" | "market";
   px: number | null; sz: number; at: number; state: string; avgPx: number | null; fillSz: number;
+  /** The stop-loss and take-profit it went with, and the id of their TP/SL order (attachAlgoClOrdId). */
+  sl?: number; tp?: number | null; algoClOrdId?: string;
+  /** OKX's id of that TP/SL order, when it was found by its price (orders from before ids were given). */
+  algoId?: string;
+  /** When it (last) filled, ms. */
+  fillT?: number;
+  /** The OKX position it went into ("posId:opened ms"), and how that position ended. */
+  posKey?: string;
+  closed?: OkxClosed;
+  /** An add: once it fills, the earlier orders' stop-loss and take-profit move to its own; how that went. */
+  moveOnFill?: boolean;
+  moved?: { at: number; ok: boolean; note: string };
+};
+/** A closed OKX position: when (UTC s), at what average price, realized PnL of the whole position (U). */
+export type OkxClosed = { t: number; px: number; pnl: number };
+/**
+ * A position on the OKX account that wasn't opened from the chart, drawn from the account: a = (opened,
+ * average price), b.p / target = its stop-loss / take-profit on OKX (placeholders next to the entry when
+ * there is none: noSl / noTp).
+ */
+export type OkxPos = {
+  posId: string; cTime: number; side: "long" | "short"; demo: boolean;
+  /** Coins when last seen, and the leverage. */
+  coins: number; lever: number;
+  noSl: boolean; noTp: boolean;
+  closed?: OkxClosed;
 };
 export type Drawing = FibDrawing | LineDrawing | RectDrawing | PositionDrawing;
 
@@ -381,10 +411,11 @@ export function cleanDrawings(raw: unknown): Drawing[] {
     if (kind === "fib") out.push({ id, kind, a, b });
     else if (kind === "rect") out.push({ id, kind, a, b, style: cleanRectStyle(d.style) });
     else if (kind === "position") {
-      if (!isNum(d.target) || b.p === a.p) continue;
+      if (!isNum(d.target) || (b.p === a.p && d.dir !== 1 && d.dir !== -1)) continue;
       const def = DEFAULT_POSITION;
       const riskMode: RiskMode = d.riskMode === "amount" ? "amount" : "pct";
       const order = cleanOrder(d.order);
+      const okx = cleanOkxPos(d.okx);
       out.push({
         id, kind, a, b, target: d.target,
         capital: d.capital === null || d.capital === undefined ? null : num(d.capital, POSITION_LIMITS.capital, def.capital, false),
@@ -392,6 +423,8 @@ export function cleanDrawings(raw: unknown): Drawing[] {
         riskMode,
         leverage: num(d.leverage, POSITION_LIMITS.leverage, def.leverage, false),
         ...(order ? { order } : {}),
+        ...(okx ? { okx } : {}),
+        ...(d.dir === 1 || d.dir === -1 ? { dir: d.dir } : {}),
       });
     }
     else out.push({ id, kind: kind as LineKind, a, b: TOOL_INFO[kind as LineKind].points === 1 ? { ...a } : b, style: cleanLineStyle(d.style) });
@@ -421,6 +454,40 @@ export function cleanOrder(raw: unknown): PositionOrder | undefined {
     state: typeof raw.state === "string" && ORDER_STATES.has(raw.state) ? raw.state : "unknown",
     avgPx: pos(raw.avgPx),
     fillSz: isNum(raw.fillSz) && raw.fillSz >= 0 ? raw.fillSz : 0,
+    ...(pos(raw.sl) != null ? { sl: pos(raw.sl)! } : {}),
+    ...(raw.tp === null || pos(raw.tp) != null ? { tp: pos(raw.tp) } : {}),
+    ...(id(raw.algoClOrdId, /^[A-Za-z0-9]{1,32}$/) ? { algoClOrdId: raw.algoClOrdId as string } : {}),
+    ...(id(raw.algoId, /^\d{1,32}$/) ? { algoId: raw.algoId as string } : {}),
+    ...(pos(raw.fillT) != null ? { fillT: pos(raw.fillT)! } : {}),
+    ...(id(raw.posKey, /^\d{1,32}:\d{1,16}$/) ? { posKey: raw.posKey as string } : {}),
+    ...(cleanClosed(raw.closed) ? { closed: cleanClosed(raw.closed)! } : {}),
+    ...(raw.moveOnFill === true ? { moveOnFill: true } : {}),
+    ...(isObj(raw.moved) && isNum(raw.moved.at)
+      ? { moved: { at: raw.moved.at, ok: raw.moved.ok === true, note: typeof raw.moved.note === "string" ? raw.moved.note.slice(0, 300) : "" } }
+      : {}),
+  };
+}
+
+function cleanClosed(raw: unknown): OkxClosed | undefined {
+  if (!isObj(raw) || !isNum(raw.t) || !isNum(raw.px) || !isNum(raw.pnl)) return undefined;
+  return { t: raw.t, px: raw.px, pnl: raw.pnl };
+}
+
+/** A saved OKX position link, or undefined. */
+export function cleanOkxPos(raw: unknown): OkxPos | undefined {
+  if (!isObj(raw) || typeof raw.posId !== "string" || !/^\d{1,32}$/.test(raw.posId) || !isNum(raw.cTime)) return undefined;
+  if (raw.side !== "long" && raw.side !== "short") return undefined;
+  const closed = cleanClosed(raw.closed);
+  return {
+    posId: raw.posId,
+    cTime: raw.cTime,
+    side: raw.side,
+    demo: raw.demo === true,
+    coins: isNum(raw.coins) && raw.coins >= 0 ? raw.coins : 0,
+    lever: isNum(raw.lever) && raw.lever > 0 ? raw.lever : 1,
+    noSl: raw.noSl === true,
+    noTp: raw.noTp === true,
+    ...(closed ? { closed } : {}),
   };
 }
 
@@ -531,6 +598,12 @@ export function cleanTimeframes(raw: unknown): TimeframeSettings {
 }
 
 /** How many bars a chart keeps: a cap (older history stops loading there), or none at all. */
+/** Following the OKX account on the charts (positions, stop-losses, take-profits). */
+export type SyncSettings = { on: boolean };
+export function cleanSync(raw: unknown): SyncSettings {
+  return { on: !(isObj(raw) && raw.on === false) };
+}
+
 export type BarSettings = { unlimited: boolean };
 export function cleanBars(raw: unknown): BarSettings {
   const r = isObj(raw) ? raw : {};

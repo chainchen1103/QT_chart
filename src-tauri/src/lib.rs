@@ -7,6 +7,7 @@ mod okx;
 mod prefs;
 mod store;
 mod stream;
+mod sync;
 mod trade;
 mod window;
 mod ws;
@@ -17,7 +18,7 @@ use std::path::PathBuf;
 use store::Store;
 use stream::Live;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
-use trade::{Account, KeyStatus, OrderInfo, OrderReq, Placed, Trader};
+use trade::{Account, AmendReq, ClosedPos, KeyStatus, OrderInfo, OrderReq, Placed, Trader};
 
 struct AppState {
     client: Client,
@@ -26,6 +27,8 @@ struct AppState {
     config_dir: PathBuf,
     store: Store,
     trader: Trader,
+    /// Following the OKX account (sync.rs).
+    sync: sync::Syncer,
 }
 
 fn check(inst_id: &str, bar: &str) -> Result<(), String> {
@@ -124,13 +127,36 @@ fn trade_status(state: State<'_, AppState>) -> KeyStatus {
 
 /// Check the key on the account, then keep it (encrypted). Returns the account.
 #[tauri::command]
-async fn trade_set_keys(state: State<'_, AppState>, key: String, secret: String, passphrase: String, demo: bool) -> Result<Account, String> {
-    state.trader.set_keys(key, secret, passphrase, demo).await
+async fn trade_set_keys(app: AppHandle, state: State<'_, AppState>, key: String, secret: String, passphrase: String, demo: bool) -> Result<Account, String> {
+    let account = state.trader.set_keys(key, secret, passphrase, demo).await?;
+    state.sync.restart(&app); // follow the new key's account
+    Ok(account)
 }
 
 #[tauri::command]
-fn trade_clear_keys(state: State<'_, AppState>) -> Result<(), String> {
-    state.trader.clear()
+fn trade_clear_keys(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.trader.clear()?;
+    state.sync.restart(&app);
+    Ok(())
+}
+
+/// Follow the OKX account (positions, their stop-loss / take-profit orders, order changes: "okx_sync"
+/// events), or stop.
+#[tauri::command]
+fn trade_sync(app: AppHandle, state: State<'_, AppState>, on: bool) {
+    state.sync.set(&app, on);
+}
+
+/// Closed positions of a symbol, newest first: how one that was open ended.
+#[tauri::command]
+async fn trade_closed_positions(state: State<'_, AppState>, inst_id: String) -> Result<Vec<ClosedPos>, String> {
+    state.trader.closed_positions(&inst_id).await
+}
+
+/// Move the trigger prices of a stop-loss / take-profit on OKX (only the prices).
+#[tauri::command]
+async fn trade_amend_stops(state: State<'_, AppState>, req: AmendReq) -> Result<(), String> {
+    state.trader.amend_stops(req).await
 }
 
 /// USDT equity, what is free, the position mode.
@@ -205,7 +231,7 @@ pub fn run() {
             // outside the store folder: the page can't read it back
             let trader = Trader::new(data_dir.join("okx-api.bin"));
             let prefs = prefs::load(&config_dir);
-            app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store, trader });
+            app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store, trader, sync: sync::Syncer::default() });
             window::create(app.handle(), prefs)?;
             Ok(())
         })
@@ -224,6 +250,9 @@ pub fn run() {
             trade_place,
             trade_order,
             trade_cancel,
+            trade_sync,
+            trade_closed_positions,
+            trade_amend_stops,
             gpu_pref,
             set_gpu_pref,
             open_tradingview

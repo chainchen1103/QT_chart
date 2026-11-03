@@ -18,7 +18,7 @@
 import { alertNotify, gpuPref, onCandle, onStatus, openTradingView, setGpuPref, setStreams, type CandleEvent } from "./core/api.ts";
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
-import { readJson, readRaw, writeJson } from "./core/storage.ts";
+import { keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
 import { findTf } from "./core/timeframes.ts";
 import { Backdrop } from "./chart/backdrop.ts";
 import { DrawingHistory } from "./drawings/history.ts";
@@ -29,12 +29,14 @@ import { renderAlertOptions, toggleAlertManager, type AlertUi } from "./alerts/p
 import { AlertService } from "./alerts/service.ts";
 import { toggleLayoutPicker } from "./layout/picker.ts";
 import { TradeAccount } from "./trade/account.ts";
-import { paintAccountButton, renderAccount } from "./trade/panel.ts";
+import { paintAccountButton, renderAccount, renderSync } from "./trade/panel.ts";
 import { Trading } from "./trade/trading.ts";
 import { TabBar } from "./layout/tabbar.ts";
 import { Workspace } from "./layout/workspace.ts";
 import { TOOL_INFO } from "./settings/model.ts";
-import { loadBgImage, loadDrawings, loadSettings, saveBgImage } from "./settings/store.ts";
+import { loadBgImage, loadDrawings, loadSettings, saveBgImage, saveDrawings } from "./settings/store.ts";
+import type { Drawing } from "./settings/model.ts";
+import { AccountSync } from "./trade/sync.ts";
 import { setupMenus } from "./ui/menus.ts";
 import { togglePineManager, type PineUi } from "./ui/panels/pine.ts";
 import { renderAppearance, type AppearanceIo } from "./ui/panels/appearance.ts";
@@ -105,6 +107,28 @@ const trading = new Trading({
   prefs: settings.orderPrefs,
   button: $("account-btn"),
   note: (text) => status.note(text),
+  filled: (instId) => sync.orderFilled(instId),
+});
+const drawingHistory = new DrawingHistory();
+/** Change a symbol's saved drawings from outside the charts (OKX): saved, not a step to undo, shown at once. */
+function editDrawings(instId: string, edit: (list: Drawing[]) => boolean) {
+  const list = loadDrawings(instId);
+  if (!edit(list)) return;
+  saveDrawings(instId, list);
+  drawingHistory.quiet(instId, list);
+  alerts.drawingsChanged(instId, list);
+  for (const p of workspace.charts()) if (p.feed.instId === instId) p.reloadDrawings();
+}
+const sync: AccountSync = new AccountSync({
+  acct: account,
+  catalog,
+  setting: settings.okxSync,
+  editDrawings,
+  symbols: () => keysWith("drawings.").map((k) => k.slice("drawings.".length)),
+  note: (text) => status.note(text),
+  redraw: () => {
+    for (const p of workspace.charts()) p.drawings.redraw();
+  },
 });
 
 // ----------------------------------------------------------------------------- toolbars and windows
@@ -137,6 +161,8 @@ function applyAppearance() {
 }
 
 // ----------------------------------------------------------------------------- the settings window
+const accountSection = renderAccount(account, settings.position);
+const syncSection = renderSync(sync, settings.okxSync, account);
 const settingsIo: SettingsIo = {
   appearance: renderAppearance(appearanceIo),
   labels: renderScaleLabels(settings.labels),
@@ -151,7 +177,10 @@ const settingsIo: SettingsIo = {
   bars: settings.bars,
   alerts: renderAlertOptions(alerts),
   position: renderPosition({ get: () => settings.position.get(), set: (v) => settings.position.set(v), apiEquity: () => account.equity() }),
-  account: renderAccount(account, settings.position),
+  account: (body, rerender) => {
+    accountSection(body, rerender);
+    if (account.keys.set) syncSection(body, rerender);
+  },
   performance: performanceSection({ gpu: gpuPref, setGpu: setGpuPref }, false),
   openTradingView: () => void openTradingView().catch((err) => status.error(String(err))),
 };
@@ -175,7 +204,7 @@ const tabBar = new TabBar({
 const workspace: Workspace = new Workspace(
   {
     grid: $("grid"),
-    shared: { catalog, settings, alerts, status, tools, trading, history: new DrawingHistory(), appearanceAt: () => openSettingsAt("appearance") },
+    shared: { catalog, settings, alerts, status, tools, trading, history: drawingHistory, sync, appearanceAt: () => openSettingsAt("appearance") },
     hub,
     inUseChanged: (p) => {
       toolbar.paintTimeframes();
@@ -264,10 +293,11 @@ async function start() {
   await onStatus((s) => status.setStream(s));
   await onCandle(route);
   alerts.start();
-  void account.start();
+  void account.start().then(() => sync.start());
   try {
     await catalog.load();
     workspace.catalogReady();
+    sync.catalogReady();
   } catch (e) {
     status.error(`讀不到幣種清單：${e}`);
   }

@@ -22,6 +22,7 @@ import { PaneMenus } from "../ui/menus.ts";
 import { closePopover } from "../ui/popover.ts";
 import type { StatusBar } from "../ui/statusbar.ts";
 import type { Tools } from "../ui/tools.ts";
+import type { AccountSync } from "../trade/sync.ts";
 import type { OrderTarget, Trading } from "../trade/trading.ts";
 import type { Catalog } from "./catalog.ts";
 import { MarketFeed, MAX_BARS } from "./feed.ts";
@@ -39,6 +40,8 @@ export type PaneShared = {
   trading: Trading;
   /** Undo and redo of the drawings, for each symbol (all charts of a symbol share its steps). */
   history: DrawingHistory;
+  /** The OKX account as it is (positions and their stops), matched to the drawings. */
+  sync: AccountSync;
   /** Open the appearance window at a screen point. */
   appearanceAt(x: number, y: number): void;
 };
@@ -223,6 +226,11 @@ export class ChartPane {
       },
       undo: () => this.stepHistory(true),
       redo: () => this.stepHistory(false),
+      isLive: (d) => shared.sync.isLive(feed.instId, d),
+      live: (d) => shared.sync.liveInfo(feed.instId, d),
+      stopsEdited: (d, before, x, y) => {
+        shared.sync.confirmEdit(feed.instId, d, before, x, y, feed.fmtPrice, () => this.drawings.setStops(d.id, before));
+      },
       toolChanged: (t) => {
         if (inUse()) shared.tools.paintTools(t);
       },
@@ -349,9 +357,10 @@ export class ChartPane {
     this.ev.priced(this);
   }
 
-  /** Another chart of the same symbol changed the drawings: show the saved ones. */
+  /** Another chart of the same symbol (or OKX) changed the drawings: show the saved ones, keeping what is
+   *  selected or dragged. */
   reloadDrawings() {
-    if (this.drawingsFor) this.drawings.setDrawings(loadDrawings(this.drawingsFor));
+    if (this.drawingsFor) this.drawings.setDrawings(loadDrawings(this.drawingsFor), true);
   }
   redrawAlerts() {
     this.alertLayer.redraw();

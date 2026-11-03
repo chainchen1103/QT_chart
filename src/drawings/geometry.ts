@@ -111,6 +111,10 @@ export function screenAngle(ax: number, ay: number, bx: number, by: number): num
 /** Long when the stop is under the entry, short when above. */
 export const positionDir = (entry: number, stop: number): 1 | -1 => (stop <= entry ? 1 : -1);
 
+/** A position's direction: its own when it has one (an order was placed from it, or it comes from OKX: its stop
+ *  may then be past the entry, a profit locked in), else from where the stop is. */
+export const posDir = (d: { a: Anchor; b: Anchor; dir?: 1 | -1 }): 1 | -1 => d.dir ?? positionDir(d.a.p, d.b.p);
+
 /** Keep a take-profit on the profit side of the entry (at the entry at worst). */
 export function clampTarget(entry: number, stop: number, target: number): number {
   return positionDir(entry, stop) === 1 ? Math.max(target, entry) : Math.min(target, entry);

@@ -7,8 +7,11 @@
 //!
 //! What the commands can do is narrow on purpose: read the USDT equity and the account's position mode, open a
 //! USDT perpetual position with a limit, post-only or market order that always carries its stop-loss (and the
-//! take-profit when given), look an order up, cancel one. No withdrawals, transfers or closing orders.
-//! Every request is signed here (HMAC-SHA256 over time + method + path + body), with OKX's server time.
+//! take-profit when given), look an order up, cancel one, read the open positions, their stop-loss and
+//! take-profit orders and the closed positions (sync.rs follows them), and move the trigger prices of a
+//! stop-loss / take-profit (nothing else about it: not its size). No withdrawals, transfers or closing orders.
+//! Every request is signed here (HMAC-SHA256 over time + method + path + body), with OKX's server time; the
+//! private WebSocket's login is signed here too, so the secret never leaves this file.
 
 use crate::okx;
 use base64::Engine as _;
@@ -71,6 +74,10 @@ pub struct OrderReq {
     /// Stop-loss trigger price (filled at market when hit). Always required.
     pub sl: String,
     pub cl_ord_id: String,
+    /// The id the stop-loss / take-profit gets (attachAlgoClOrdId): OKX gives it to their order once this one
+    /// fills, so they can be found and moved later.
+    #[serde(default)]
+    pub algo_cl_ord_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -92,6 +99,49 @@ pub struct OrderInfo {
     pub ord_type: String,
     pub side: String,
     pub c_time: String,
+    /// When it last filled (ms), and when it last changed.
+    pub fill_time: String,
+    pub u_time: String,
+}
+
+/// Moving the stop-loss and / or take-profit of an order's TP/SL. `kind` "algo": the TP/SL order itself (its
+/// order filled), found by algo_id or algo_cl_ord_id; "attached": the TP/SL still attached to order ord_id (not
+/// filled yet), found by algo_cl_ord_id (attachAlgoClOrdId) or algo_id (attachAlgoId).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmendReq {
+    pub inst_id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub ord_id: Option<String>,
+    #[serde(default)]
+    pub algo_id: Option<String>,
+    #[serde(default)]
+    pub algo_cl_ord_id: Option<String>,
+    /// New trigger prices (filled at market when hit); None leaves that one as it is.
+    #[serde(default)]
+    pub sl: Option<String>,
+    #[serde(default)]
+    pub tp: Option<String>,
+}
+
+/// A closed position (OKX's position history).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPos {
+    pub inst_id: String,
+    pub pos_id: String,
+    /// "long" or "short".
+    pub direction: String,
+    /// Opened and last changed (closed), ms.
+    pub c_time: i64,
+    pub u_time: i64,
+    pub open_avg_px: f64,
+    pub close_avg_px: f64,
+    /// Realized profit and loss (U), fees and funding included.
+    pub realized_pnl: f64,
+    /// OKX's close type: 1 partly closed, 2 closed, 3 liquidated, 4 partly liquidated, 5 ADL.
+    pub kind: String,
 }
 
 const NO_KEY: &str = "還沒設定 OKX API";
@@ -127,6 +177,10 @@ impl Trader {
             .build()
             .expect("HTTP client");
         Self { file, keys: Mutex::new(None), offset: Mutex::new(None), http }
+    }
+
+    pub(crate) fn keys_set(&self) -> Option<bool> {
+        self.keys().map(|k| k.demo)
     }
 
     fn keys(&self) -> Option<Keys> {
@@ -226,6 +280,48 @@ impl Trader {
         }
     }
 
+    /// The private WebSocket's login message (signed with OKX's time), and whether the key is a demo one.
+    pub(crate) async fn ws_login(&self) -> Result<(Value, bool), String> {
+        let k = self.keys().ok_or(NO_KEY)?;
+        let ts = (self.now_ms().await / 1000).to_string();
+        let sig = sign(&k.secret, &format!("{ts}GET/users/self/verify"));
+        Ok((json!({"op": "login", "args": [{"apiKey": k.key, "passphrase": k.passphrase, "timestamp": ts, "sign": sig}]}), k.demo))
+    }
+
+    /// Open USDT perpetual positions (OKX's records, as they come).
+    pub(crate) async fn positions(&self) -> Result<Vec<Value>, String> {
+        let k = self.keys().ok_or(NO_KEY)?;
+        Ok(self.call(&k, "GET", "/api/v5/account/positions", "instType=SWAP", None).await?)
+    }
+
+    /// Stop-loss and take-profit orders waiting (conditional and OCO), as they come.
+    pub(crate) async fn algos(&self) -> Result<Vec<Value>, String> {
+        let k = self.keys().ok_or(NO_KEY)?;
+        let mut out = Vec::new();
+        for t in ["conditional", "oco"] {
+            out.extend(self.call(&k, "GET", "/api/v5/trade/orders-algo-pending", &format!("instType=SWAP&ordType={t}"), None).await?);
+        }
+        Ok(out)
+    }
+
+    /// Closed positions of one symbol, newest first.
+    pub async fn closed_positions(&self, inst_id: &str) -> Result<Vec<ClosedPos>, String> {
+        if !okx::valid_inst(inst_id) {
+            return Err("商品不對".into());
+        }
+        let k = self.keys().ok_or(NO_KEY)?;
+        let data = self.call(&k, "GET", "/api/v5/account/positions-history", &format!("instType=SWAP&instId={inst_id}&limit=50"), None).await?;
+        Ok(data.iter().filter_map(closed_pos).collect())
+    }
+
+    /// Move the trigger prices of a stop-loss / take-profit (see AmendReq).
+    pub async fn amend_stops(&self, r: AmendReq) -> Result<(), String> {
+        let (path, body) = r.request()?;
+        let k = self.keys().ok_or(NO_KEY)?;
+        self.call(&k, "POST", path, "", Some(&body)).await?;
+        Ok(())
+    }
+
     pub async fn order(&self, inst_id: &str, ord_id: &str) -> Result<OrderInfo, String> {
         check_ids(inst_id, ord_id)?;
         let k = self.keys().ok_or(NO_KEY)?;
@@ -279,7 +375,7 @@ impl Trader {
     }
 
     /// Now in OKX's time (requests more than 30 s off are refused), measured again every half hour.
-    async fn now_ms(&self) -> i64 {
+    pub(crate) async fn now_ms(&self) -> i64 {
         let local = || SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         if let Some((off, at)) = *self.offset.lock().unwrap_or_else(|e| e.into_inner()) {
             if at.elapsed() < Duration::from_secs(1800) {
@@ -322,7 +418,7 @@ impl OrderReq {
         if self.tp.as_deref().is_some_and(|t| !decimal(t)) {
             return Err("止盈價不對".into());
         }
-        if self.cl_ord_id.is_empty() || self.cl_ord_id.len() > 32 || !self.cl_ord_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        if !client_id(&self.cl_ord_id) || self.algo_cl_ord_id.as_deref().is_some_and(|a| !client_id(a)) {
             return Err("訂單編號不對".into());
         }
         if self.ord_type == "market" {
@@ -343,6 +439,9 @@ impl OrderReq {
 
     fn body(&self, pos_side: Option<&str>) -> Value {
         let mut algo = json!({"slTriggerPx": self.sl, "slOrdPx": "-1", "slTriggerPxType": "last"});
+        if let Some(a) = &self.algo_cl_ord_id {
+            algo["attachAlgoClOrdId"] = json!(a);
+        }
         if let Some(tp) = &self.tp {
             algo["tpTriggerPx"] = json!(tp);
             algo["tpOrdPx"] = json!("-1");
@@ -367,6 +466,89 @@ impl OrderReq {
         }
         b
     }
+}
+
+impl AmendReq {
+    /// Where it goes and what it says; only trigger prices change (taken at market when hit, as placed).
+    fn request(&self) -> Result<(&'static str, Value), String> {
+        if !okx::valid_inst(&self.inst_id) || !self.inst_id.ends_with("-USDT-SWAP") {
+            return Err(format!("只能改 USDT 永續合約的止損止盈：{}", self.inst_id));
+        }
+        if self.sl.is_none() && self.tp.is_none() {
+            return Err("沒有要改的止損或止盈".into());
+        }
+        if self.sl.as_deref().is_some_and(|v| !decimal(v)) || self.tp.as_deref().is_some_and(|v| !decimal(v)) {
+            return Err("止損或止盈價不對".into());
+        }
+        let algo_id = self.algo_id.as_deref().filter(|a| !a.is_empty());
+        let cl = self.algo_cl_ord_id.as_deref().filter(|a| !a.is_empty());
+        if algo_id.is_some_and(|a| a.len() > 32 || !a.chars().all(|c| c.is_ascii_digit())) || cl.is_some_and(|a| !client_id(a)) {
+            return Err("止損止盈單的編號不對".into());
+        }
+        let mut prices = serde_json::Map::new();
+        if let Some(sl) = &self.sl {
+            prices.insert("newSlTriggerPx".into(), json!(sl));
+            prices.insert("newSlOrdPx".into(), json!("-1"));
+        }
+        if let Some(tp) = &self.tp {
+            prices.insert("newTpTriggerPx".into(), json!(tp));
+            prices.insert("newTpOrdPx".into(), json!("-1"));
+        }
+        match self.kind.as_str() {
+            "algo" => {
+                let mut b = json!({"instId": self.inst_id});
+                match (algo_id, cl) {
+                    (Some(a), _) => b["algoId"] = json!(a),
+                    (None, Some(c)) => b["algoClOrdId"] = json!(c),
+                    _ => return Err("要指定止損止盈單".into()),
+                }
+                for (k, v) in prices {
+                    b[k] = v;
+                }
+                Ok(("/api/v5/trade/amend-algos", b))
+            }
+            "attached" => {
+                let ord_id = self.ord_id.as_deref().filter(|o| !o.is_empty() && o.len() <= 32 && o.chars().all(|c| c.is_ascii_digit()));
+                let ord_id = ord_id.ok_or("要指定訂單")?;
+                let mut algo = Value::Object(prices);
+                match (cl, algo_id) {
+                    (Some(c), _) => algo["attachAlgoClOrdId"] = json!(c),
+                    (None, Some(a)) => algo["attachAlgoId"] = json!(a),
+                    _ => return Err("要指定附帶的止損止盈".into()),
+                }
+                Ok(("/api/v5/trade/amend-order", json!({"instId": self.inst_id, "ordId": ord_id, "attachAlgoOrds": [algo]})))
+            }
+            _ => Err("不知道要改哪一種止損止盈".into()),
+        }
+    }
+}
+
+/// One record of OKX's position history.
+fn closed_pos(d: &Value) -> Option<ClosedPos> {
+    let s = |f: &str| d[f].as_str().unwrap_or("").to_string();
+    let n = |f: &str| d[f].as_str().and_then(|v| v.parse::<f64>().ok());
+    let t = |f: &str| d[f].as_str().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+    let direction = match (s("direction").as_str(), s("posSide").as_str()) {
+        ("long", _) | (_, "long") => "long",
+        ("short", _) | (_, "short") => "short",
+        _ => return None,
+    };
+    Some(ClosedPos {
+        inst_id: s("instId"),
+        pos_id: s("posId"),
+        direction: direction.into(),
+        c_time: t("cTime"),
+        u_time: t("uTime"),
+        open_avg_px: n("openAvgPx").unwrap_or(0.0),
+        close_avg_px: n("closeAvgPx").unwrap_or(0.0),
+        realized_pnl: n("realizedPnl").or_else(|| n("pnl")).unwrap_or(0.0),
+        kind: s("type"),
+    })
+}
+
+/// A client-made id: letters and digits, up to 32.
+fn client_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// A plain positive decimal such as "0.42" or "78110.2".
@@ -550,6 +732,7 @@ mod tests {
             tp: Some("79000".into()),
             sl: "77500".into(),
             cl_ord_id: "qtc1abc".into(),
+            algo_cl_ord_id: Some("qtc1abcs".into()),
         }
     }
 
@@ -591,12 +774,55 @@ mod tests {
         assert_eq!(b["attachAlgoOrds"][0]["slTriggerPx"], "77500");
         assert_eq!(b["attachAlgoOrds"][0]["slOrdPx"], "-1");
         assert_eq!(b["attachAlgoOrds"][0]["tpTriggerPx"], "79000");
+        assert_eq!(b["attachAlgoOrds"][0]["attachAlgoClOrdId"], "qtc1abcs");
+        let mut bad = req();
+        bad.algo_cl_ord_id = Some("qtc-1".into());
+        assert!(bad.check().is_err());
         let mut m = req();
         (m.ord_type, m.tp) = ("market".into(), None);
         let b = m.body(None);
         assert!(b.get("px").is_none() && b.get("posSide").is_none());
         assert!(b["attachAlgoOrds"][0].get("tpTriggerPx").is_none());
         assert_eq!(explain("50110", "Invalid IP"), "這台電腦的 IP 不在這組 API 的白名單裡（OKX 50110：Invalid IP）");
+    }
+
+    #[test]
+    fn stop_moves() {
+        let amend = |kind: &str, ord: Option<&str>, id: Option<&str>, cl: Option<&str>, sl: Option<&str>, tp: Option<&str>| AmendReq {
+            inst_id: "BTC-USDT-SWAP".into(),
+            kind: kind.into(),
+            ord_id: ord.map(Into::into),
+            algo_id: id.map(Into::into),
+            algo_cl_ord_id: cl.map(Into::into),
+            sl: sl.map(Into::into),
+            tp: tp.map(Into::into),
+        };
+        // a TP/SL order of its own (its order filled), by the id we gave it
+        let (path, b) = amend("algo", None, None, Some("qtc1abcs"), Some("77800.5"), Some("80000")).request().unwrap();
+        assert_eq!(path, "/api/v5/trade/amend-algos");
+        assert_eq!(b, json!({"instId": "BTC-USDT-SWAP", "algoClOrdId": "qtc1abcs", "newSlTriggerPx": "77800.5", "newSlOrdPx": "-1", "newTpTriggerPx": "80000", "newTpOrdPx": "-1"}));
+        // by OKX's id, only the stop
+        let (_, b) = amend("algo", None, Some("1234567"), None, Some("77800"), None).request().unwrap();
+        assert_eq!(b["algoId"], "1234567");
+        assert!(b.get("newTpTriggerPx").is_none() && b.get("algoClOrdId").is_none());
+        // still attached to an order that hasn't filled
+        let (path, b) = amend("attached", Some("700000000000000001"), None, Some("qtc1abcs"), Some("77800"), None).request().unwrap();
+        assert_eq!(path, "/api/v5/trade/amend-order");
+        assert_eq!(b, json!({"instId": "BTC-USDT-SWAP", "ordId": "700000000000000001", "attachAlgoOrds": [{"attachAlgoClOrdId": "qtc1abcs", "newSlTriggerPx": "77800", "newSlOrdPx": "-1"}]}));
+        // refused: nothing to change, a bad price, no id, another market, an id with odd characters
+        assert!(amend("algo", None, Some("1"), None, None, None).request().is_err());
+        assert!(amend("algo", None, Some("1"), None, Some("-5"), None).request().is_err());
+        assert!(amend("algo", None, None, None, Some("5"), None).request().is_err());
+        assert!(amend("attached", None, None, Some("qtc1"), Some("5"), None).request().is_err());
+        assert!(amend("algo", None, None, Some("a b"), Some("5"), None).request().is_err());
+        let mut spot = amend("algo", None, Some("1"), None, Some("5"), None);
+        spot.inst_id = "BTC-USDT".into();
+        assert!(spot.request().is_err());
+        // position history records
+        let h = json!({"instId": "ETH-USDT-SWAP", "posId": "42", "direction": "long", "posSide": "net", "cTime": "1793426400000",
+            "uTime": "1793430000000", "openAvgPx": "2243.97", "closeAvgPx": "2260.5", "realizedPnl": "3.2", "type": "2"});
+        let c = closed_pos(&h).unwrap();
+        assert_eq!((c.direction.as_str(), c.c_time, c.close_avg_px, c.realized_pnl, c.kind.as_str()), ("long", 1_793_426_400_000, 2260.5, 3.2, "2"));
     }
 
     #[test]

@@ -65,10 +65,41 @@ export type OrderReq = {
   tp: string | null;
   sl: string; // always
   clOrdId: string;
+  /** The id its stop-loss / take-profit gets: OKX gives it to their order once this one fills. */
+  algoClOrdId: string | null;
 };
 export type Placed = { ordId: string; clOrdId: string };
 export type OrderInfo = {
   state: string; px: string; sz: string; avgPx: string; accFillSz: string; ordType: string; side: string; cTime: string;
+  fillTime: string; uTime: string;
+};
+
+// ----------------------------------------------------------------------------- the account as it is (src-tauri/src/sync.rs)
+/** An open position. posSide "net": one per symbol, pos below 0 is a short. Times in ms. */
+export type SyncPos = {
+  instId: string; posId: string; posSide: string; pos: number; avgPx: number; upl: number; markPx: number;
+  liqPx: number | null; lever: number; mgnMode: string; cTime: number; uTime: number;
+};
+/** A stop-loss / take-profit order waiting; `side` is the side it closes with; sz 0 with closeFraction (all). */
+export type SyncAlgo = {
+  instId: string; algoId: string; algoClOrdId: string; ordType: string; side: string; posSide: string; sz: number;
+  closeFraction: boolean; sl: number | null; tp: number | null; cTime: number;
+};
+/** An order that changed; sl / tp: its attached stop-loss and take-profit as they stand. */
+export type SyncOrder = {
+  instId: string; ordId: string; clOrdId: string; state: string; side: string; sz: number; accFillSz: number;
+  avgPx: number | null; fillTime: number; uTime: number; sl: number | null; tp: number | null; attachAlgoClOrdId: string;
+};
+export type SyncEvent = { demo: boolean; source: "rest" | "ws"; positions: SyncPos[]; algos: SyncAlgo[]; orders: SyncOrder[] };
+export type SyncStatus = { state: "off" | "connecting" | "ws" | "polling" | "error"; detail: string };
+/** A closed position (OKX's position history); times in ms. */
+export type ClosedPos = {
+  instId: string; posId: string; direction: "long" | "short"; cTime: number; uTime: number;
+  openAvgPx: number; closeAvgPx: number; realizedPnl: number; kind: string;
+};
+/** Move a stop-loss / take-profit: its own order ("algo", its order filled) or still attached to ordId. */
+export type AmendReq = {
+  instId: string; kind: "algo" | "attached"; ordId?: string; algoId?: string; algoClOrdId?: string; sl?: string; tp?: string;
 };
 export const tradeStatus = () => invoke<KeyStatus>("trade_status");
 export const tradeSetKeys = (key: string, secret: string, passphrase: string, demo: boolean) =>
@@ -78,6 +109,13 @@ export const tradeAccount = () => invoke<Account>("trade_account");
 export const tradePlace = (order: OrderReq) => invoke<Placed>("trade_place", { order });
 export const tradeOrder = (instId: string, ordId: string) => invoke<OrderInfo>("trade_order", { instId, ordId });
 export const tradeCancel = (instId: string, ordId: string) => invoke<void>("trade_cancel", { instId, ordId });
+/** Follow the account ("okx_sync" events) or stop. */
+export const tradeSync = (on: boolean) => invoke<void>("trade_sync", { on });
+export const tradeClosedPositions = (instId: string) => invoke<ClosedPos[]>("trade_closed_positions", { instId });
+export const tradeAmendStops = (req: AmendReq) => invoke<void>("trade_amend_stops", { req });
+export const onSync = (cb: (e: SyncEvent) => void): Promise<UnlistenFn> => listen<SyncEvent>("okx_sync", (e) => cb(e.payload));
+export const onSyncStatus = (cb: (s: SyncStatus) => void): Promise<UnlistenFn> =>
+  listen<SyncStatus>("okx_sync_status", (e) => cb(e.payload));
 
 /** Whether the web view may use the graphics card; a change takes effect at the next start. */
 export const gpuPref = () => invoke<boolean>("gpu_pref");

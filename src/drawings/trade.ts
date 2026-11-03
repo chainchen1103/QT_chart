@@ -26,8 +26,10 @@ export type TradePlan = {
   rr: number;
 };
 
-export function planTrade(entry: number, stop: number, target: number, capital: number, risk: number, mode: RiskMode, leverage: number): TradePlan {
-  const dir: 1 | -1 = stop <= entry ? 1 : -1;
+export function planTrade(
+  entry: number, stop: number, target: number, capital: number, risk: number, mode: RiskMode, leverage: number, side?: 1 | -1,
+): TradePlan {
+  const dir: 1 | -1 = side ?? (stop <= entry ? 1 : -1);
   const dist = Math.abs(entry - stop);
   const wanted = Math.max(0, mode === "pct" ? (capital * risk) / 100 : risk);
   let qty = dist > 0 ? wanted / dist : 0;
@@ -56,8 +58,10 @@ export function planTrade(entry: number, stop: number, target: number, capital: 
 export type TradeStatus = "pending" | "unfilled" | "open" | "tp" | "sl" | "expired" | "nodata";
 export type TradeOutcome = { status: TradeStatus; exit: number | null; exitT: number | null };
 
-export function settleTrade(bars: Candle[], barSec: number, entryT: number, endT: number, entry: number, stop: number, target: number): TradeOutcome {
-  const dir = stop <= entry ? 1 : -1;
+export function settleTrade(
+  bars: Candle[], barSec: number, entryT: number, endT: number, entry: number, stop: number, target: number, side?: 1 | -1,
+): TradeOutcome {
+  const dir = side ?? (stop <= entry ? 1 : -1);
   if (!bars.length || entryT < bars[0].time) return { status: "nodata", exit: null, exitT: null };
   const ended = bars[bars.length - 1].time > endT; // the bars have moved past the end of the box
   let filled = false;
@@ -89,10 +93,14 @@ export type PositionPrices = { entry: number; stop: number; target: number };
  * of the entry and the take-profit on the other (below and above it for a long, the other way round for a
  * short).
  */
-export function checkPrices(p: PositionPrices): string | null {
+export function checkPrices(p: PositionPrices, dir?: 1 | -1): string | null {
   if (![p.entry, p.stop, p.target].every((v) => Number.isFinite(v) && v > 0)) return "價格要是大於 0 的數字";
   if (p.stop === p.entry) return "止損不能等於進場價";
   if (p.target === p.entry) return "止盈不能等於進場價";
+  if (dir != null) {
+    // its direction is its own (on OKX): the stop may be past the entry (a profit locked in), the take-profit not
+    return (p.target - p.entry) * dir > 0 ? null : dir === 1 ? "多單的止盈要在進場價上面" : "空單的止盈要在進場價下面";
+  }
   if ((p.stop < p.entry) === (p.target < p.entry)) return "止損和止盈要在進場價的兩邊：多單止損在下、止盈在上，空單相反";
   return null;
 }
@@ -111,6 +119,8 @@ export type PositionInput = {
   /** Starts from the default capital whatever came before (still running while the default is the
    *  trading account's real equity: earlier positions on the chart are only what-ifs). */
   fresh?: boolean;
+  /** Its own direction (see posDir); else from where the stop is. */
+  dir?: 1 | -1;
 };
 /**
  * A position built up by adds (scaling in): same direction, each add filled while the whole position was
@@ -155,7 +165,7 @@ export type PositionResult = {
   scale: ScaleIn | null;
 };
 
-const sideOf = (p: PositionInput): 1 | -1 => (p.stop <= p.entry ? 1 : -1);
+const sideOf = (p: PositionInput): 1 | -1 => p.dir ?? (p.stop <= p.entry ? 1 : -1);
 
 /** Index of the bar that holds time t (or the first one after it). */
 function barAt(bars: Candle[], barSec: number, t: number): number {
@@ -236,8 +246,8 @@ type Whole = { qty: number; notional: number; avg: number };
  * before counts with its profit (or loss) at that stop. Never below 0, and no more than the capital can carry
  * at the add's leverage together with what is open.
  */
-export function addPlan(w: Whole, p: Pick<PositionInput, "entry" | "stop" | "target" | "risk" | "riskMode" | "leverage">, capital: number): { plan: TradePlan; full: boolean } {
-  const dir: 1 | -1 = p.stop <= p.entry ? 1 : -1;
+export function addPlan(w: Whole, p: Pick<PositionInput, "entry" | "stop" | "target" | "risk" | "riskMode" | "leverage" | "dir">, capital: number): { plan: TradePlan; full: boolean } {
+  const dir: 1 | -1 = p.dir ?? (p.stop <= p.entry ? 1 : -1);
   const dist = Math.abs(p.entry - p.stop);
   const budget = Math.max(0, p.riskMode === "pct" ? (capital * p.risk) / 100 : p.risk);
   const locked = w.qty * (p.stop - w.avg) * dir;
@@ -315,7 +325,7 @@ export function chainPositions(
   for (const p of sorted) {
     if (fills.get(p.id) !== -1) continue;
     const g = openNow(sideOf(p));
-    if (g && settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target).status === "pending") waiting.set(p.id, g);
+    if (g && settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target, p.dir).status === "pending") waiting.set(p.id, g);
   }
 
   // sizes and capital, in entry-time order of what stands on its own
@@ -335,8 +345,8 @@ export function chainPositions(
     if (u.p) {
       const p = u.p;
       const { auto, chained, capital } = startCapital(p);
-      const plan = planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage);
-      const outcome = settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target);
+      const plan = planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir);
+      const outcome = settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target, p.dir);
       out.set(p.id, { capital, auto, chained, plan, outcome, pnl: 0, endCapital: capital, scale: null });
       prevEnd = capital;
       continue;
@@ -347,7 +357,8 @@ export function chainPositions(
     let w: Whole = { qty: 0, notional: 0, avg: base.entry };
     const parts = g.members.map(({ p }, j) => {
       const own = p.capital ?? capital;
-      const { plan, full } = j === 0 ? { plan: planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage), full: false } : addPlan(w, p, own);
+      const { plan, full } =
+        j === 0 ? { plan: planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir), full: false } : addPlan(w, p, own);
       w = grow(w, plan.qty, p.entry);
       return { p, own, plan, full };
     });

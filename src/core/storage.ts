@@ -93,6 +93,14 @@ function localSet(key: string, v: string | null): boolean {
   }
 }
 
+/** The saved keys that start with `prefix` (e.g. "drawings."). */
+export function keysWith(prefix: string): string[] {
+  if (files) return [...cache.keys()].filter((k) => k.startsWith(prefix));
+  const out: string[] = [];
+  for (const [k] of localEntries()) if (k.startsWith(PREFIX + prefix)) out.push(k.slice(PREFIX.length));
+  return out;
+}
+
 /** undefined when nothing (or nothing readable) is saved. */
 export function readJson(key: string): unknown {
   const s = files ? cache.get(key) ?? null : localGet(key);

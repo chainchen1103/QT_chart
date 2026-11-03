@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trade-sync"
+description = "Enables the trade_sync command without any pre-configured scope."
+commands.allow = ["trade_sync"]
+
+[[permission]]
+identifier = "deny-trade-sync"
+description = "Denies the trade_sync command without any pre-configured scope."
+commands.deny = ["trade_sync"]

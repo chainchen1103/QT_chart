@@ -4,7 +4,8 @@
 import type { Setting } from "../core/setting.ts";
 import { fmtClock, shortName } from "../core/format.ts";
 import { fmtMoney, type PositionResult } from "../drawings/trade.ts";
-import type { PositionDrawing, PositionOrder, PositionSettings } from "../settings/model.ts";
+import type { PositionDrawing, PositionOrder, PositionSettings, SyncSettings } from "../settings/model.ts";
+import type { AccountSync } from "./sync.ts";
 import { checkbox, el, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import type { TradeAccount } from "./account.ts";
@@ -84,6 +85,58 @@ export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, posi
   togglePopover(anchor, "below", "交易帳戶（OKX API）", renderAccount(acct, position));
 }
 
+const SYNC_TEXT: Record<string, string> = {
+  connecting: "連線中…",
+  ws: "即時（WebSocket）",
+  polling: "WebSocket 連不上，改成每 5 秒查一次",
+  error: "出了問題",
+  off: "關閉",
+};
+
+/** Following the OKX account on the charts: on / off, and how it is going. */
+export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, acct: TradeAccount): Render {
+  let following = false;
+  return (body, rerender) => {
+    if (!following) {
+      following = true;
+      const stop = sync.subscribe(() => rerender());
+      body.addEventListener(POPOVER_CLOSED, () => {
+        stop();
+        following = false; // the next time the window opens, follow again
+      }, { once: true });
+    }
+    body.append(el("div", "pop-section", "與 OKX 同步"));
+    const on = setting.get().on;
+    body.append(
+      labelled(
+        checkbox(on, "", (v) => {
+          setting.set({ on: v });
+          rerender();
+        }),
+        "與 OKX 同步持倉和止盈止損",
+        "OKX 的私人頻道（WebSocket）即時推送；連不上時每 5 秒用 REST 查一次",
+      ),
+    );
+    if (on) {
+      const st = sync.status;
+      const e = sync.state;
+      const what = !acct.keys.set
+        ? "還沒設定 API"
+        : `${SYNC_TEXT[st.state] ?? st.state}${st.state === "error" && st.detail ? `：${st.detail}` : ""}` +
+          (e ? `，${e.positions.length} 個持倉、${e.algos.length} 張止損止盈單` : "");
+      body.append(row(lbl("狀態"), what));
+    }
+    body.append(
+      el(
+        "div",
+        "pop-note",
+        "開著時：OKX 上的持倉（包括在 OKX App 開的）會畫在那個幣種的圖上，標實際數量、均價和未實現盈虧，平倉後留著標已實現盈虧；" +
+          "OKX 上改了止損、止盈，圖上跟著改；在圖上拖 OKX 持倉的止損、止盈，會先問要不要一起改 OKX；加倉單成交時，可以自動把前面那筆的止損、止盈移過去。",
+      ),
+    );
+  };
+}
+
 /** The account window's contents (also a section of the settings window). */
 export function renderAccount(acct: TradeAccount, position: Setting<PositionSettings>): Render {
   let following = false;
@@ -94,7 +147,10 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
       const stop = acct.subscribe(() => {
         if (acct.keys.set) rerender();
       });
-      body.addEventListener(POPOVER_CLOSED, () => stop(), { once: true });
+      body.addEventListener(POPOVER_CLOSED, () => {
+        stop();
+        following = false; // the next time the window opens, follow again
+      }, { once: true });
     }
     if (!acct.keys.set) {
       keyForm(body, acct, rerender);
@@ -181,6 +237,7 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
 
 // ----------------------------------------------------------------------------- the order window
 export function openOrderWindow(x: number, y: number, s: OrderSpot) {
+  let move = true; // an add: move the earlier stops once it fills (kept across redraws)
   popoverAt(x, y, `下單：${shortName(s.instId)}`, (body, rerender) => {
     const { acct, drawing: d, trade: t } = s;
     const prefs = s.prefs.get();
@@ -232,18 +289,28 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
     );
     for (const p of plan.problems) body.append(el("div", "pop-msg", p));
     for (const w of plan.warnings) body.append(el("div", "trade-warn", w));
-    if (t.scale && t.scale.step > 1) {
+    const isAdd = !!t.scale && t.scale.step > 1;
+    if (isAdd) {
+      const where = `${fp(Number(plan.sl))}${plan.tp != null ? `、${fp(Number(plan.tp))}` : ""}`;
       body.append(
-        el("div", "trade-warn", `這是加倉：這張單只開加倉的部分，止損、止盈只掛在這張上。OKX 上前面那筆的止損、止盈不會自動移到 ${fp(d.b.p)}、${fp(d.target)}，要自己去改`),
+        labelled(
+          checkbox(move, "", (v) => {
+            move = v;
+          }),
+          `成交後把前面那筆在 OKX 上的止損${plan.tp != null ? "、止盈" : ""}移到 ${where}`,
+          "加倉單成交時才移；那時 QT Chart 要開著，設定裡的「與 OKX 同步」要開",
+        ),
+        el("div", "pop-note", "這張單只開加倉的部分。成交時 QT Chart 要開著、「與 OKX 同步」要開才會自動移；沒勾的話請自己到 OKX 改。"),
       );
     }
-    body.append(el("div", "pop-note", "送出後在圖上移動這個倉位不會改到交易所的單；要改請先撤單再重新下。不含手續費。"));
+    body.append(el("div", "pop-note", "送出後在圖上拖止損、止盈，會問要不要一起改 OKX（要開「與 OKX 同步」）；進場價不能改，要改請撤單重下。不含手續費。"));
     const msg = el("div", "pop-msg");
     const go = textButton(`確認下單（${envText(demo)}）`, "text-btn " + (demo ? "primary" : "danger-solid"), async () => {
       go.disabled = true;
       go.textContent = "送出中…";
       msg.textContent = "";
       const clOrdId = newClOrdId();
+      const algoClOrdId = `qts${clOrdId.slice(3)}`; // its stop-loss / take-profit, to find them again
       try {
         const r = await acct.place({
           instId: s.instId,
@@ -256,6 +323,7 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
           tp: plan.tp,
           sl: plan.sl,
           clOrdId,
+          algoClOrdId,
         });
         s.record({
           ordId: r.ordId,
@@ -269,6 +337,10 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
           state: "live",
           avgPx: null,
           fillSz: 0,
+          sl: Number(plan.sl),
+          tp: plan.tp == null ? null : Number(plan.tp),
+          algoClOrdId,
+          ...(isAdd && move ? { moveOnFill: true } : {}),
         });
         closePopover();
         s.note(`已送出：${s.base} ${long ? "多單" : "空單"} ${ORD_TYPE_TEXT[prefs.ordType]} ${plan.sz} 張（訂單 ${r.ordId}）`);
@@ -358,13 +430,15 @@ export function openOrderDetails(x: number, y: number, s: OrderSpot) {
 }
 
 /** The order with what OKX says about it now. */
-export function withInfo(o: PositionOrder, info: { state: string; avgPx: string; accFillSz: string }): PositionOrder {
+export function withInfo(o: PositionOrder, info: { state: string; avgPx: string; accFillSz: string; fillTime?: string; uTime?: string }): PositionOrder {
   const avg = Number(info.avgPx);
   const fill = Number(info.accFillSz);
+  const fillT = Number(info.fillTime) || Number(info.uTime) || 0;
   return {
     ...o,
     state: STATE_TEXT[info.state] && info.state !== "missing" ? info.state : "unknown",
     avgPx: avg > 0 ? avg : o.avgPx,
     fillSz: Number.isFinite(fill) && fill >= 0 ? fill : o.fillSz,
+    ...(fill > 0 && fillT > 0 ? { fillT } : {}),
   };
 }

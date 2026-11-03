@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trade-closed-positions"
+description = "Enables the trade_closed_positions command without any pre-configured scope."
+commands.allow = ["trade_closed_positions"]
+
+[[permission]]
+identifier = "deny-trade-closed-positions"
+description = "Denies the trade_closed_positions command without any pre-configured scope."
+commands.deny = ["trade_closed_positions"]

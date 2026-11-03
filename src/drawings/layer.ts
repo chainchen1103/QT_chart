@@ -24,7 +24,8 @@ import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Candle } from "../core/api.ts";
 import { xOfLogical } from "../chart/coords.ts";
 import { chainPositions, type PositionPrices, type PositionResult } from "./trade.ts";
-import { clampTarget, indexToTime, lockAxis, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
+import type { LiveInfo } from "../trade/sync.ts";
+import { clampTarget, indexToTime, lockAxis, posDir, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
 import { ACCENT, paintOver, paintUnder, type HotSpot, type OrderTag, type PaintOptions } from "./paint.ts";
 import { isTyping } from "../ui/dom.ts";
@@ -85,6 +86,12 @@ export type DrawingHost = {
   /** Ctrl+Z, Ctrl+Y: the drawings one step back, or the step undone last again. */
   undo(): void;
   redo(): void;
+  /** A position on OKX now (its entry is OKX's; moving its stops asks to change OKX), and what it shows. */
+  isLive(d: PositionDrawing): boolean;
+  live(d: PositionDrawing): LiveInfo | null;
+  /** The stop-loss / take-profit of a position on OKX was moved on the chart (`before`: what they were), at
+   *  screen point (x, y): ask whether to change OKX. */
+  stopsEdited(d: PositionDrawing, before: { stop: number; target: number }, x: number, y: number): void;
   toolChanged(tool: Tool): void;
   /** The magnet is in effect right now (always on, or the hold key is down). */
   magnetActive(active: boolean): void;
@@ -94,7 +101,7 @@ export type DrawingHost = {
   hint(text: string | null): void;
 };
 
-type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor }; moved: boolean };
+type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor; target: number }; moved: boolean };
 type Mouse = { x: number; y: number; inside: boolean };
 type AxisLabel = { pos: number; text: string; color: string };
 
@@ -211,9 +218,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const items = this.draft ? [...this.list, this.draft] : this.list;
     const inputs = [];
     for (const d of items) {
-      if (d.kind !== "position") continue;
+      if (d.kind !== "position" || d.okx) continue;
       inputs.push({
-        id: d.id, entryT: d.a.t, endT: d.b.t, entry: d.a.p, stop: d.b.p, target: d.target,
+        id: d.id, entryT: d.a.t, endT: d.b.t, entry: d.a.p, stop: d.b.p, target: d.target, dir: d.dir,
         capital: d.capital, risk: d.risk, riskMode: d.riskMode, leverage: d.leverage,
         fresh: cap.live && d.b.t >= newest, // a position still running sizes from the real account
       });
@@ -236,14 +243,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.refreshHint();
     this.redraw();
   }
-  /** Show another symbol's drawings (does not save). */
-  setDrawings(list: Drawing[]) {
+  /** Show another symbol's drawings (does not save). `keep`: the same symbol's, changed elsewhere (another
+   *  chart, OKX): what is selected, hovered or dragged stays so when it is still there. */
+  setDrawings(list: Drawing[], keep = false) {
+    const has = (id: string | null) => keep && id != null && list.some((d) => d.id === id);
     this.list = list;
     this.draft = null;
     this.placing = null;
-    this.drag = null;
-    this.selected = null;
-    this.hovered = null;
+    if (!(this.drag && has(this.drag.id))) this.drag = null;
+    if (!has(this.selected)) this.selected = null;
+    if (!has(this.hovered)) this.hovered = null;
     this.refreshHint();
     this.redraw();
   }
@@ -258,8 +267,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   setOrder(id: string, order: PositionOrder | undefined) {
     const d = this.find(id);
     if (!d || d.kind !== "position") return;
-    if (order) d.order = order;
-    else delete d.order;
+    if (order) {
+      d.order = order;
+      d.dir ??= order.side === "buy" ? 1 : -1; // on OKX: the direction is the order's from now on
+    } else delete d.order;
     this.host.changed(this.list, false); // what the exchange did is not undone
     this.redraw();
   }
@@ -300,13 +311,32 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.redraw();
   }
   /** Entry, stop-loss and take-profit of one position, typed in its settings (checked there); saved at once. */
-  setPrices(id: string, p: PositionPrices) {
+  setPrices(id: string, p: PositionPrices, at?: { x: number; y: number }) {
     const d = this.find(id);
     if (!d || d.kind !== "position") return;
-    d.a = { ...d.a, p: p.entry };
+    const before = { stop: d.b.p, target: d.target };
+    const live = this.host.isLive(d);
+    if (!live && !d.okx) d.a = { ...d.a, p: p.entry }; // on OKX the entry is OKX's
     d.b = { ...d.b, p: p.stop };
     d.target = p.target;
     this.host.changed(this.list);
+    this.redraw();
+    if (live && (before.stop !== d.b.p || before.target !== d.target)) {
+      this.host.stopsEdited(d, before, at?.x ?? window.innerWidth / 2, at?.y ?? window.innerHeight / 3);
+    }
+  }
+  /** Is this position on OKX now (see DrawingHost.isLive)? */
+  isLive(id: string): boolean {
+    const d = this.find(id);
+    return d?.kind === "position" && (!!(d.okx && !d.okx.closed) || this.host.isLive(d));
+  }
+  /** Put a position's stops back (not sent to OKX), not as a step to undo. */
+  setStops(id: string, s: { stop: number; target: number }) {
+    const d = this.find(id);
+    if (!d || d.kind !== "position") return;
+    d.b = { ...d.b, p: s.stop };
+    d.target = s.target;
+    this.host.changed(this.list, false);
     this.redraw();
   }
   roundPrice(p: number): number {
@@ -362,6 +392,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       barSec: this.host.barSec(),
       trades: this.trades,
       orderTag: (d) => this.host.orderTag(d),
+      live: (d) => this.host.live(d),
     };
   }
 
@@ -626,7 +657,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const d = this.find(h.id);
     if (!d) return;
     this.selected = h.id;
-    this.drag = { ...h, x0: m.x, y0: m.y, start: this.pointAt(m.x, m.y, false), orig: { a: { ...d.a }, b: { ...d.b } }, moved: false };
+    const target = d.kind === "position" ? d.target : 0;
+    this.drag = { ...h, x0: m.x, y0: m.y, start: this.pointAt(m.x, m.y, false), orig: { a: { ...d.a }, b: { ...d.b }, target }, moved: false };
     this.host.el.classList.add("dragging");
     this.refreshHint();
     this.redraw();
@@ -655,10 +687,15 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private onUp(e: MouseEvent) {
     if (e.button !== 0) return;
     if (this.drag) {
-      const moved = this.drag.moved;
+      const dr = this.drag;
       this.drag = null;
       this.host.el.classList.remove("dragging");
-      if (moved) this.host.changed(this.list);
+      if (!dr.moved) return;
+      this.host.changed(this.list);
+      const d = this.find(dr.id);
+      if (d?.kind === "position" && (dr.part === "stop" || dr.part === "target") && this.host.isLive(d)) {
+        this.host.stopsEdited(d, { stop: dr.orig.b.p, target: dr.orig.target }, e.clientX, e.clientY);
+      }
       return;
     }
     if (this.tool !== "cursor" && this.draft && this.placing?.pressed) {
@@ -729,6 +766,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const d = this.find(dr.id);
     if (!d) return;
     if (!dr.moved && Math.hypot(m.x - dr.x0, m.y - dr.y0) < 3) return;
+    if (d.kind === "position" && (d.okx || this.host.isLive(d)) && dr.part !== "stop" && dr.part !== "target") {
+      this.host.hint("OKX 上的倉位：進場和位置照 OKX，只能拖止損、止盈（放開後確認才會改 OKX）");
+      return;
+    }
     dr.moved = true;
     if (dr.part === "body") {
       const cur = this.pointAt(m.x, m.y, false);
@@ -751,12 +792,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       let pt = this.pointAt(m.x, m.y, snap && !shift);
       if (!pt) return;
       if (shift && dr.part === "a") pt = lockAxis(m.x - dr.x0, m.y - dr.y0) === "h" ? { t: pt.t, p: dr.orig.a.p } : { t: dr.orig.a.t, p: pt.p };
-      const dir = positionDir(d.a.p, d.b.p);
+      const dir = posDir(d);
       const tiny = Math.abs(d.a.p) * 1e-6;
       if (dr.part === "stop") {
-        d.b.p = dir === 1 ? Math.min(pt.p, d.a.p - tiny) : Math.max(pt.p, d.a.p + tiny); // stays on its side
+        // stays on its side; with a direction of its own (on OKX) it may go past the entry (a profit locked in)
+        if (d.dir != null) d.b.p = Math.abs(pt.p - d.a.p) < tiny ? d.a.p - dir * tiny : pt.p;
+        else d.b.p = dir === 1 ? Math.min(pt.p, d.a.p - tiny) : Math.max(pt.p, d.a.p + tiny);
       } else if (dr.part === "target") {
-        d.target = clampTarget(d.a.p, d.b.p, pt.p);
+        d.target = dir === 1 ? Math.max(pt.p, d.a.p) : Math.min(pt.p, d.a.p); // on the profit side
       } else if (dr.part === "edge") {
         d.b.t = Math.max(pt.t, this.barsLater(d.a.t, 1));
       } else {
@@ -876,6 +919,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (info.points === 1) this.host.hint(`${info.name}：點一下放置；${snap}；Esc 取消`);
       else if (this.draft) this.host.hint(`${info.name}：點第二個點；${shift}；${snap}；Esc 取消`);
       else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${shift}；${snap}；Esc 取消`);
+    } else if (this.selected && this.isLive(this.selected)) {
+      this.host.hint("OKX 上的倉位：進場照 OKX；拖止損、止盈放開後會問要不要一起改 OKX；雙擊或右鍵看設定");
     } else if (this.selected && this.find(this.selected)?.kind === "position") {
       this.host.hint("拖曳進場、止損、止盈或右邊的把手調整，拖曳框移動；雙擊或右鍵直接輸入價格、資金和風險；Delete 刪除");
     } else if (this.selected) {

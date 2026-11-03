@@ -79,7 +79,9 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
       case "position": {
         const targetY = pr.y(d.target);
         if (targetY == null) continue;
-        const levels = rLevels(d.a.p, d.b.p, d.target, o.rLevels).flatMap((l) => {
+        // a stop past the entry (a profit locked in, on OKX) leaves no R to count in
+        const lossSide = d.dir == null || (d.a.p - d.b.p) * d.dir > 0;
+        const levels = (lossSide && !d.okx ? rLevels(d.a.p, d.b.p, d.target, o.rLevels) : []).flatMap((l) => {
           const y = pr.y(l.price);
           return y == null ? [] : [{ ...l, y }];
         });
@@ -98,6 +100,9 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
           { x: ax, y: targetY, part: "target" },
           { x: x1, y: ay, part: "edge" },
         ];
+        // drawn from OKX: only the stops OKX has can be moved, and none once it is closed
+        const k = d.okx;
+        if (k) g.handles = k.closed ? [] : g.handles.filter((h) => (h.part === "stop" && !k.noSl) || (h.part === "target" && !k.noTp));
         break;
       }
       case "hline":

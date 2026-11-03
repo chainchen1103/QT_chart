@@ -31,6 +31,8 @@ export type TradingDeps = {
   /** The account button (the API settings open next to it). */
   button: HTMLElement;
   note(text: string): void;
+  /** An order of ours filled (seen by asking OKX): an add may move the earlier stops now. */
+  filled?(instId: string): void;
 };
 
 /** 下單 is the primary action on the chart: off-white with dark text, like the primary buttons. */
@@ -112,6 +114,7 @@ export class Trading {
             if (!t.alive() || (next.state === o.state && next.fillSz === o.fillSz && next.avgPx === o.avgPx)) continue;
             t.setOrder(d.id, next);
             if (next.state === "filled") this.d.note(`${t.instId()} 訂單成交：${fmtCoins(next.sz)} 張${next.avgPx ? " @ " + t.fmtPrice(next.avgPx) : ""}`);
+            if (next.fillSz > 0 && next.moveOnFill && !next.moved) this.d.filled?.(t.instId());
           } catch (e) {
             if (isMissing(e) && t.alive()) t.setOrder(d.id, { ...o, state: "missing" }); // stop asking
             // anything else: asked again next round
