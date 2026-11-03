@@ -8,7 +8,8 @@
 // Mouse: listeners on the chart element in the capture phase, so a press on a drawing (or while placing one)
 // never reaches the chart and never starts a pan. Points are stored as (bar start time, price), so drawings
 // stay put across timeframes, history loading and restarts. With several charts on screen, only the chart in
-// use (active) takes the keys: Esc, Delete, the tool shortcuts.
+// use (active) takes the keys: Esc, Delete, the tool shortcuts, Ctrl+Z / Ctrl+Y (undo is history.ts, kept by the
+// charts for each symbol).
 
 import type {
   IChartApi,
@@ -77,8 +78,13 @@ export type DrawingHost = {
   orderClicked(d: PositionDrawing, x: number, y: number): void;
   /** The style a new drawing of this kind starts with. */
   styleFor(kind: Exclude<DrawKind, "fib" | "position">): LineStyle | RectStyle;
-  /** The list changed (added, moved, restyled, deleted): save it. */
-  changed(list: Drawing[]): void;
+  /** The list changed (added, moved, restyled, deleted): save it. `step`, for undo: the name of a change that
+   *  goes on (a color being picked: one step), or false for a change that is no step of its own (an order's
+   *  state). */
+  changed(list: Drawing[], step?: string | false): void;
+  /** Ctrl+Z, Ctrl+Y: the drawings one step back, or the step undone last again. */
+  undo(): void;
+  redo(): void;
   toolChanged(tool: Tool): void;
   /** The magnet is in effect right now (always on, or the hold key is down). */
   magnetActive(active: boolean): void;
@@ -254,7 +260,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!d || d.kind !== "position") return;
     if (order) d.order = order;
     else delete d.order;
-    this.host.changed(this.list);
+    this.host.changed(this.list, false); // what the exchange did is not undone
     this.redraw();
   }
   find(id: string): Drawing | undefined {
@@ -282,7 +288,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const d = this.find(id);
     if (!d || d.kind === "fib" || d.kind === "position") return;
     (d as { style: LineStyle | RectStyle }).style = style;
-    this.host.changed(this.list);
+    this.host.changed(this.list, `style:${id}`); // a color dragged across the picker is one step
     this.redraw();
   }
   /** Capital, risk or leverage of one position changed; saved at once. */
@@ -803,7 +809,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       return;
     }
     if (!down || !this.active || isTyping(document.activeElement)) return;
-    if (e.key === "Escape") {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === "KeyZ" || e.code === "KeyY")) {
+      e.preventDefault();
+      if (this.drag) return;
+      const redo = e.code === "KeyY" || e.shiftKey;
+      if (this.draft && !redo) this.cancel(); // the drawing being placed goes first
+      else if (redo) this.host.redo();
+      else this.host.undo();
+    } else if (e.key === "Escape") {
       this.cancel();
     } else if ((e.key === "Delete" || e.key === "Backspace") && this.selected && !this.drag) {
       e.preventDefault();

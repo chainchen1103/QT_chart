@@ -10,6 +10,7 @@ import { AlertLayer } from "../alerts/layer.ts";
 import type { TradeStage } from "../alerts/model.ts";
 import { drawingAlertSection, type AlertUi } from "../alerts/panel.ts";
 import type { AlertService } from "../alerts/service.ts";
+import type { DrawingHistory } from "../drawings/history.ts";
 import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
 import { PineHost } from "../indicators/pine/host.ts";
@@ -18,6 +19,7 @@ import { DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, type Drawing } from "../setting
 import { loadDrawings, saveDrawings, type Settings } from "../settings/store.ts";
 import { el } from "../ui/dom.ts";
 import { PaneMenus } from "../ui/menus.ts";
+import { closePopover } from "../ui/popover.ts";
 import type { StatusBar } from "../ui/statusbar.ts";
 import type { Tools } from "../ui/tools.ts";
 import type { OrderTarget, Trading } from "../trade/trading.ts";
@@ -35,6 +37,8 @@ export type PaneShared = {
   status: StatusBar;
   tools: Tools;
   trading: Trading;
+  /** Undo and redo of the drawings, for each symbol (all charts of a symbol share its steps). */
+  history: DrawingHistory;
   /** Open the appearance window at a screen point. */
   appearanceAt(x: number, y: number): void;
 };
@@ -209,12 +213,16 @@ export class ChartPane {
       orderTag: (d) => (feed.replaying ? null : shared.trading.tag(d, feed.bars[feed.bars.length - 1]?.time ?? null, feed.fmtPrice)),
       orderClicked: (d, x, y) => shared.trading.click(this.orders, d, x, y),
       styleFor: (k) => (k === "rect" ? settings.drawStyles.get().rect ?? DEFAULT_RECT_STYLE : settings.drawStyles.get()[k] ?? DEFAULT_LINE_STYLE),
-      changed: (list) => {
+      changed: (list, step) => {
         if (!this.drawingsFor) return;
         saveDrawings(this.drawingsFor, list);
+        if (step === false) shared.history.quiet(this.drawingsFor, list);
+        else shared.history.record(this.drawingsFor, list, step);
         shared.alerts.drawingsChanged(this.drawingsFor, list);
         events.drawingsChanged(this);
       },
+      undo: () => this.stepHistory(true),
+      redo: () => this.stepHistory(false),
       toolChanged: (t) => {
         if (inUse()) shared.tools.paintTools(t);
       },
@@ -372,6 +380,24 @@ export class ChartPane {
   }
 
   // ------------------------------------------------------------------- internals
+  /** Ctrl+Z (back) or Ctrl+Y on this chart: its symbol's drawings one step back, or forward again. */
+  private stepHistory(back: boolean) {
+    const id = this.drawingsFor;
+    if (!id) return;
+    const { history, status, alerts } = this.s;
+    const list = back ? history.undo(id) : history.redo(id);
+    if (!list) {
+      status.note(back ? "沒有可以還原的畫線操作" : "沒有可以重做的畫線操作");
+      return;
+    }
+    closePopover(); // a window open on a drawing would show it as it was
+    saveDrawings(id, list);
+    this.drawings.setDrawings(list);
+    alerts.drawingsChanged(id, list);
+    this.ev.drawingsChanged(this);
+    status.note(back ? "已還原上一步（Ctrl+Y 重做）" : "已重做");
+  }
+
   /** Where a position stands on the chart: an alert made after its entry waits for the exit. */
   private tradeStage(d: Drawing): TradeStage | null {
     if (d.kind !== "position") return null;
@@ -448,7 +474,9 @@ export class ChartPane {
       this.s.status.ok();
       if (this.drawingsFor !== this.feed.instId) {
         this.drawingsFor = this.feed.instId;
-        this.drawings.setDrawings(loadDrawings(this.feed.instId));
+        const list = loadDrawings(this.feed.instId);
+        this.s.history.start(this.feed.instId, list);
+        this.drawings.setDrawings(list);
       }
       this.showLatest();
       this.replay.sync(); // a replay carried over to this symbol or timeframe

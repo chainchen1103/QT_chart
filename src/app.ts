@@ -21,6 +21,7 @@ import { LiveHub } from "./core/live.ts";
 import { readJson, readRaw, writeJson } from "./core/storage.ts";
 import { findTf } from "./core/timeframes.ts";
 import { Backdrop } from "./chart/backdrop.ts";
+import { DrawingHistory } from "./drawings/history.ts";
 import { Catalog, DEFAULT_SYMBOL } from "./chart/catalog.ts";
 import { renderQuote } from "./chart/legend.ts";
 import { Notifier } from "./alerts/notify.ts";
@@ -174,7 +175,7 @@ const tabBar = new TabBar({
 const workspace: Workspace = new Workspace(
   {
     grid: $("grid"),
-    shared: { catalog, settings, alerts, status, tools, trading, appearanceAt: () => openSettingsAt("appearance") },
+    shared: { catalog, settings, alerts, status, tools, trading, history: new DrawingHistory(), appearanceAt: () => openSettingsAt("appearance") },
     hub,
     inUseChanged: (p) => {
       toolbar.paintTimeframes();
