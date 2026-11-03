@@ -178,7 +178,7 @@
 ## 執行（PowerShell 或命令提示字元都可以）
 開發模式（改程式會自動重新載入）：
 ```powershell
-cd D:\QT_Stratagy\qtchart
+cd D:\qtchart
 npm install
 npm run tauri dev
 ```
