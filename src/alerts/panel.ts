@@ -20,6 +20,8 @@ export type AlertUi = {
   fmtClock(t: number): string;
   /** Show this symbol on the chart. */
   open(instId: string): void;
+  /** Open the settings window at the alerts' sound and notifications. */
+  settings?(): void;
 };
 
 
@@ -162,15 +164,15 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     }
     body.append(lr);
 
-    const o = s.options();
-    const opts = el("div", "pop-row");
-    opts.append(
-      labelled(checkbox(o.sound, "", (v) => s.setOptions({ ...s.options(), sound: v })), "聲音"),
-      labelled(checkbox(o.system, "", (v) => s.setOptions({ ...s.options(), system: v })), "Windows 通知", "視窗在背景時，右下角跳出通知，工作列按鈕也會閃"),
-    );
-    body.append(opts);
     const foot = el("div", "pop-foot");
     foot.append(el("span", "pop-note", "程式開著（可以縮到最小）才會提醒"), el("span", "spacer"));
+    if (ui.settings) {
+      const go = ui.settings;
+      foot.append(textButton("聲音和通知…", "link-btn", () => {
+        closePopover();
+        go();
+      }, "在設定裡"));
+    }
     if (log.length) foot.append(textButton("清除紀錄", "link-btn", () => s.clearLog()));
     body.append(foot);
   });
@@ -316,3 +318,16 @@ export function drawingAlertSection(ui: AlertUi, d: Drawing, stage: () => TradeS
     body.append(row, row2);
   };
 }
+
+/** Sound and Windows notifications for every alert (a section of the settings window). */
+export function renderAlertOptions(service: AlertService): Render {
+  return (body) => {
+    const o = service.options();
+    body.append(
+      labelled(checkbox(o.sound, "", (v) => service.setOptions({ ...service.options(), sound: v })), "聲音", "提醒響的時候播放提示音"),
+      labelled(checkbox(o.system, "", (v) => service.setOptions({ ...service.options(), system: v })), "Windows 通知", "視窗在背景時，右下角跳出通知，工作列按鈕也會閃"),
+      el("div", "pop-note", "程式開著（可以縮到最小）才會提醒"),
+    );
+  };
+}
+

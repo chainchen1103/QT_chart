@@ -22,7 +22,8 @@ import type { StatusBar } from "../ui/statusbar.ts";
 import type { Tools } from "../ui/tools.ts";
 import type { OrderTarget, Trading } from "../trade/trading.ts";
 import type { Catalog } from "./catalog.ts";
-import { MarketFeed } from "./feed.ts";
+import { MarketFeed, MAX_BARS } from "./feed.ts";
+import { Replay } from "./replay.ts";
 import { Legend } from "./legend.ts";
 import { ScaleLabelLayer } from "./scalelabels.ts";
 import { ChartView } from "./view.ts";
@@ -51,6 +52,8 @@ export type PaneEvents = {
   drawingsChanged(p: ChartPane): void;
   /** Its zoom changed. */
   zoomed(p: ChartPane): void;
+  /** Bar replay started, ended, or started or stopped playing (the toolbar button). */
+  replay(p: ChartPane): void;
 };
 
 export class ChartPane {
@@ -65,6 +68,8 @@ export class ChartPane {
   readonly orders: OrderTarget;
   /** The Pine scripts on this chart. */
   readonly pine: PineHost;
+  /** Bar replay on this chart. */
+  readonly replay: Replay;
   private readonly overlays: Overlays;
   private readonly scaleLabels: ScaleLabelLayer;
   private readonly alertLayer: AlertLayer;
@@ -109,10 +114,12 @@ export class ChartPane {
       },
       cell.instId,
       cell.bar,
+      () => (settings.bars.get().unlimited ? Infinity : MAX_BARS),
     );
     const feed = this.feed;
     const daily = () => feed.tf.sec >= 86400;
-    this.view = new ChartView({ el: chartEl, appearance: settings.appearance, labels: settings.labels, daily });
+    const seconds = () => feed.tf.sec < 60;
+    this.view = new ChartView({ el: chartEl, appearance: settings.appearance, labels: settings.labels, daily, seconds });
     const { chart, candles } = this.view;
 
     this.overlays = new Overlays({
@@ -161,6 +168,7 @@ export class ChartPane {
       fmtPrice: feed.fmtPrice,
       labels: () => settings.labels.get(),
       colors: () => ({ up: settings.appearance.get().up, down: settings.appearance.get().down }),
+      live: () => !feed.replaying,
     });
     candles.attachPrimitive(this.scaleLabels);
 
@@ -190,12 +198,13 @@ export class ChartPane {
         return c ? [c.open, c.high, c.low, c.close] : null;
       },
       fmtPrice: feed.fmtPrice,
-      fmtTime: (t) => fmtChartTime(toChartTime(t), daily()),
+      fmtTime: (t) => fmtChartTime(toChartTime(t), daily(), seconds()),
       fib: () => settings.fib.get(),
       magnet: () => settings.magnet.get(),
       position: () => settings.position.get(),
       capital: () => shared.trading.capital(),
-      orderTag: (d) => shared.trading.tag(d, feed.bars[feed.bars.length - 1]?.time ?? null, feed.fmtPrice),
+      // no orders from a replay: its newest bar is in the past
+      orderTag: (d) => (feed.replaying ? null : shared.trading.tag(d, feed.bars[feed.bars.length - 1]?.time ?? null, feed.fmtPrice)),
       orderClicked: (d, x, y) => shared.trading.click(this.orders, d, x, y),
       styleFor: (k) => (k === "rect" ? settings.drawStyles.get().rect ?? DEFAULT_RECT_STYLE : settings.drawStyles.get()[k] ?? DEFAULT_LINE_STYLE),
       changed: (list) => {
@@ -226,6 +235,18 @@ export class ChartPane {
       positions: () => this.drawings.positions(),
       setOrder: (id, o) => this.drawings.setOrder(id, o),
     };
+
+    this.replay = new Replay({
+      el: this.el,
+      chart,
+      feed,
+      inUse,
+      hint: (text) => {
+        if (inUse()) shared.status.hint(text);
+      },
+      note: (text) => shared.status.note(text),
+      changed: () => events.replay(this),
+    });
 
     this.alertLayer = new AlertLayer({
       chart,
@@ -336,6 +357,7 @@ export class ChartPane {
     clearTimeout(this.zoomTimer);
     for (const off of this.offs) off();
     this.feed.dispose();
+    this.replay.destroy();
     this.overlays.destroy();
     this.pine.destroy();
     this.drawings.destroy();
@@ -403,7 +425,13 @@ export class ChartPane {
     this.ev.switched(this);
   }
 
-  private onLoaded(kind: "first" | "older" | "repair", added: number) {
+  private onLoaded(kind: "first" | "older" | "repair" | "replay", added: number) {
+    if (kind === "replay") {
+      this.redrawAll();
+      this.showLatest();
+      this.replay.sync();
+      return;
+    }
     if (kind === "older") {
       const range = this.view.chart.timeScale().getVisibleLogicalRange();
       this.redrawAll();
@@ -419,6 +447,7 @@ export class ChartPane {
         this.drawings.setDrawings(loadDrawings(this.feed.instId));
       }
       this.showLatest();
+      this.replay.sync(); // a replay carried over to this symbol or timeframe
     }
   }
 

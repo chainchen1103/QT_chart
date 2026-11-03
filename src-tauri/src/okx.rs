@@ -38,11 +38,9 @@ fn is_okx_ws(url: &str) -> bool {
     host == "okx.com" || host.ends_with(".okx.com")
 }
 
-/// Bar sizes the app offers (OKX names; daily and weekly bars on UTC boundaries).
-pub const BARS: &[&str] = &["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "6Hutc", "12Hutc", "1Dutc", "1Wutc"];
-
+/// A timeframe the app can show (bars.rs: OKX's own, or put together from them).
 pub fn valid_bar(bar: &str) -> bool {
-    BARS.contains(&bar)
+    crate::bars::spec(bar).is_some()
 }
 
 pub fn valid_inst(id: &str) -> bool {
@@ -272,7 +270,7 @@ impl Client {
     /// About `count` bars, oldest first. Without `before_ms`: ending with the newest bar.
     /// With it: only bars that start before that time (UTC milliseconds), for scrolling back.
     pub async fn candles(&self, inst_id: &str, bar: &str, before_ms: Option<i64>, count: usize) -> Result<Vec<Candle>, String> {
-        let count = count.clamp(1, 3000);
+        let count = count.clamp(1, 8000); // up to 8000 when they are parts of a longer timeframe (bars.rs)
         let mut out: Vec<Candle> = Vec::new();
         let mut cursor = before_ms;
         if cursor.is_none() {

@@ -57,7 +57,7 @@ function riskInputs(value: number, mode: RiskMode, onChange: (v: number, m: Risk
   return [box, unit];
 }
 
-function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Render {
+export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Render {
   return (body, rerender) => {
     const cur = io.get();
     const set = (p: Partial<PositionSettings>) => io.set({ ...io.get(), ...p });

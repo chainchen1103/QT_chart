@@ -25,6 +25,8 @@ export type ScaleLabelHost = {
   fmtPrice(p: number): string;
   labels(): ScaleLabels;
   colors(): { up: string; down: string };
+  /** False in a bar replay: no countdown (the newest bar shown is in the past). */
+  live(): boolean;
 };
 
 const LABEL_H = 17; // height of a price label with the 12 px axis font (font + 2.5 px padding above and below)
@@ -109,7 +111,7 @@ export class ScaleLabelLayer implements ISeriesPrimitive<Time> {
         // pad with figure spaces so the countdown is as wide as the price label above it
         const cd = fmtCountdown(left);
         const text = cd + "\u2007".repeat(Math.max(0, this.host.fmtPrice(last.close).length - cd.length));
-        this.cd = { y, text, color, visible: true, countdown: o.countdown };
+        this.cd = { y, text, color, visible: true, countdown: o.countdown && this.host.live() };
       }
     }
 

@@ -33,9 +33,10 @@ export function detectRenderer(): { gpu: boolean; name: string } {
   return renderer;
 }
 
-export function performanceSection(io: PerformanceIo): Render {
+/** `header`: start with the section's name (not when the window already says it). */
+export function performanceSection(io: PerformanceIo, header = true): Render {
   return (body) => {
-    body.append(el("div", "pop-section", "效能"));
+    if (header) body.append(el("div", "pop-section", "效能"));
     const r = detectRenderer();
     const now = el("div", "pop-note", r.gpu ? `目前用顯示卡繪圖（${r.name}）` : r.name ? "目前用軟體繪圖" : "無法判斷目前用什麼繪圖");
     const row = el("div", "pop-row");

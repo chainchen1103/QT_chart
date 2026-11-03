@@ -4,6 +4,7 @@
 
 import type { Broker } from "./strategy.ts";
 import type { Outputs } from "./outputs.ts";
+import { barForSec } from "../core/timeframes.ts";
 
 // ----------------------------------------------------------------------------- values
 
@@ -170,7 +171,8 @@ const TF_TABLE: [string[], number, string | null][] = [
   [["W", "1W"], 604800, "1Wutc"],
 ];
 
-/** A Pine timeframe string, or null when it isn't one we can load (seconds, months, odd multiples). */
+/** A Pine timeframe string; `okx` is the app's name for it, or null when the app can't load it (months,
+ *  lengths no OKX bar divides). */
 export function pineTf(s: string): PineTf | null {
   const t = s.trim();
   for (const [names, sec, okx] of TF_TABLE) if (names.includes(t)) return { period: names[0], sec, okx };
@@ -181,7 +183,7 @@ export function pineTf(s: string): PineTf | null {
   const sec = unit === "" ? n * 60 : unit === "S" ? n : unit === "D" ? n * 86400 : unit === "W" ? n * 604800 : 0;
   if (!sec) return null;
   for (const [names, s2, okx] of TF_TABLE) if (s2 === sec) return { period: names[0], sec, okx };
-  return { period: t, sec, okx: null };
+  return { period: t, sec, okx: barForSec(sec) };
 }
 
 /** The Pine name of a timeframe in seconds (as `timeframe.period` shows it). */

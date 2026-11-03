@@ -9,6 +9,13 @@ import { popoverAt, type Render } from "../popover.ts";
 export function openScaleMenu(x: number, y: number, labels: { get: () => ScaleLabels; set: (v: ScaleLabels) => void }, extra?: Render) {
   popoverAt(x, y, "價格標籤", (body, rerender) => {
     extra?.(body, rerender);
+    renderScaleLabels(labels)(body, rerender);
+  });
+}
+
+/** The labels' switches (also a section of the settings window). */
+export function renderScaleLabels(labels: { get: () => ScaleLabels; set: (v: ScaleLabels) => void }): Render {
+  return (body, rerender) => {
     const cur = labels.get();
     for (const it of LABEL_ITEMS) {
       body.append(labelled(checkbox(cur[it.key], "", (v) => labels.set({ ...labels.get(), [it.key]: v })), it.text, it.title));
@@ -19,5 +26,5 @@ export function openScaleMenu(x: number, y: number, labels: { get: () => ScaleLa
       rerender();
     }));
     body.append(foot);
-  });
+  };
 }

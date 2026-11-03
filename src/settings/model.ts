@@ -3,7 +3,7 @@
 
 import type { Anchor } from "../drawings/geometry.ts";
 import type { RiskMode } from "../drawings/trade.ts";
-import { TIMEFRAMES } from "../core/timeframes.ts";
+import { DEFAULT_TF_BAR, findTf } from "../core/timeframes.ts";
 
 export type MaKind = "SMA" | "EMA" | "WMA";
 export const MA_KINDS: MaKind[] = ["SMA", "EMA", "WMA"];
@@ -207,7 +207,7 @@ const isColor = (c: unknown): c is string => typeof c === "string" && /^#[0-9a-f
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 /** "" (the chart's timeframe) or a known bar; anything else becomes "". */
-const cleanTf = (v: unknown): string => (typeof v === "string" && TIMEFRAMES.some((t) => t.bar === v) ? v : "");
+const cleanTf = (v: unknown): string => (typeof v === "string" && findTf(v) ? v : "");
 /** A number in [min, max] (rounded when `int`), or the fallback. */
 const num = (v: unknown, r: { min: number; max: number }, fallback: number, int = true): number =>
   isNum(v) && v >= r.min && v <= r.max ? (int ? Math.round(v) : v) : fallback;
@@ -516,3 +516,24 @@ export function cleanPine(raw: unknown): PineScript[] {
   }
   return out;
 }
+
+// ----------------------------------------------------------------------------- timeframes and bars
+/** The timeframes on the toolbar (in order), and the ones the user added by count and unit. */
+export type TimeframeSettings = { bar: string[]; custom: string[] };
+export const MAX_TF_BAR = 16;
+export const MAX_TF_CUSTOM = 24;
+export function cleanTimeframes(raw: unknown): TimeframeSettings {
+  const r = isObj(raw) ? raw : {};
+  const list = (v: unknown, max: number): string[] =>
+    Array.isArray(v) ? [...new Set(v.filter((b): b is string => typeof b === "string" && !!findTf(b)))].slice(0, max) : [];
+  const bar = list(r.bar, MAX_TF_BAR);
+  return { bar: bar.length ? bar : [...DEFAULT_TF_BAR], custom: list(r.custom, MAX_TF_CUSTOM) };
+}
+
+/** How many bars a chart keeps: a cap (older history stops loading there), or none at all. */
+export type BarSettings = { unlimited: boolean };
+export function cleanBars(raw: unknown): BarSettings {
+  const r = isObj(raw) ? raw : {};
+  return { unlimited: r.unlimited === true };
+}
+

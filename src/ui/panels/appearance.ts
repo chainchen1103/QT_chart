@@ -40,8 +40,8 @@ async function pictureToDataUrl(file: File, bg: string): Promise<string> {
   }
 }
 
-/** `extra`: another section above the foot (the GPU switch). */
-function renderAppearance(io: AppearanceIo, extra?: Render): Render {
+/** `extra`: another section above the foot. (Also a section of the settings window.) */
+export function renderAppearance(io: AppearanceIo, extra?: Render): Render {
   return (body, rerender) => {
     const a = io.get();
     const set = (p: Partial<Appearance>) => io.set({ ...io.get(), ...p });

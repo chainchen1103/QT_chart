@@ -33,6 +33,12 @@
       </span>
       <span class="toolbar-sep"></span>
       <button id="pine-btn" class="tool-btn pine-btn" title="Pine 腳本：匯入 TradingView 的指標和策略、開關、參數、回測績效">Pine</button>
+      <button id="replay-btn" class="tool-btn replay-tool" title="K 線重播：點一根 K 線，從那裡一根一根往後播（Shift+→ 下一根）">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 10a6.5 6.5 0 1 0 1.9-4.6" /><path d="M3.5 3.5v3h3" /><path d="M8.5 7.5v5l4-2.5z" />
+        </svg>
+        重播
+      </button>
       <span class="spacer"></span>
       <span id="quote" class="quote"></span>
       <button id="layout-btn" class="tool-btn icon-only" title="版面：分割成左右、上下，最多四個圖表">
@@ -46,10 +52,10 @@
         </svg>
         <span id="alert-count" class="alert-count"></span>
       </button>
-      <button id="appearance-btn" class="tool-btn icon-only" title="圖表外觀：背景顏色、背景圖片、K 線顏色（也可以在圖上按右鍵）">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <circle cx="10" cy="10" r="2.6" /><circle cx="10" cy="10" r="5.6" />
-          <path d="M10 1.8v2.6M10 15.6v2.6M1.8 10h2.6M15.6 10h2.6M4.2 4.2l1.8 1.8M14 14l1.8 1.8M4.2 15.8 6 14M14 6l1.8-1.8" />
+      <button id="settings-btn" class="tool-btn icon-only" title="設定：圖表外觀、價格標籤、K 線與週期、提醒、倉位、交易帳戶、效能">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8.6 2.5h2.8l.4 2.1 1.5.9 2-.8 1.4 2.4-1.6 1.4v1.8l1.6 1.4-1.4 2.4-2-.8-1.5.9-.4 2.1H8.6l-.4-2.1-1.5-.9-2 .8-1.4-2.4 1.6-1.4V9.1L3.3 7.7l1.4-2.4 2 .8 1.5-.9z" />
+          <circle cx="10" cy="10" r="2.4" />
         </svg>
       </button>
     </header>

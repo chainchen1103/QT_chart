@@ -43,11 +43,13 @@ export function fmtClock(t: number): string {
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** A chart time (already shifted to local) as "2026-11-02 16:15", or just the day for daily and weekly bars. */
-export function fmtChartTime(t: Time, daily: boolean): string {
+/** A chart time (already shifted to local) as "2026-11-02 16:15", just the day for daily and weekly bars, or
+ *  with the seconds for second bars. */
+export function fmtChartTime(t: Time, daily: boolean, seconds = false): string {
   const d = new Date((t as number) * 1000); // shifted: read with the UTC getters
   const day = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  return daily ? day : `${day} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (daily) return day;
+  return `${day} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}${seconds ? ":" + pad(d.getUTCSeconds()) : ""}`;
 }
 
 /** Time-axis tick labels: year, "11月", "11/2", "16:15". `kind` is lightweight-charts' TickMarkType (0 year,
@@ -57,5 +59,6 @@ export function fmtTick(t: Time, kind: number): string {
   if (kind === 0) return String(d.getUTCFullYear());
   if (kind === 1) return `${d.getUTCMonth() + 1}月`;
   if (kind === 2) return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  if (kind === 4) return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }

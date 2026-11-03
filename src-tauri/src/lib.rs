@@ -2,6 +2,7 @@
 //! The page can call only the commands below, and only those listed in capabilities/default.json
 //! (build.rs declares them; anything else is refused).
 
+mod bars;
 mod okx;
 mod prefs;
 mod store;
@@ -51,7 +52,19 @@ async fn get_candles(
     count: Option<usize>,
 ) -> Result<Vec<Candle>, String> {
     check(&inst_id, &bar)?;
-    state.client.candles(&inst_id, &bar, before, count.unwrap_or(500)).await
+    let spec = bars::spec(&bar).ok_or_else(|| format!("不支援的週期：{bar}"))?;
+    let count = count.unwrap_or(500).clamp(1, 3000);
+    if spec.hist_n == 1 {
+        return state.client.candles(&inst_id, spec.hist, before, count).await;
+    }
+    // put together from shorter OKX bars: one extra bar's worth, so the oldest one is whole
+    let n = spec.hist_n as usize;
+    let parts = state.client.candles(&inst_id, spec.hist, before, (count * n + n - 1).min(8000)).await?;
+    let mut out = bars::group(&spec, &parts, bars::okx_sec(spec.hist), true);
+    if out.len() > count {
+        out.drain(..out.len() - count);
+    }
+    Ok(out)
 }
 
 /// Live candles ("candle" events) for exactly these symbols and timeframes: the charts on screen, the

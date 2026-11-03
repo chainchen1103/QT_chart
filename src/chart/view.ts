@@ -25,6 +25,8 @@ export type ChartViewOptions = {
   labels: Setting<ScaleLabels>;
   /** True for daily and weekly bars: times then show the day only. */
   daily(): boolean;
+  /** True for second bars: times then show the seconds. */
+  seconds(): boolean;
 };
 
 export class ChartView {
@@ -35,6 +37,8 @@ export class ChartView {
   /** Candle colors set by Pine scripts (barcolor), by bar; null: the usual up / down colors. */
   private barColors: (string | null)[] | null = null;
   private readonly o: ChartViewOptions;
+  /** The time axis shows seconds (second bars). */
+  private seconds = false;
 
   constructor(o: ChartViewOptions) {
     this.o = o;
@@ -54,7 +58,7 @@ export class ChartView {
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: THEME.line },
       timeScale: { borderColor: THEME.line, timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 8, tickMarkFormatter: fmtTick },
-      localization: { timeFormatter: (t: Parameters<typeof fmtChartTime>[0]) => fmtChartTime(t, o.daily()) },
+      localization: { timeFormatter: (t: Parameters<typeof fmtChartTime>[0]) => fmtChartTime(t, o.daily(), o.seconds()) },
     });
     this.candles = this.chart.addSeries(CandlestickSeries, {
       upColor: a.up, downColor: a.down, borderVisible: false, wickUpColor: a.up, wickDownColor: a.down,
@@ -78,6 +82,11 @@ export class ChartView {
 
   /** All bars (first load, older history, after a gap). The array stays the feed's. */
   setBars(bars: Candle[]) {
+    const seconds = this.o.seconds();
+    if (seconds !== this.seconds) {
+      this.seconds = seconds;
+      this.chart.applyOptions({ timeScale: { secondsVisible: seconds } });
+    }
     this.bars = bars;
     this.candles.setData(bars.map(this.bar));
     this.volume.setData(bars.map(this.vol));

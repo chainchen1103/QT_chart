@@ -4,7 +4,7 @@
 
 import type { LiveHub } from "../core/live.ts";
 import { readJson, writeJson } from "../core/storage.ts";
-import { TIMEFRAMES } from "../core/timeframes.ts";
+import { findTf } from "../core/timeframes.ts";
 import { ChartPane, type PaneEvents, type PaneShared } from "../chart/pane.ts";
 import { Grid } from "./grid.ts";
 import {
@@ -34,9 +34,11 @@ export type WorkspaceDeps = {
   priced(p: ChartPane): void;
   /** Tabs added, closed, moved, shown, or what they show changed. */
   tabsChanged(): void;
+  /** The chart in use started or ended a bar replay. */
+  replayChanged(p: ChartPane): void;
 };
 
-const isBar = (b: string) => TIMEFRAMES.some((t) => t.bar === b);
+const isBar = (b: string) => !!findTf(b);
 
 export class Workspace {
   private state: Tabs;
@@ -64,6 +66,9 @@ export class Workspace {
         for (const q of this.panes) if (q !== p && q.feed.instId === p.feed.instId) q.reloadDrawings();
       },
       zoomed: () => this.save(),
+      replay: (p) => {
+        if (p === this.inUse()) d.replayChanged(p);
+      },
     };
   }
 

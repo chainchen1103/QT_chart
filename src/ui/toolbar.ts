@@ -1,16 +1,18 @@
-// The top bar: symbol search and timeframe buttons for the chart in use, and the indicator switches (均線, FVG,
-// OB, 支撐阻力) with their settings windows (shared by every chart).
+// The top bar: symbol search and timeframe buttons for the chart in use (the ones the user starred, and a menu
+// with all of them), and the indicator switches (均線, FVG, OB, 支撐阻力) with their settings windows (shared by
+// every chart).
 
 import type { Catalog } from "../chart/catalog.ts";
 import type { Instrument } from "../core/api.ts";
 import { fmtChange, shortName } from "../core/format.ts";
-import { TIMEFRAMES } from "../core/timeframes.ts";
+import { findTf, tfSec } from "../core/timeframes.ts";
 import { clone, DEFAULT_FVG, DEFAULT_OB, DEFAULT_SR, type Groups } from "../settings/model.ts";
 import type { Settings } from "../settings/store.ts";
 import { el } from "./dom.ts";
 import { toggleMaPanel } from "./panels/ma.ts";
 import { toggleFvgPanel, toggleObPanel, toggleSrPanel } from "./panels/zones.ts";
-import { closePopover } from "./popover.ts";
+import { closePopover, togglePopover } from "./popover.ts";
+import { renderTimeframes, toolbarBars } from "./panels/timeframes.ts";
 
 export type ToolbarDeps = {
   catalog: Catalog;
@@ -34,6 +36,7 @@ export class Toolbar {
     this.setupSymbolBox();
     this.setupIndicators();
     d.settings.groups.watch(() => this.paintGroups());
+    d.settings.timeframes.watch(() => this.paintTimeframes());
   }
 
   /** Timeframe buttons, the current one highlighted; the symbol box shows the symbol of the chart in use.
@@ -42,15 +45,36 @@ export class Toolbar {
     const cur = this.d.current();
     const nav = $("timeframes");
     nav.replaceChildren();
-    for (const tf of TIMEFRAMES) {
+    // the starred ones, and the one on the chart when it isn't starred
+    const bars = toolbarBars(this.d.settings.timeframes.get());
+    if (!bars.includes(cur.bar) && findTf(cur.bar)) bars.push(cur.bar);
+    bars.sort((a, b) => tfSec(a) - tfSec(b));
+    for (const bar of bars) {
+      const tf = findTf(bar);
+      if (!tf) continue;
       const b = el("button", "tf-btn" + (tf.bar === cur.bar ? " active" : ""), tf.label);
-      b.onclick = () => {
-        const now = this.d.current();
-        if (tf.bar !== now.bar) this.d.switchTo(now.instId, tf.bar);
-      };
+      b.onclick = () => this.pickTf(tf.bar);
       nav.append(b);
     }
+    const more = el("button", "tf-btn tf-more");
+    more.title = "所有週期：秒、分、時、日、週，或自己加";
+    more.innerHTML = `<svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.75 6 7.25l2.5-2.5" /></svg>`;
+    more.onclick = () =>
+      togglePopover(more, "below", "週期", renderTimeframes({
+        timeframes: this.d.settings.timeframes,
+        current: () => this.d.current().bar,
+        pick: (bar) => {
+          closePopover();
+          this.pickTf(bar);
+        },
+      }));
+    nav.append(more);
     if (document.activeElement !== this.input) this.input.value = shortName(cur.instId);
+  }
+
+  private pickTf(bar: string) {
+    const now = this.d.current();
+    if (bar !== now.bar) this.d.switchTo(now.instId, bar);
   }
 
   /** Put the cursor in the symbol box (a new tab: type the symbol it should show). */

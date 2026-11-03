@@ -1,14 +1,16 @@
 // Shared controls of the settings windows.
 // Each change is applied and saved at once through the callbacks; nothing waits for an OK button.
 
-import { TIMEFRAMES, tfLabel, tfSec } from "../../core/timeframes.ts";
+import { findTf, TIMEFRAMES, tfLabel, tfSec } from "../../core/timeframes.ts";
 import { el } from "../dom.ts";
 
 /** Which timeframe an indicator runs on: "" = the chart's. Orange when smaller than the chart's (not shown). */
 export function tfSelect(value: string, chartBar: string, onChange: (v: string) => void): HTMLSelectElement {
   const s = el("select");
   s.append(new Option("圖表週期", "", false, value === ""));
-  for (const t of TIMEFRAMES) s.append(new Option(t.label, t.bar, false, t.bar === value));
+  // the named timeframes, and the one saved when the user had added it by count and unit
+  const list = TIMEFRAMES.some((t) => t.bar === value) || !findTf(value) ? TIMEFRAMES : [...TIMEFRAMES, findTf(value)!];
+  for (const t of list) s.append(new Option(t.label, t.bar, false, t.bar === value));
   const paint = () => {
     const low = !!s.value && tfSec(s.value) < tfSec(chartBar);
     s.classList.toggle("warn", low);

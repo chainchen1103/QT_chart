@@ -19,16 +19,16 @@ import { alertNotify, gpuPref, onCandle, onStatus, openTradingView, setGpuPref, 
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
 import { readJson, readRaw, writeJson } from "./core/storage.ts";
-import { TIMEFRAMES } from "./core/timeframes.ts";
+import { findTf } from "./core/timeframes.ts";
 import { Backdrop } from "./chart/backdrop.ts";
 import { Catalog, DEFAULT_SYMBOL } from "./chart/catalog.ts";
 import { renderQuote } from "./chart/legend.ts";
 import { Notifier } from "./alerts/notify.ts";
-import { toggleAlertManager, type AlertUi } from "./alerts/panel.ts";
+import { renderAlertOptions, toggleAlertManager, type AlertUi } from "./alerts/panel.ts";
 import { AlertService } from "./alerts/service.ts";
 import { toggleLayoutPicker } from "./layout/picker.ts";
 import { TradeAccount } from "./trade/account.ts";
-import { paintAccountButton } from "./trade/panel.ts";
+import { paintAccountButton, renderAccount } from "./trade/panel.ts";
 import { Trading } from "./trade/trading.ts";
 import { TabBar } from "./layout/tabbar.ts";
 import { Workspace } from "./layout/workspace.ts";
@@ -36,8 +36,12 @@ import { TOOL_INFO } from "./settings/model.ts";
 import { loadBgImage, loadDrawings, loadSettings, saveBgImage } from "./settings/store.ts";
 import { setupMenus } from "./ui/menus.ts";
 import { togglePineManager, type PineUi } from "./ui/panels/pine.ts";
-import { appearanceAt, toggleAppearancePanel, type AppearanceIo } from "./ui/panels/appearance.ts";
+import { renderAppearance, type AppearanceIo } from "./ui/panels/appearance.ts";
 import { performanceSection } from "./ui/panels/performance.ts";
+import { renderPosition } from "./ui/panels/position.ts";
+import { renderScaleLabels } from "./ui/panels/scale.ts";
+import { openSettings, type SettingsIo, type SettingsSection } from "./ui/panels/settings.ts";
+import { renderTimeframes } from "./ui/panels/timeframes.ts";
 import { StatusBar } from "./ui/statusbar.ts";
 import { Toolbar } from "./ui/toolbar.ts";
 import { Tools } from "./ui/tools.ts";
@@ -69,7 +73,7 @@ const alerts = new AlertService({
   fmtPrice: catalog.fmtPrice,
   fmtTime: fmtClock,
   notify: (n) => notifier.show(n),
-  isTf: (b) => TIMEFRAMES.some((t) => t.bar === b),
+  isTf: (b) => !!findTf(b),
   read: readJson,
   write: writeJson,
   now: () => Date.now() / 1000,
@@ -83,6 +87,7 @@ const alertUi: AlertUi = {
   fmtPrice: catalog.fmtPrice,
   fmtClock,
   open: (id) => workspace.openSymbol(id),
+  settings: () => openSettingsAt("alerts"),
 };
 function paintAlertButton() {
   const on = alerts.all().filter((a) => a.on).length;
@@ -126,9 +131,31 @@ const appearanceIo: AppearanceIo = {
     return true;
   },
 };
-const performance = performanceSection({ gpu: gpuPref, setGpu: setGpuPref });
 function applyAppearance() {
   backdrop.apply(settings.appearance.get(), bgImage);
+}
+
+// ----------------------------------------------------------------------------- the settings window
+const settingsIo: SettingsIo = {
+  appearance: renderAppearance(appearanceIo),
+  labels: renderScaleLabels(settings.labels),
+  timeframes: renderTimeframes({
+    timeframes: settings.timeframes,
+    current: () => workspace.inUse().feed.bar,
+    pick: (bar) => {
+      const p = workspace.inUse();
+      if (bar !== p.feed.bar) p.switchTo(p.feed.instId, bar);
+    },
+  }),
+  bars: settings.bars,
+  alerts: renderAlertOptions(alerts),
+  position: renderPosition({ get: () => settings.position.get(), set: (v) => settings.position.set(v), apiEquity: () => account.equity() }),
+  account: renderAccount(account, settings.position),
+  performance: performanceSection({ gpu: gpuPref, setGpu: setGpuPref }, false),
+  openTradingView: () => void openTradingView().catch((err) => status.error(String(err))),
+};
+function openSettingsAt(section: SettingsSection) {
+  openSettings(settingsIo, section);
 }
 
 // ----------------------------------------------------------------------------- tabs and charts
@@ -147,13 +174,15 @@ const tabBar = new TabBar({
 const workspace: Workspace = new Workspace(
   {
     grid: $("grid"),
-    shared: { catalog, settings, alerts, status, tools, trading, appearanceAt: (x, y) => appearanceAt(x, y, appearanceIo, performance) },
+    shared: { catalog, settings, alerts, status, tools, trading, appearanceAt: () => openSettingsAt("appearance") },
     hub,
     inUseChanged: (p) => {
       toolbar.paintTimeframes();
       tools.paintTools(p.drawings.getTool());
       renderQuote($("quote"), p.feed, catalog);
+      paintReplayButton(p.replay);
     },
+    replayChanged: (p) => paintReplayButton(p.replay),
     priced: (p) => renderQuote($("quote"), p.feed, catalog),
     tabsChanged: () => tabBar.render(),
   },
@@ -175,6 +204,10 @@ const pineUi: PineUi = {
   },
   note: (text) => status.note(text),
 };
+/** The replay button follows the chart in use: on while it replays or picks where to start. */
+function paintReplayButton(r: { active: boolean }) {
+  $("replay-btn").classList.toggle("on", r.active);
+}
 function paintPineButton() {
   $("pine-btn").classList.toggle("on", settings.pine.get().some((s) => s.on));
 }
@@ -209,7 +242,8 @@ document.addEventListener("mousedown", (e) => {
   if ((e.target as Element | null)?.closest?.(".icon-btn, .icon-caret, .tf-btn, .tool-btn, .tab, .tab-add, .layout-btn")) e.preventDefault();
 });
 $("layout-btn").onclick = () => toggleLayoutPicker($("layout-btn"), () => workspace.layout(), (id) => workspace.setLayout(id));
-$("appearance-btn").onclick = () => toggleAppearancePanel($("appearance-btn"), appearanceIo, performance);
+$("settings-btn").onclick = () => openSettingsAt("appearance");
+$("replay-btn").onclick = () => workspace.inUse().replay.toggle();
 $("alert-btn").onclick = () => toggleAlertManager($("alert-btn"), alertUi);
 $("account-btn").onclick = () => trading.openAccount();
 $("pine-btn").onclick = () => togglePineManager($("pine-btn"), pineUi);

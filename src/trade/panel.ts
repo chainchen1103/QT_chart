@@ -6,7 +6,7 @@ import { fmtClock, shortName } from "../core/format.ts";
 import { fmtMoney, type PositionResult } from "../drawings/trade.ts";
 import type { PositionDrawing, PositionOrder, PositionSettings } from "../settings/model.ts";
 import { checkbox, el, labelled, lbl, textButton } from "../ui/dom.ts";
-import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover } from "../ui/popover.ts";
+import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import type { TradeAccount } from "./account.ts";
 import {
   fmtCoins,
@@ -81,8 +81,13 @@ export function paintAccountButton(btn: HTMLElement, acct: TradeAccount) {
 
 // ----------------------------------------------------------------------------- API settings
 export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, position: Setting<PositionSettings>) {
+  togglePopover(anchor, "below", "交易帳戶（OKX API）", renderAccount(acct, position));
+}
+
+/** The account window's contents (also a section of the settings window). */
+export function renderAccount(acct: TradeAccount, position: Setting<PositionSettings>): Render {
   let following = false;
-  togglePopover(anchor, "below", "交易帳戶（OKX API）", (body, rerender) => {
+  return (body, rerender) => {
     if (!following) {
       // follow the account's refreshes while the window is open (not while a key is being typed in)
       following = true;
@@ -125,7 +130,7 @@ export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, posi
       }, "從這台電腦刪掉這組 API（OKX 上的 API 不受影響）"),
     );
     body.append(foot);
-  });
+  };
 }
 
 function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {

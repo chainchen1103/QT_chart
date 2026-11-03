@@ -7,6 +7,7 @@ import { readJson, readRaw, writeJson, writeRaw } from "../core/storage.ts";
 import {
   clone,
   cleanAppearance,
+  cleanBars,
   cleanDrawings,
   cleanDrawStyles,
   cleanFib,
@@ -20,6 +21,7 @@ import {
   cleanPine,
   cleanPosition,
   cleanSrs,
+  cleanTimeframes,
   DEFAULT_FIB,
   DEFAULT_FVG,
   DEFAULT_GROUPS,
@@ -49,6 +51,10 @@ export function loadSettings() {
     orderPrefs: setting("orderprefs", cleanOrderPrefs),
     /** Pine scripts added by the user (every chart runs the ones switched on). */
     pine: setting("pine", cleanPine),
+    /** The timeframes on the toolbar, and the ones the user added. */
+    timeframes: setting("timeframes", cleanTimeframes),
+    /** How many bars a chart keeps. */
+    bars: setting("bars", cleanBars),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;

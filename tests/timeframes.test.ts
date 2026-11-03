@@ -1,17 +1,44 @@
 // Laying a larger timeframe onto the chart's bars, and folding live candles into larger bars.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alignToChart, foldTick, tfSec, TIMEFRAMES } from "../src/core/timeframes.ts";
+import { alignToChart, DEFAULT_TF_BAR, findTf, foldTick, tfLabel, tfName, tfSec, TIMEFRAMES } from "../src/core/timeframes.ts";
+import { pineTf } from "../src/pine/runtime.ts";
 import type { Candle } from "../src/core/api.ts";
 
 const bar = (time: number, close: number, confirmed = true, extra: Partial<Candle> = {}): Candle => ({
   time, open: close, high: close, low: close, close, volume: 1, confirmed, ...extra,
 });
 
-test("timeframes nest and weekly bars are a week long", () => {
+test("timeframe names: OKX's own, put-together ones, and the one name of each length", () => {
   assert.equal(tfSec("1Wutc"), 604800);
   assert.equal(tfSec("nope"), 0);
-  for (let k = 1; k < TIMEFRAMES.length; k++) assert.equal(TIMEFRAMES[k].sec % TIMEFRAMES[k - 1].sec, 0);
+  assert.equal(tfLabel("10s"), "10秒");
+  assert.equal(tfLabel("45m"), "45分");
+  assert.equal(tfLabel("3H"), "3時");
+  assert.equal(tfLabel("1Dutc"), "日");
+  assert.equal(tfLabel("2Wutc"), "2週");
+  assert.equal(tfLabel("6H"), "6時"); // OKX's Hong Kong 6-hour bars, saved by older versions
+  // the one name of a length
+  assert.equal(tfName(90, "m"), "90m");
+  assert.equal(tfName(120, "m"), "2H");
+  assert.equal(tfName(6, "H"), "6Hutc");
+  assert.equal(tfName(24, "H"), "1Dutc");
+  assert.equal(tfName(14, "D"), "2Wutc");
+  assert.equal(tfName(60, "s"), "1m");
+  // lengths the app can't make
+  assert.equal(tfName(61, "s"), null);
+  assert.equal(tfName(1439, "m"), null); // only 1-minute bars divide it: 1439 of them
+  assert.equal(tfName(13, "W"), null);
+  assert.equal(tfName(0, "m"), null);
+  assert.equal(findTf("15M"), undefined);
+  // every named one is valid, and the default toolbar nests
+  for (const t of TIMEFRAMES) assert.ok(findTf(t.bar), t.bar);
+  for (let k = 1; k < DEFAULT_TF_BAR.length; k++) assert.equal(tfSec(DEFAULT_TF_BAR[k]) % tfSec(DEFAULT_TF_BAR[k - 1]), 0);
+  // Pine timeframes to the app's
+  assert.equal(pineTf("5S")?.okx, "5s");
+  assert.equal(pineTf("10")?.okx, "10m");
+  assert.equal(pineTf("180")?.okx, "3H");
+  assert.equal(pineTf("M")?.okx ?? null, null);
 });
 
 test("align: live uses the larger bar holding each chart bar; waiting uses the last closed one", () => {
