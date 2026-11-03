@@ -118,3 +118,132 @@ test("typed prices: above 0, stop and take-profit on either side of the entry", 
   assert.match(checkPrices({ entry: 0, stop: -2, target: 4 }) ?? "", /大於 0/);
   assert.match(checkPrices({ entry: NaN, stop: 98, target: 104 }) ?? "", /大於 0/);
 });
+
+test("scaling in: an add filled while the first is open is sized on the whole position", () => {
+  const s = 60;
+  const base = { riskMode: "pct" as const, leverage: 10, risk: 1, capital: null };
+  const bars = [bar(0, 99, 101), bar(60, 100, 106), bar(120, 105, 111), bar(180, 108, 115), bar(240, 97, 109)];
+  // long 100 / stop 95 (2 coins for 1 % of 1000), then an add at 110 moving the stop to 98
+  const r = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 110, stop: 98, target: 130, ...base },
+    ],
+    bars, s, 1000, true,
+  );
+  const a = r.get("a")!;
+  const b = r.get("b")!;
+  close(a.plan.qty, 2);
+  close(b.plan.qty, 0.5); // the first part loses 4 at 98, so the add may lose 6: 6 / 12
+  const w = b.scale!;
+  assert.equal(w.step, 2);
+  assert.equal(w.count, 2);
+  close(w.qty, 2.5);
+  close(w.avg, 102);
+  close(w.risk, 10); // (102 - 98) x 2.5: still 1 %
+  close(w.reward, 70);
+  assert.equal(w.full, false);
+  assert.equal(a.scale!.step, 1);
+  // the whole position leaves at the add's stop, 98
+  assert.deepEqual(a.outcome, { status: "sl", exit: 98, exitT: 240 });
+  assert.deepEqual(b.outcome, a.outcome);
+  close(a.pnl, -4);
+  close(b.pnl, -6);
+  close(w.pnl, -10);
+  close(a.endCapital, 990);
+  close(b.endCapital, 990);
+
+  // the stop moved above the first entry: its locked-in profit lets the add be bigger
+  const up = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 110, stop: 105, target: 130, ...base },
+    ],
+    bars, s, 1000, true,
+  );
+  close(up.get("b")!.plan.qty, 4); // (10 + 2 x 5) / 5
+  close(up.get("b")!.scale!.avg, 640 / 6);
+  close(up.get("b")!.scale!.risk, 10);
+
+  // a stop so far that the first part alone already loses more: nothing is added
+  const full = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 110, stop: 90, target: 130, ...base },
+    ],
+    bars, s, 1000, true,
+  );
+  close(full.get("b")!.plan.qty, 0);
+  assert.equal(full.get("b")!.scale!.full, true);
+  close(full.get("b")!.scale!.risk, 20);
+});
+
+test("scaling in: not after an exit, not the other direction; capital goes on after the whole", () => {
+  const s = 60;
+  const base = { riskMode: "pct" as const, leverage: 10, risk: 1, capital: null };
+  // the first reaches its take-profit (104) before the second fills: two positions on their own
+  const bars = [bar(0, 99, 101), bar(60, 100, 104.5), bar(120, 101, 103), bar(180, 101.5, 103), bar(240, 97, 102)];
+  const r = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 98, target: 104, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 102, stop: 98, target: 110, ...base },
+    ],
+    bars, s, 1000, true,
+  );
+  assert.equal(r.get("a")!.scale, null);
+  assert.equal(r.get("b")!.scale, null);
+  close(r.get("b")!.capital, 1020); // after the first's +20
+  // a short while a long is open: each on its own
+  const both = chainPositions(
+    [
+      { id: "l", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "s", entryT: 60, endT: 6000, entry: 102, stop: 106, target: 90, ...base },
+    ],
+    [bar(0, 99, 101), bar(60, 100, 103), bar(120, 101, 103)], s, 1000, true,
+  );
+  assert.equal(both.get("l")!.scale, null);
+  assert.equal(both.get("s")!.scale, null);
+  // the whole position counts as one for the capital that comes after it
+  const later = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 110, stop: 98, target: 130, ...base },
+      { id: "c", entryT: 300, endT: 6000, entry: 100, stop: 99, target: 103, ...base },
+    ],
+    [bar(0, 99, 101), bar(60, 100, 106), bar(120, 105, 111), bar(180, 108, 115), bar(240, 97, 109), bar(300, 99.5, 100.5)],
+    s, 1000, true,
+  );
+  close(later.get("c")!.capital, 990);
+  assert.equal(later.get("c")!.chained, true);
+});
+
+test("scaling in: an add waiting to fill is sized on the position open now; leverage caps an add", () => {
+  const s = 60;
+  const base = { riskMode: "pct" as const, leverage: 10, risk: 1, capital: null };
+  const bars = [bar(0, 99, 101), bar(60, 100, 106), bar(120, 104, 108)];
+  const r = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 95, target: 120, ...base },
+      { id: "b", entryT: 120, endT: 6000, entry: 110, stop: 98, target: 130, ...base }, // 110 not reached yet
+    ],
+    bars, s, 1000, true,
+  );
+  assert.equal(r.get("a")!.scale, null); // nothing added yet
+  assert.equal(r.get("a")!.outcome.status, "open");
+  const b = r.get("b")!;
+  assert.equal(b.outcome.status, "pending");
+  close(b.plan.qty, 0.5);
+  assert.equal(b.scale!.step, 2);
+  close(b.scale!.avg, 102);
+  // at 1x the first part takes all the capital: no room for an add
+  const tight = chainPositions(
+    [
+      { id: "a", entryT: 0, endT: 6000, entry: 100, stop: 99, target: 120, riskMode: "pct", risk: 1, leverage: 1, capital: null },
+      { id: "b", entryT: 120, endT: 6000, entry: 105, stop: 103, target: 130, riskMode: "pct", risk: 1, leverage: 1, capital: null },
+    ],
+    [bar(0, 99.5, 101), bar(60, 100, 104), bar(120, 104, 106), bar(180, 104, 107)], s, 1000, true,
+  );
+  close(tight.get("a")!.plan.qty, 10);
+  close(tight.get("b")!.plan.qty, 0);
+  assert.equal(tight.get("b")!.plan.capped, true);
+});

@@ -232,6 +232,11 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
     );
     for (const p of plan.problems) body.append(el("div", "pop-msg", p));
     for (const w of plan.warnings) body.append(el("div", "trade-warn", w));
+    if (t.scale && t.scale.step > 1) {
+      body.append(
+        el("div", "trade-warn", `這是加倉：這張單只開加倉的部分，止損、止盈只掛在這張上。OKX 上前面那筆的止損、止盈不會自動移到 ${fp(d.b.p)}、${fp(d.target)}，要自己去改`),
+      );
+    }
     body.append(el("div", "pop-note", "送出後在圖上移動這個倉位不會改到交易所的單；要改請先撤單再重新下。不含手續費。"));
     const msg = el("div", "pop-msg");
     const go = textButton(`確認下單（${envText(demo)}）`, "text-btn " + (demo ? "primary" : "danger-solid"), async () => {

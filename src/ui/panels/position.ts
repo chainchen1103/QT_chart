@@ -77,10 +77,16 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
     msg.textContent = m && "error" in m ? `${m.error}。紅框的價格還沒套用。` : "";
   };
   const pct = (p: number) => fmtChange((p - now.entry) / now.entry);
+  // the last add of a position built up by adds: its stop and take-profit are the whole position's
+  const sc = one.trade()?.scale;
+  const whole = sc && sc.step === sc.count ? sc : null;
+  const side = positionDir(now.entry, now.stop) === 1 ? "多單" : "空單";
   const info: Record<PriceKey, string> = {
-    entry: positionDir(now.entry, now.stop) === 1 ? "多單" : "空單",
+    entry: whole ? `${side}加倉` : side,
     stop: pct(now.stop),
-    target: `${pct(now.target)}　${rewardRisk(now.entry, now.stop, now.target).toFixed(2)} R`,
+    target: whole
+      ? `${pct(now.target)}　整筆 ${whole.risk > 0 ? `${(whole.reward / whole.risk).toFixed(2)} R` : "止損也獲利"}`
+      : `${pct(now.target)}　${rewardRisk(now.entry, now.stop, now.target).toFixed(2)} R`,
   };
   const rows: HTMLElement[] = [];
   for (const { key, name, title } of PRICE_ROWS) {
@@ -190,13 +196,31 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       body.append(capRow, riskRow, levRow);
       if (t) {
         const pl = t.plan;
-        const lines = [
-          `數量 ${fmtQty(pl.qty)}　名目 ${fmtMoney(pl.notional)} U　保證金 ${fmtMoney(pl.margin)} U`,
-          `最大虧損 ${fmtMoney(pl.riskAmount)} U　止盈獲利 ${fmtMoney(pl.reward)} U`,
-          `結果：${OUTCOME_TEXT[t.outcome.status]}` +
-            (t.outcome.exit != null ? `　${t.pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(t.pnl))} U，資金變成 ${fmtMoney(t.endCapital)} U` : ""),
-        ];
+        const sc = t.scale;
+        const money = (v: number) => `${v >= 0 ? "+" : "−"}${fmtMoney(Math.abs(v))} U`;
+        const result = (pnl: number) =>
+          `結果：${OUTCOME_TEXT[t.outcome.status]}` + (t.outcome.exit != null ? `　${money(pnl)}，資金變成 ${fmtMoney(t.endCapital)} U` : "");
+        const size = `數量 ${fmtQty(pl.qty)}　名目 ${fmtMoney(pl.notional)} U　保證金 ${fmtMoney(pl.margin)} U`;
+        let lines: string[];
+        if (!sc) {
+          lines = [size, `最大虧損 ${fmtMoney(pl.riskAmount)} U　止盈獲利 ${fmtMoney(pl.reward)} U`, result(t.pnl)];
+        } else if (sc.step < sc.count) {
+          lines = [size, `已加倉：這是第 ${sc.step} 筆，整筆改用第 ${sc.count} 筆的止損、止盈，結果看那一筆`];
+        } else {
+          const after = t.outcome.status === "pending" ? "成交後整筆" : "整筆";
+          lines = [
+            `加倉${sc.count > 2 ? `（第 ${sc.step} 筆）` : ""}：${size}`,
+            `${after}：數量 ${fmtQty(sc.qty)}　均價 ${one.priceText(sc.avg)}`,
+            sc.risk > 0
+              ? `${after}最大虧損 ${fmtMoney(sc.risk)} U　止盈獲利 ${fmtMoney(sc.reward)} U`
+              : `${after}在止損還有 ${money(-sc.risk)} 的獲利　止盈獲利 ${fmtMoney(sc.reward)} U`,
+            result(sc.pnl),
+          ];
+        }
         for (const s of lines) body.append(el("div", "pop-note", s));
+        if (sc?.full && sc.step === sc.count) {
+          body.append(el("div", "pop-msg", "前面的部位在這個止損就已經虧到這筆設定的風險（或更多），所以這筆不加，數量是 0"));
+        }
         if (pl.capped) body.append(el("div", "pop-msg", "保證金超過資金，數量已減到這個槓桿能開的最大值，實際風險會比設定小"));
       }
     } else {

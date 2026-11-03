@@ -159,11 +159,13 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
           const x1 = g.pos.x1 * hr;
           const lw = Math.max(1, Math.round(hr));
           const hl = (y: number, color: string, dash: Dash) => path([[x0, crisp(y * vr, lw)], [x1, crisp(y * vr, lw)]], { color, width: 1, dash });
-          for (const l of g.pos.levels) hl(l.y, hexToRgba(ps.profit, 0.9), "dash");
-          hl(g.pos.targetY, ps.profit, "solid");
-          hl(g.pos.stopY, ps.loss, "solid");
-          hl(g.pos.entryY, "#b2b5be", "solid");
           const t = o.trades.get(d.id);
+          const sc = t?.scale;
+          const dim = sc && sc.step < sc.count ? 0.4 : 1; // an earlier part: a later add's stop and take-profit rule
+          for (const l of g.pos.levels) hl(l.y, hexToRgba(ps.profit, 0.9 * dim), "dash");
+          hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
+          hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
+          hl(g.pos.entryY, "#b2b5be", "solid");
           if (g.pos.exit && t) {
             const color = t.outcome.status === "tp" ? ps.profit : t.outcome.status === "sl" ? ps.loss : "#b2b5be";
             ctx.beginPath();
@@ -280,7 +282,8 @@ function infoBox(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: n
 
 /** Position: take-profit, stop and entry labels, the result, the order button, and the R lines' names. The
  *  info, the result and the order button stay on screen when the box runs past the right edge (a position
- *  drawn at the newest bar usually does). */
+ *  drawn at the newest bar usually does). A position built up by adds: the last add carries the whole
+ *  position's numbers (average entry, quantity, risk, result); earlier parts show only their own part. */
 function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, spots: HotSpot[], width: number) {
   const d = g.d;
   const p = g.pos;
@@ -317,34 +320,59 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   // labels sit just outside the box, past the take-profit and the stop
   const outward = (y: number, sign: number) => y + sign * 13;
   const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
+  const sc = t?.scale ?? null;
+  const earlier = !!sc && sc.step < sc.count; // a later add's stop and take-profit are the ones in force
+  // the risk and reward the R and money are of: the whole position for the last add, else this one
+  const risk = sc ? sc.risk : (t?.plan.riskAmount ?? 0);
+  const reward = sc ? sc.reward : (t?.plan.reward ?? 0);
   // results in R (multiples of the risk) next to the money: the stop is −1.00R, the take-profit +reward/risk
-  tag([`止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})  ${signed(rr)}R${t ? "  " + money(t.plan.reward) : ""}`], mid, outward(p.targetY, up), ps.profit);
-  tag([`止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})  −1.00R${t ? "  " + money(-t.plan.riskAmount) : ""}`], mid, outward(p.stopY, -up), ps.loss);
+  const tpR = sc ? (risk > 0 ? `  ${signed(reward / risk)}R` : "") : `  ${signed(rr)}R`;
+  const slR = risk > 0 || !sc ? "  −1.00R" : "";
+  const tpText = `止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})${earlier ? "" : `${tpR}${t ? "  " + money(reward) : ""}`}`;
+  const slText = `止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})${earlier ? "" : `${slR}${t ? "  " + money(-risk) : ""}`}`;
+  tag([tpText], mid, outward(p.targetY, up), earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
+  tag([slText], mid, outward(p.stopY, -up), earlier ? hexToRgba(ps.loss, 0.45) : ps.loss);
   if (!t) return;
   const pl = t.plan;
   const side = dir === 1 ? "多單" : "空單";
-  const infoLines = [
-    `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${pl.capped ? "（保證金不夠，已減量）" : ""}`,
-    `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
-  ];
+  const capped = pl.capped ? "（保證金不夠，已減量）" : "";
+  const infoLines = !sc
+    ? [
+        `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
+        `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
+      ]
+    : earlier
+      ? [
+          `${side}${sc.step > 1 ? `加倉（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
+          `已加倉：整筆改用第 ${sc.count} 筆的止損、止盈`,
+        ]
+      : [
+          `${side}加倉${sc.count > 2 ? `（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${sc.full ? "（風險已滿，不加）" : capped}`,
+          `${t.outcome.status === "pending" ? "成交後" : "合併"} ${fmtQty(sc.qty)} ${o.base}  均價 ${fp(sc.avg)}  ${risk > 0 ? `整筆風險 ${fmtMoney(risk)} U` : `止損時 ${money(-risk)}`}`,
+        ];
   const infoX = Math.max(0, Math.min(p.x0 + 4, width - 4 - size(infoLines).w));
-  const info = box(infoLines, infoX, p.entryY, "rgba(25,25,27,0.92)", "left", pl.capped ? THEME.down : "#ffffff");
+  const warn = pl.capped || (!!sc && sc.full && !earlier);
+  // an earlier part's labels go to the stop side of its entry: later adds sit on the profit side, close by
+  const rowY = earlier ? p.entryY - up * (size(infoLines).h / 2 + 3) : p.entryY;
+  const info = box(infoLines, infoX, rowY, "rgba(25,25,27,0.92)", "left", warn ? THEME.down : "#ffffff");
   const infoRight = info.x + info.w;
-  const inR = pl.riskAmount > 0 ? `${signed(t.pnl / pl.riskAmount)}R  ` : "";
+  const pnl = sc ? sc.pnl : t.pnl;
+  const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
+  const gray = "rgba(45,45,48,0.95)";
   const result: Record<string, [string, string]> = {
-    tp: [`止盈出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
-    sl: [`止損出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
-    expired: [`到期出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, "rgba(45,45,48,0.95)"],
-    open: [`持倉中 ${inR}${money(t.pnl)}`, "rgba(45,45,48,0.95)"],
-    pending: ["等待進場", "rgba(45,45,48,0.95)"],
-    unfilled: ["沒有成交", "rgba(45,45,48,0.95)"],
-    nodata: ["K 線不夠，無法結算", "rgba(45,45,48,0.95)"],
+    tp: [`止盈出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
+    sl: [`止損出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
+    expired: [`到期出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, gray],
+    open: [`持倉中 ${inR}${money(pnl)}`, gray],
+    pending: ["等待進場", gray],
+    unfilled: ["沒有成交", gray],
+    nodata: ["K 線不夠，無法結算", gray],
   };
-  const [text, bg] = result[t.outcome.status];
+  const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : result[t.outcome.status];
   const order = o.orderTag(d);
   const total = size([text]).w + (order ? 4 + size([order.text]).w : 0);
   let x = Math.max(p.x1, infoRight) + 6; // past the info box when that is wider than the position
-  let y = p.entryY;
+  let y = rowY;
   if (x + total > width - 4) {
     // past the right edge: pull them back on screen, after the info box, or under it when there is no room
     x = width - 4 - total;
