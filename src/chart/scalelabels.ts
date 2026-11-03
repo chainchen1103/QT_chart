@@ -15,6 +15,7 @@ import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Candle } from "../core/api.ts";
 import type { ScaleLabels } from "../settings/model.ts";
 import { fmtCountdown } from "../core/timeframes.ts";
+import { MONO_FONT, THEME } from "../ui/theme.ts";
 
 export type ScaleLabelHost = {
   chart: IChartApi;
@@ -27,9 +28,9 @@ export type ScaleLabelHost = {
 };
 
 const LABEL_H = 17; // height of a price label with the 12 px axis font (font + 2.5 px padding above and below)
-const TAG_BG = "#363a45";
-const TAG_TEXT = "#d1d4dc";
-const TAG_FONT = "11px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
+const TAG_BG = THEME.hover;
+const TAG_TEXT = THEME.text;
+const TAG_FONT = `11px ${MONO_FONT}`;
 
 export class ScaleLabelLayer implements ISeriesPrimitive<Time> {
   private requestUpdate: (() => void) | null = null;

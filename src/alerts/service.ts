@@ -4,6 +4,7 @@
 // AlertDeps, so this file knows nothing about the chart or the DOM.
 
 import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
+import { shortName } from "../core/format.ts";
 import { describe, evaluate, moveSince, targetShape, tradeSig, type AlertEvent, type Snapshot } from "./engine.ts";
 import {
   cleanAlerts,
@@ -229,8 +230,7 @@ export class AlertService {
     const text = events.map((e) => describe(e, fmt, this.deps.fmtTime)).join("；");
     this.entries.unshift({ t: now, instId: a.instId, text, note: a.note, alertId: a.id });
     if (this.entries.length > MAX_LOG) this.entries.length = MAX_LOG;
-    const base = a.instId.replace(/-USDT-SWAP$/, "");
-    this.deps.notify({ alert: a, title: `${base} ${text}`, body: `現價 ${fmt(price)}${a.note ? `\n${a.note}` : ""}` });
+    this.deps.notify({ alert: a, title: `${shortName(a.instId)} ${text}`, body: `現價 ${fmt(price)}${a.note ? `\n${a.note}` : ""}` });
   }
 
   // ------------------------------------------------------------------- internals

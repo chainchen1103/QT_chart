@@ -16,6 +16,7 @@ import { fmtChartTime, fmtTick, toChartTime } from "../core/format.ts";
 import type { Setting } from "../core/setting.ts";
 import { hexToRgba } from "../drawings/geometry.ts";
 import type { Appearance, ScaleLabels } from "../settings/model.ts";
+import { MONO_FONT, THEME } from "../ui/theme.ts";
 
 export type ChartViewOptions = {
   /** The chart's own element. */
@@ -45,13 +46,14 @@ export class ChartView {
         background: { type: ColorType.Solid, color: "rgba(0,0,0,0)" },
         textColor: a.text,
         fontSize: 12,
-        panes: { separatorColor: "#2a2e39", separatorHoverColor: "#363a45", enableResize: true },
+        fontFamily: MONO_FONT, // figures on the axes, like every price in the app
+        panes: { separatorColor: THEME.line, separatorHoverColor: THEME.hover, enableResize: true },
         attributionLogo: false, // the credit TradingView's licence asks for is in the status bar instead
       },
       grid: { vertLines: { color: a.grid }, horzLines: { color: a.grid } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#2a2e39" },
-      timeScale: { borderColor: "#2a2e39", timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 8, tickMarkFormatter: fmtTick },
+      rightPriceScale: { borderColor: THEME.line },
+      timeScale: { borderColor: THEME.line, timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 8, tickMarkFormatter: fmtTick },
       localization: { timeFormatter: (t: Parameters<typeof fmtChartTime>[0]) => fmtChartTime(t, o.daily()) },
     });
     this.candles = this.chart.addSeries(CandlestickSeries, {

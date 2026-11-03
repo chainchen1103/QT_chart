@@ -37,7 +37,7 @@ export function performanceSection(io: PerformanceIo): Render {
   return (body) => {
     body.append(el("div", "pop-section", "效能"));
     const r = detectRenderer();
-    const now = el("div", "pop-note", r.gpu ? `目前用顯示卡繪圖（${r.name}）` : r.name ? "目前用軟體繪圖" : "我也看不出目前用什麼繪圖");
+    const now = el("div", "pop-note", r.gpu ? `目前用顯示卡繪圖（${r.name}）` : r.name ? "目前用軟體繪圖" : "無法判斷目前用什麼繪圖");
     const row = el("div", "pop-row");
     const msg = el("div", "pop-note");
     const box = checkbox(true, "", async (v) => {

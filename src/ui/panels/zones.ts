@@ -38,7 +38,7 @@ function zoneSetsPanel<T extends FvgConf | ObConf | SrConf>(
   togglePopover(anchor, "below", title, (body, rerender) => {
     body.append(el("div", "pop-note", intro));
     const list = sets.get();
-    if (!list.length) body.append(el("div", "pop-note", "目前沒有設定。按「新增一組」加一組。"));
+    if (!list.length) body.append(el("div", "pop-note", "目前沒有設定，按「新增一組」加一組"));
     for (const c of list) {
       const p = (x: Partial<T>) => patch(c.id, x);
       const card = el("div", "pop-card");

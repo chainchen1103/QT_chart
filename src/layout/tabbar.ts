@@ -4,6 +4,7 @@
 // Ctrl+Shift+Tab next / previous.
 
 import { shortName, type Catalog } from "../chart/catalog.ts";
+import { fmtChange } from "../core/format.ts";
 import { tfLabel } from "../core/timeframes.ts";
 import { el, textButton } from "../ui/dom.ts";
 import { activeCell, cellCount, LAYOUTS, MAX_TABS, type Tab } from "./model.ts";
@@ -21,7 +22,7 @@ export type TabBarDeps = {
   move(from: number, to: number): void;
 };
 
-type Item = { instId: string; arrow: HTMLElement; px: HTMLElement; chg: HTMLElement };
+type Item = { instId: string; px: HTMLElement; chg: HTMLElement };
 
 export class TabBar {
   private readonly d: TabBarDeps;
@@ -54,11 +55,11 @@ export class TabBar {
     tabs.forEach((t, i) => {
       const c = activeCell(t);
       const tab = el("div", "tab" + (i === this.d.shown() ? " shown" : ""));
-      const charts = t.cells.slice(0, cellCount(t.layout)).map((x) => `${x.instId} ${tfLabel(x.bar)}`);
+      const charts = t.cells.slice(0, cellCount(t.layout)).map((x) => `${shortName(x.instId)} ${tfLabel(x.bar)}`);
       tab.title = (t.layout === "1" ? charts[0] : `${LAYOUTS[t.layout].name}：\n${charts.join("\n")}`) + "\n拖曳可移動，中鍵關閉";
       if (t.layout !== "1") tab.append(layoutIcon(t.layout, "tab-layout"));
-      const item: Item = { instId: c.instId, arrow: el("span", "tab-arrow"), px: el("span", "tab-px"), chg: el("span", "tab-chg") };
-      tab.append(el("span", "tab-sym", shortName(c.instId)), item.arrow, item.px, item.chg);
+      const item: Item = { instId: c.instId, px: el("span", "tab-px"), chg: el("span", "tab-chg") };
+      tab.append(el("span", "tab-sym", shortName(c.instId)), item.px, item.chg);
       if (tabs.length > 1) {
         const x = textButton("×", "tab-close", () => this.d.close(i), "關閉分頁（Ctrl+W）");
         x.addEventListener("mousedown", (e) => e.stopPropagation()); // closing doesn't show the tab first
@@ -101,11 +102,9 @@ export class TabBar {
     if (!p) return;
     const chg = catalog.change24h(item.instId, p);
     const cls = chg == null ? "" : chg >= 0 ? "up" : "down";
-    item.arrow.className = "tab-arrow " + cls;
-    item.arrow.textContent = chg == null ? "" : chg >= 0 ? "▲" : "▼";
     item.px.textContent = catalog.fmtPrice(item.instId, p);
     item.chg.className = "tab-chg " + cls;
-    item.chg.textContent = chg == null ? "" : `${chg >= 0 ? "+" : "−"}${Math.abs(chg * 100).toFixed(2)}%`;
+    item.chg.textContent = chg == null ? "" : fmtChange(chg);
   }
 
   /** Dragging a tab sideways moves it past its neighbors. */

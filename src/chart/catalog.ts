@@ -39,8 +39,4 @@ export class Catalog {
   }
 }
 
-/** "BTC-USDT-SWAP" → "BTCUSDT.P", as TradingView names perpetuals. */
-export const shortName = (id: string): string => {
-  const m = /^([A-Z0-9]+)-([A-Z0-9]+)-SWAP$/.exec(id);
-  return m ? `${m[1]}${m[2]}.P` : id;
-};
+export { shortName } from "../core/format.ts";

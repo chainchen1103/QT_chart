@@ -10,6 +10,7 @@ import type { PositionDrawing, PositionOrder, PositionSettings } from "../settin
 import type { TradeAccount } from "./account.ts";
 import { fmtCoins, isOpenState, type ContractSpec, type OrderPrefs } from "./model.ts";
 import { isMissing, openOrderDetails, openOrderWindow, toggleAccountPanel, withInfo, type OrderSpot } from "./panel.ts";
+import { THEME } from "../ui/theme.ts";
 
 /** A chart, as the order parts see it. */
 export type OrderTarget = {
@@ -32,10 +33,11 @@ export type TradingDeps = {
   note(text: string): void;
 };
 
-const BLUE = "#2962ff";
-const OPEN_BG = "rgba(41,98,255,0.55)";
+/** 下單 is the primary action on the chart: off-white with dark text, like the primary buttons. */
+const ACTION_BG = THEME.text;
+const OPEN_BG = "rgba(91,156,246,0.45)";
 const DONE_BG = "#089981";
-const GRAY = "rgba(54,58,69,0.95)";
+const GRAY = "rgba(45,45,48,0.95)";
 
 export class Trading {
   private readonly d: TradingDeps;
@@ -55,7 +57,7 @@ export class Trading {
   /** The spot at the right of a position: 下單 while its box still reaches the newest bar, then its order. */
   tag(d: PositionDrawing, newestBar: number | null, fmtPrice: (p: number) => string): OrderTag | null {
     const o = d.order;
-    if (!o) return newestBar != null && d.b.t >= newestBar ? { text: "下單", bg: BLUE } : null;
+    if (!o) return newestBar != null && d.b.t >= newestBar ? { text: "下單", bg: ACTION_BG, fg: THEME.bg } : null;
     const env = o.demo ? "模擬 · " : "";
     switch (o.state) {
       case "live":

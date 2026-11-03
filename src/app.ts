@@ -16,7 +16,7 @@
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
 
 import { alertNotify, gpuPref, onCandle, onStatus, openTradingView, setGpuPref, setStreams, type CandleEvent } from "./core/api.ts";
-import { fmtClock } from "./core/format.ts";
+import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
 import { readJson, readRaw, writeJson } from "./core/storage.ts";
 import { TIMEFRAMES } from "./core/timeframes.ts";
@@ -43,11 +43,11 @@ import { Toolbar } from "./ui/toolbar.ts";
 import { Tools } from "./ui/tools.ts";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
-const DEFAULT_HINT = "滾輪縮放、拖曳平移；往左拖載入更早的 K 線；價格標尺按右鍵設定標籤；分割畫面時點一下圖表就換用那個圖表";
 
 const settings = loadSettings();
 const catalog = new Catalog();
-const status = new StatusBar({ dot: $("status-dot"), status: $("status"), hint: $("hint") }, DEFAULT_HINT);
+// the hint line is empty until a drawing tool or a short note has something to say
+const status = new StatusBar({ dot: $("status-dot"), status: $("status"), hint: $("hint") }, "");
 const backdrop = new Backdrop(document.documentElement);
 let bgImage = loadBgImage();
 /** One live connection for the charts on screen, the alerts and the tabs. */
@@ -171,7 +171,7 @@ const pineUi: PineUi = {
   host: () => workspace.inUse().pine,
   chartName: () => {
     const f = workspace.inUse().feed;
-    return `${f.instId} · ${f.tf.label}`;
+    return `${shortName(f.instId)} · ${f.tf.label}`;
   },
   note: (text) => status.note(text),
 };

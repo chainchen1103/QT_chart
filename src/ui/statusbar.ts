@@ -5,8 +5,8 @@ import type { StreamStatus } from "../core/api.ts";
 
 const STATUS_TEXT: Record<StreamStatus["state"], string> = {
   connecting: "連線中…",
-  ws: "即時（WebSocket）",
-  polling: "輪詢更新中（每 2 秒）",
+  ws: "即時",
+  polling: "每 2 秒更新",
   error: "錯誤",
 };
 

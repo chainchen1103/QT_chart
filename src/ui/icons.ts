@@ -1,10 +1,11 @@
-// Small line icons (20 × 20, current color) for the drawing tools.
+// Small line icons (20 × 20, current color, 1.5 stroke like every icon in the app) for the drawing tools.
 
 import type { DrawKind } from "../settings/model.ts";
 
 const svg = (body: string) =>
-  `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${body}</svg>`;
-const dot = (x: number, y: number) => `<circle cx="${x}" cy="${y}" r="1.8" fill="#131722"/>`;
+  `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">${body}</svg>`;
+/** An anchor point: a hollow dot, filled with the button's own background (--icon-hole in style.css). */
+const dot = (x: number, y: number) => `<circle cx="${x}" cy="${y}" r="1.8" style="fill: var(--icon-hole, var(--bg-deep))"/>`;
 
 export const ICONS: Record<DrawKind, string> = {
   fib: svg(`<path d="M3 4h14M3 8h14M3 12h14M3 16h14"/><path d="M4 16 16 4" stroke-dasharray="2 2"/>`),

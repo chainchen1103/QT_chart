@@ -84,7 +84,7 @@ export class AlertLayer implements ISeriesPrimitive<Time> {
     this.axis = this.lines.map((l) => ({
       coordinate: () => l.y,
       text: () => this.host.fmtPrice(l.price),
-      textColor: () => "#131722",
+      textColor: () => "#141415",
       backColor: () => ALERT_COLOR,
     }));
   }
@@ -114,7 +114,7 @@ export class AlertLayer implements ISeriesPrimitive<Time> {
 function bell(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.beginPath();
   ctx.arc(x, y, 8, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(19,23,34,0.85)";
+  ctx.fillStyle = "rgba(20,20,21,0.85)";
   ctx.fill();
   ctx.fillStyle = ALERT_COLOR;
   ctx.beginPath();

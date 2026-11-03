@@ -5,6 +5,7 @@ import type { IChartApi, ISeriesApi, ISeriesPrimitive, IPrimitivePaneView, Serie
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { xOfLogical } from "../chart/coords.ts";
 import { hexToRgba, timeToIndex } from "../drawings/geometry.ts";
+import { UI_FONT } from "../ui/theme.ts";
 
 /** A box from `from` to `to` (or the right edge); with `line`, a level drawn as a line at `top`. */
 export type DrawZone = { from: number; to: number | null; top: number; bottom: number; color: string; label: string; line?: boolean };
@@ -19,7 +20,7 @@ export type ZoneHost = {
   barSec(): number;
 };
 
-const LABEL_FONT = "10px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
+const LABEL_FONT = `10px ${UI_FONT}`;
 
 export class ZoneLayer implements ISeriesPrimitive<Time> {
   private zones: DrawZone[] = [];

@@ -20,6 +20,7 @@ import { cssColor, DEFAULT_BLUE } from "../../pine/runtime.ts";
 import { DISPLAY, type PlotOut } from "../../pine/outputs.ts";
 import type { RunResult, ScriptInfo } from "../../pine/index.ts";
 import { emptyScene, PineLayer, type PineScene } from "./layer.ts";
+import { THEME } from "../../ui/theme.ts";
 
 export type ViewHost = {
   chart: IChartApi;
@@ -43,7 +44,8 @@ const kindOf = (style: string): Kind => (style === "histogram" || style === "col
 const LEGEND_FONT_PX = 12;
 
 /** "RSI 14 close" → shown in the legend; values formatted like the series. */
-export type LegendItem = { text: string; color: string | null };
+/** `mark`: an error or a warning, shown after a small red dot. */
+export type LegendItem = { text: string; color: string | null; mark?: boolean };
 
 export class ScriptView {
   readonly id: string;
@@ -313,12 +315,12 @@ export class ScriptView {
     const args = r ? legendInputs(r) : "";
     items.push({ text: args ? `${title} ${args}` : title, color: null });
     if (this.error) {
-      items.push({ text: `⚠ ${this.error}`, color: "#ef5350" });
+      items.push({ text: this.error, color: THEME.down, mark: true });
       return items;
     }
     if (this.loading) items.push({ text: "載入中…", color: null });
     if (!r) return items;
-    for (const w of r.warnings.slice(0, 1)) items.push({ text: `⚠ ${w}`, color: "#f0b90b" });
+    for (const w of r.warnings.slice(0, 1)) items.push({ text: `注意：${w}`, color: THEME.text2, mark: true });
     for (const ps of this.plots) {
       const p = ps.plot;
       if (!(p.display & DISPLAY.legend)) continue;
@@ -370,7 +372,7 @@ function legendInputs(r: RunResult): string {
 export function fillLegend(box: HTMLElement, items: LegendItem[]) {
   box.replaceChildren();
   items.forEach((it, k) => {
-    const s = el("span", k === 0 ? "name" : "", k === 0 ? it.text : `${it.text}  `);
+    const s = el("span", k === 0 ? "name" : it.mark ? "mark" : "", k === 0 ? it.text : `${it.text}  `);
     if (it.color) s.style.color = it.color;
     box.append(s);
   });

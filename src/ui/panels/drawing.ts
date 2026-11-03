@@ -13,7 +13,7 @@ import {
   TOOL_INFO,
 } from "../../settings/model.ts";
 import { ICONS } from "../icons.ts";
-import { checkbox, colorInput, el, labelled, lbl, textButton } from "../dom.ts";
+import { checkbox, colorInput, el, keycaps, labelled, lbl, textButton } from "../dom.ts";
 import { closePopover, popoverAt, togglePopover, type Render } from "../popover.ts";
 
 /** Flyout of a tool group in the left toolbar (e.g. the lines): pick one to start drawing. */
@@ -24,7 +24,7 @@ export function toggleToolMenu(anchor: HTMLElement, title: string, kinds: DrawKi
       row.type = "button";
       const icon = el("span", "tool-row-icon");
       icon.innerHTML = ICONS[k]; // our own fixed SVG
-      row.append(icon, el("span", "tool-row-name", TOOL_INFO[k].name), el("span", "tool-row-key", TOOL_INFO[k].key));
+      row.append(icon, el("span", "tool-row-name", TOOL_INFO[k].name), keycaps(TOOL_INFO[k].key, "keys tool-row-key"));
       row.onclick = () => {
         closePopover();
         onPick(k);

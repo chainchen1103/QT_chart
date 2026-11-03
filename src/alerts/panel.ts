@@ -2,6 +2,7 @@
 // drawing's settings. Changes go straight to the AlertService; the windows redraw when it changes.
 
 import type { Drawing } from "../settings/model.ts";
+import { shortName } from "../core/format.ts";
 import { checkbox, el, flagBad, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type Repeat, type TradeStage } from "./model.ts";
@@ -21,7 +22,6 @@ export type AlertUi = {
   open(instId: string): void;
 };
 
-const base = (instId: string) => instId.replace(/-USDT-SWAP$/, "");
 
 // ----------------------------------------------------------------------------- inputs
 function select<T extends string>(options: T[], text: Record<T, string>, value: T, onChange: (v: T) => void, title = ""): HTMLSelectElement {
@@ -99,7 +99,7 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     body.classList.add("alert-pop");
 
     // new price alert for the symbol on screen
-    body.append(el("div", "pop-section", `新增價格提醒：${inst}`));
+    body.append(el("div", "pop-section", `新增價格提醒：${shortName(inst)}`));
     let cond: AlertCond = "touch";
     let repeat: Repeat = "once";
     const msg = el("div", "pop-msg");
@@ -125,10 +125,10 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     const rows = el("div", "alert-list");
     for (const a of list) {
       const row = el("div", "alert-row" + (a.on ? "" : " off"));
-      const sym = textButton(base(a.instId), "alert-sym", () => {
+      const sym = textButton(shortName(a.instId), "alert-sym", () => {
         ui.open(a.instId);
         closePopover();
-      }, `在圖上打開 ${a.instId}`);
+      }, `在圖上打開 ${shortName(a.instId)}`);
       const label = el("span", "alert-label", s.label(a) + (a.note ? `　${a.note}` : ""));
       label.title = "按一下修改";
       label.onclick = () => {
@@ -157,7 +157,7 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     const lr = el("div", "alert-log");
     for (const e of log.slice(0, 30)) {
       const line = el("div", "alert-log-row");
-      line.append(el("span", "alert-time", ui.fmtClock(e.t)), el("span", "alert-sym-text", base(e.instId)), el("span", "", e.text + (e.note ? `（${e.note}）` : "")));
+      line.append(el("span", "alert-time", ui.fmtClock(e.t)), el("span", "alert-sym-text", shortName(e.instId)), el("span", "", e.text + (e.note ? `（${e.note}）` : "")));
       lr.append(line);
     }
     body.append(lr);
@@ -210,7 +210,7 @@ function roundish(p: number | null): number | null {
 // ----------------------------------------------------------------------------- a new alert at a point
 /** New price alert for the symbol on screen, at `price` (right-click menu, Alt+A). */
 export function alertDialogAt(x: number, y: number, ui: AlertUi, price: number | null) {
-  popoverAt(x, y, `新增提醒：${ui.instId()}`, (body) => {
+  popoverAt(x, y, `新增提醒：${shortName(ui.instId())}`, (body) => {
     let cond: AlertCond = "touch";
     let repeat: Repeat = "once";
     const msg = el("div", "pop-msg");

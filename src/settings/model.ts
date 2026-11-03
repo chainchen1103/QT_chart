@@ -445,16 +445,18 @@ export type Appearance = {
   bg: string; grid: string; text: string; up: string; down: string; imageTransparency: number; imageFit: ImageFit;
 };
 export const DEFAULT_APPEARANCE: Appearance = {
-  bg: "#131722", grid: "#1e222d", text: "#b2b5be", up: "#26a69a", down: "#ef5350", imageTransparency: 70, imageFit: "cover",
+  bg: "#141415", grid: "#1d1d1f", text: "#85858b", up: "#26a69a", down: "#ef5350", imageTransparency: 70, imageFit: "cover",
 };
+/** The defaults before the graphite look: saved as they were, they become the new defaults. */
+const OLD_APPEARANCE = { bg: "#131722", grid: "#1e222d", text: "#b2b5be" };
 export function cleanAppearance(raw: unknown): Appearance {
   const r = isObj(raw) ? raw : {};
   const d = DEFAULT_APPEARANCE;
   const color = (v: unknown, f: string) => (isColor(v) ? v : f);
   return {
-    bg: color(r.bg, d.bg),
-    grid: color(r.grid, d.grid),
-    text: color(r.text, d.text),
+    bg: r.bg === OLD_APPEARANCE.bg ? d.bg : color(r.bg, d.bg),
+    grid: r.grid === OLD_APPEARANCE.grid ? d.grid : color(r.grid, d.grid),
+    text: r.text === OLD_APPEARANCE.text ? d.text : color(r.text, d.text),
     up: color(r.up, d.up),
     down: color(r.down, d.down),
     imageTransparency: num(r.imageTransparency, { min: 0, max: 100 }, d.imageTransparency),

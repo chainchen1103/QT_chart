@@ -6,9 +6,12 @@ import type { Dash, FibSettings, PositionDrawing, PositionSettings } from "../se
 import type { Geo } from "./geo.ts";
 import { fmtSpan, hexToRgba, positionDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
+import { signed } from "../core/format.ts";
+import { MONO_FONT, THEME } from "../ui/theme.ts";
 
 /** The button at the right of a position: 下單, or the order placed from it. */
-export type OrderTag = { text: string; bg: string };
+/** `fg`: the text color (white when not given). */
+export type OrderTag = { text: string; bg: string; fg?: string };
 /** Where something clickable was painted (chart pixels), and the drawing it belongs to. */
 export type HotSpot = { id: string; x: number; y: number; w: number; h: number };
 
@@ -24,8 +27,9 @@ export type PaintOptions = {
   orderTag(d: PositionDrawing): OrderTag | null;
 };
 
-const FONT = "11px -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
-export const ACCENT = "#2962ff";
+const FONT = `11px ${MONO_FONT}`;
+/** Handles and axis labels of the drawing being edited. */
+export const ACCENT = THEME.data;
 const FAR = 100000; // px: endless lines are drawn this far out and the canvas clips them
 
 function dashOf(dash: Dash, width: number, hr: number): number[] {
@@ -313,8 +317,9 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   // labels sit just outside the box, past the take-profit and the stop
   const outward = (y: number, sign: number) => y + sign * 13;
   const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
-  tag([`止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})  ${rr.toFixed(2)}R${t ? "  " + money(t.plan.reward) : ""}`], mid, outward(p.targetY, up), ps.profit);
-  tag([`止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})${t ? "  " + money(-t.plan.riskAmount) : ""}`], mid, outward(p.stopY, -up), ps.loss);
+  // results in R (multiples of the risk) next to the money: the stop is −1.00R, the take-profit +reward/risk
+  tag([`止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})  ${signed(rr)}R${t ? "  " + money(t.plan.reward) : ""}`], mid, outward(p.targetY, up), ps.profit);
+  tag([`止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})  −1.00R${t ? "  " + money(-t.plan.riskAmount) : ""}`], mid, outward(p.stopY, -up), ps.loss);
   if (!t) return;
   const pl = t.plan;
   const side = dir === 1 ? "多單" : "空單";
@@ -323,16 +328,17 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
     `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
   ];
   const infoX = Math.max(0, Math.min(p.x0 + 4, width - 4 - size(infoLines).w));
-  const info = box(infoLines, infoX, p.entryY, "rgba(30,34,45,0.92)", "left", pl.capped ? "#f7a600" : "#ffffff");
+  const info = box(infoLines, infoX, p.entryY, "rgba(25,25,27,0.92)", "left", pl.capped ? THEME.down : "#ffffff");
   const infoRight = info.x + info.w;
+  const inR = pl.riskAmount > 0 ? `${signed(t.pnl / pl.riskAmount)}R  ` : "";
   const result: Record<string, [string, string]> = {
-    tp: [`止盈出場 ${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
-    sl: [`止損出場 ${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
-    expired: [`到期出場 ${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, "rgba(54,58,69,0.95)"],
-    open: [`持倉中 ${money(t.pnl)}`, "rgba(54,58,69,0.95)"],
-    pending: ["等待進場", "rgba(54,58,69,0.95)"],
-    unfilled: ["沒有成交", "rgba(54,58,69,0.95)"],
-    nodata: ["K 線不夠，無法結算", "rgba(54,58,69,0.95)"],
+    tp: [`止盈出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
+    sl: [`止損出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
+    expired: [`到期出場 ${inR}${money(t.pnl)} → ${fmtMoney(t.endCapital)} U`, "rgba(45,45,48,0.95)"],
+    open: [`持倉中 ${inR}${money(t.pnl)}`, "rgba(45,45,48,0.95)"],
+    pending: ["等待進場", "rgba(45,45,48,0.95)"],
+    unfilled: ["沒有成交", "rgba(45,45,48,0.95)"],
+    nodata: ["K 線不夠，無法結算", "rgba(45,45,48,0.95)"],
   };
   const [text, bg] = result[t.outcome.status];
   const order = o.orderTag(d);
@@ -349,7 +355,7 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   }
   const resultRight = tag([text], x, y, bg, "left");
   if (order) {
-    const b = box([order.text], resultRight + 4, y, order.bg, "left");
+    const b = box([order.text], resultRight + 4, y, order.bg, "left", order.fg);
     ctx.strokeStyle = "rgba(255,255,255,0.35)";
     ctx.lineWidth = 1;
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);

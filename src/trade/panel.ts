@@ -2,7 +2,7 @@
 // position's 下單 button opens (nothing is sent before 確認下單), and an order's details with 撤單.
 
 import type { Setting } from "../core/setting.ts";
-import { fmtClock } from "../core/format.ts";
+import { fmtClock, shortName } from "../core/format.ts";
 import { fmtMoney, type PositionResult } from "../drawings/trade.ts";
 import type { PositionDrawing, PositionOrder, PositionSettings } from "../settings/model.ts";
 import { checkbox, el, labelled, lbl, textButton } from "../ui/dom.ts";
@@ -113,7 +113,7 @@ export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, posi
         "倉位的初始資金用帳戶權益",
         "不勾就用倉位設定裡填的預設資金",
       ),
-      el("div", "pop-note", "下單：在倉位右邊按「下單」，確認後才會送出；止損一定會一起設。"),
+      el("div", "pop-note", "下單：在倉位右邊按「下單」，確認後才會送出；止損一定會一起設"),
     );
     const foot = el("div", "pop-foot");
     foot.append(
@@ -131,7 +131,7 @@ export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, posi
 function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
   body.classList.add("trade-form");
   body.append(
-    el("div", "pop-note", "填你 OKX 帳戶的 API，就能從倉位直接下單，倉位的初始資金也會帶入帳戶權益。"),
+    el("div", "pop-note", "填你 OKX 帳戶的 API，就能從倉位直接下單，倉位的初始資金也會帶入帳戶權益"),
     el("div", "pop-note", "到 OKX「API 管理」建立：權限只勾「交易」，不要勾「提現」；最好綁定這台電腦的 IP。手單建議用子帳戶的 API。"),
   );
   const input = (placeholder: string, secret: boolean) => {
@@ -176,7 +176,7 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
 
 // ----------------------------------------------------------------------------- the order window
 export function openOrderWindow(x: number, y: number, s: OrderSpot) {
-  popoverAt(x, y, `下單：${s.instId}`, (body, rerender) => {
+  popoverAt(x, y, `下單：${shortName(s.instId)}`, (body, rerender) => {
     const { acct, drawing: d, trade: t } = s;
     const prefs = s.prefs.get();
     const demo = acct.keys.demo;
@@ -277,7 +277,7 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
 
 // ----------------------------------------------------------------------------- an order's details
 export function openOrderDetails(x: number, y: number, s: OrderSpot) {
-  popoverAt(x, y, `訂單：${s.instId}`, (body, rerender) => {
+  popoverAt(x, y, `訂單：${shortName(s.instId)}`, (body, rerender) => {
     const o = s.drawing.order;
     if (!o) {
       closePopover();
@@ -297,8 +297,8 @@ export function openOrderDetails(x: number, y: number, s: OrderSpot) {
     );
     if (o.fillSz > 0) body.append(row(lbl("已成交"), `${fmtCoins(o.fillSz)} 張`, ...(o.avgPx ? [lbl("均價"), fp(o.avgPx)] : [])));
     body.append(row(lbl("下單時間"), fmtClock(o.at)), row(lbl("訂單編號"), o.ordId));
-    if (other) body.append(el("div", "pop-note", `這張單是用${envText(o.demo)}的 API 下的，現在的 API 查不到它。`));
-    else body.append(el("div", "pop-note", "止損、止盈在成交後由交易所掛上，可以在 OKX 的「委託」裡看到。"));
+    if (other) body.append(el("div", "pop-note", `這張單是用${envText(o.demo)}的 API 下的，現在的 API 查不到它`));
+    else body.append(el("div", "pop-note", "止損、止盈在成交後由交易所掛上，可以在 OKX 的「委託」裡看到"));
     const msg = el("div", "pop-msg");
     const busy = (b: HTMLButtonElement, text: string, job: () => Promise<void>) => async () => {
       const was = b.textContent;

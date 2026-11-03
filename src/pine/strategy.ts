@@ -104,6 +104,8 @@ export type StrategyReport = {
   maxDrawdownPct: number;
   maxRunup: number;
   buyHold: number;
+  /** The same capital bought at the first bar's open and held, at each bar's close (NaN without bars). */
+  buyHoldEquity: Float64Array;
   maxHeld: number;
 };
 
@@ -519,6 +521,8 @@ export class Broker {
     const R = this.R;
     const first = R.n ? R.o[0] : NaN;
     const last = R.n ? R.c[R.n - 1] : NaN;
+    const hold = new Float64Array(R.n).fill(NaN);
+    if (first > 0) for (let i = 0; i < R.n; i++) hold[i] = (this.initial * R.c[i]) / first;
     return {
       initialCapital: this.initial,
       currency: this.currency,
@@ -536,6 +540,7 @@ export class Broker {
       maxDrawdownPct: this.maxDDPct,
       maxRunup: this.maxRunup,
       buyHold: first > 0 ? ((last - first) / first) * 100 : NaN,
+      buyHoldEquity: hold,
       maxHeld: this.maxHeld,
     };
   }

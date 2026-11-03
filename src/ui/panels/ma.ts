@@ -27,7 +27,7 @@ export function toggleMaPanel(
   const patch = (id: string, p: Partial<MaConf>) => mas.set(mas.get().map((m) => (m.id === id ? { ...m, ...p } : m)));
   togglePopover(anchor, "below", "均線", (body, rerender) => {
     const list = mas.get();
-    if (!list.length) body.append(el("div", "pop-note", "目前沒有均線。"));
+    if (!list.length) body.append(el("div", "pop-note", "目前沒有均線"));
     for (const m of list) {
       const row = el("div", "pop-row");
       const kind = el("select");

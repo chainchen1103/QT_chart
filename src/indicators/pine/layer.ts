@@ -11,6 +11,7 @@ import type { Candle } from "../../core/api.ts";
 import { cssColor } from "../../pine/runtime.ts";
 import type { ArrowOut, BgOut, CandleOut, FillOut, HlineOut, PBox, PLabel, PLine, PLinefill, PPolyline, PTable, PlotOut, ShapeOut } from "../../pine/outputs.ts";
 import type { Fill } from "../../pine/strategy.ts";
+import { UI_FONT } from "../../ui/theme.ts";
 
 export type PineScene = {
   /** In the price pane: abovebar / belowbar are measured from the candles. */
@@ -43,7 +44,7 @@ export type LayerHost = {
   barSec(): number;
 };
 
-const FONT = "-apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif";
+const FONT = UI_FONT;
 const TEXT_PX: Record<string, number> = { tiny: 9, small: 11, normal: 13, large: 16, huge: 22, auto: 12 };
 const SHAPE_PX: Record<string, number> = { tiny: 7, small: 10, normal: 14, large: 20, huge: 28, auto: 10 };
 const BUY = "#2962FF";

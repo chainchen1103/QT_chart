@@ -2,7 +2,7 @@
 // bar under the crosshair or the newest one; and the latest price with its 24h change, for the toolbar and the
 // window title.
 
-import { fmtVol } from "../core/format.ts";
+import { fmtChange, fmtVol, shortName } from "../core/format.ts";
 import type { IndState, Overlays } from "../indicators/overlays.ts";
 import { el } from "../ui/dom.ts";
 import type { Catalog } from "./catalog.ts";
@@ -39,7 +39,7 @@ export class Legend {
       const j = indexOf(feed.times, t);
       if (j >= 0) i = j;
     }
-    box.append(el("span", "name", `${feed.instId} · ${feed.tf.label}`));
+    box.append(el("span", "name", `${shortName(feed.instId)} · ${feed.tf.label}`));
     const c = bars[i];
     if (!c) return;
     const fp = feed.fmtPrice;
@@ -47,7 +47,7 @@ export class Legend {
     const chg = prev ? (c.close - prev) / prev : 0;
     const cls = c.close >= c.open ? "up" : "down";
     for (const [k, v] of [["開", c.open], ["高", c.high], ["低", c.low], ["收", c.close]] as const) box.append(el("span", "k", k + " "), el("span", cls, fp(v)));
-    box.append(el("span", chg >= 0 ? "up" : "down", `  ${chg >= 0 ? "+" : ""}${(chg * 100).toFixed(2)}%`));
+    box.append(el("span", chg >= 0 ? "up" : "down", `  ${fmtChange(chg)}`));
     box.append(el("span", "k", "量 "), el("span", "", fmtVol(c.volume)));
     const mas = this.overlays.maLegend(i);
     if (mas.length) {
@@ -88,8 +88,8 @@ export function renderQuote(box: HTMLElement, feed: MarketFeed, catalog: Catalog
   if (!c) return;
   const chg = catalog.change24h(feed.instId, c.close);
   box.append(el("span", "", feed.fmtPrice(c.close) + "  "));
-  if (chg != null) box.append(el("span", chg >= 0 ? "up" : "down", `24h ${chg >= 0 ? "+" : ""}${(chg * 100).toFixed(2)}%`));
-  document.title = `${feed.instId} ${feed.fmtPrice(c.close)} · QT Chart`;
+  if (chg != null) box.append(el("span", "muted", "24h "), el("span", chg >= 0 ? "up" : "down", fmtChange(chg)));
+  document.title = `${shortName(feed.instId)} ${feed.fmtPrice(c.close)} · QT Chart`;
 }
 
 function indexOf(times: number[], t: number): number {

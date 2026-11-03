@@ -73,12 +73,19 @@ export function numInput(
   return i;
 }
 
-/** A row in a right-click menu: the action, and a shortcut hint on the right. */
+/** A keyboard shortcut as small keycaps: "Alt+Shift+R" → [Alt] [Shift] [R]. */
+export function keycaps(keys: string, cls = "keys"): HTMLElement {
+  const box = el("span", cls);
+  for (const k of keys.split("+")) box.append(el("kbd", "kbd", k));
+  return box;
+}
+
+/** A row in a right-click menu: the action, and its shortcut on the right. */
 export function menuItem(text: string, onClick: () => void, hint = ""): HTMLButtonElement {
   const b = el("button", "menu-item");
   b.type = "button";
   b.append(el("span", "", text));
-  if (hint) b.append(el("span", "menu-hint", hint));
+  if (hint) b.append(keycaps(hint, "keys menu-hint"));
   b.onclick = onClick;
   return b;
 }

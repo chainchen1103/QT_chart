@@ -4,10 +4,24 @@ import type { Time, UTCTimestamp } from "lightweight-charts";
 
 export const pad = (n: number) => String(n).padStart(2, "0");
 
+/** How the app names a symbol everywhere: "BTC-USDT-SWAP" → "BTCUSDT.P", as TradingView names perpetuals. */
+export const shortName = (id: string): string => {
+  const m = /^([A-Z0-9]+)-([A-Z0-9]+)-SWAP$/.exec(id);
+  return m ? `${m[1]}${m[2]}.P` : id;
+};
+
 /** The chart library works in UTC: bar times are shifted by the local offset so the axis shows local time. */
 export const TZ_SEC = -new Date().getTimezoneOffset() * 60;
 export const toChartTime = (t: number) => (t + TZ_SEC) as UTCTimestamp;
 export const fromChartTime = (t: Time) => (t as number) - TZ_SEC;
+
+/** A signed number with a true minus sign, the way the app writes changes: "+1.23", "−4.56", "0.00". */
+export function signed(v: number, digits = 2): string {
+  const a = Math.abs(v).toFixed(digits);
+  return `${Number(a) === 0 ? "" : v > 0 ? "+" : "−"}${a}`;
+}
+/** A change as a fraction (0.0186), in percent: "+1.86%", "−0.47%". */
+export const fmtChange = (frac: number): string => `${signed(frac * 100)}%`;
 
 /** 78123.4 with 1 decimal → "78,123.4". */
 export function fmtFixed(v: number, decimals: number): string {

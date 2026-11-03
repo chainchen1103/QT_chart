@@ -167,7 +167,7 @@ function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Rend
       );
       body.append(row);
     });
-    if (!cur.levels.length) body.append(el("div", "pop-note", "沒有 R 線。在下面輸入一個。"));
+    if (!cur.levels.length) body.append(el("div", "pop-note", "還沒有 R 線，在下方輸入"));
     const addRow = el("div", "pop-row");
     const input = el("input");
     input.type = "text";

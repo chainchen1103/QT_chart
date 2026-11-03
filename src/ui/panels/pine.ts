@@ -2,9 +2,9 @@
 // script's inputs, and a strategy's backtest report. Scripts are saved in settings (settings.pine); every
 // chart runs the ones switched on, and these windows show the results of the chart in use.
 
-import { ColorType, createChart, LineSeries, type IChartApi, type UTCTimestamp } from "lightweight-charts";
+import { ColorType, createChart, LineSeries, type IChartApi, type Time, type UTCTimestamp } from "lightweight-charts";
 import type { Setting } from "../../core/setting.ts";
-import { toChartTime } from "../../core/format.ts";
+import { fmtChartTime, fmtTick, signed, toChartTime } from "../../core/format.ts";
 import type { PineHost } from "../../indicators/pine/host.ts";
 import { loadCached } from "../../indicators/pine/host.ts";
 import { load, titleOf } from "../../pine/index.ts";
@@ -14,6 +14,7 @@ import { MAX_PINE_SCRIPTS, MAX_PINE_SOURCE, newId, type PineScript } from "../..
 import { checkbox, colorInput, el, flagBad, textButton } from "../dom.ts";
 import { openModal, type Modal } from "../modal.ts";
 import { POPOVER_CLOSED, togglePopover } from "../popover.ts";
+import { MONO_FONT, THEME } from "../theme.ts";
 
 export type PineUi = {
   scripts: Setting<PineScript[]>;
@@ -83,7 +84,7 @@ function scriptRow(s: PineScript, ui: PineUi, host: PineHost, rerender: () => vo
   });
   const name = el("span", "pine-name", s.name || info?.title || "Pine 腳本");
   name.title = `${s.name || info?.title || ""}（${kind}${info ? (info.overlay ? "，畫在 K 線上" : "，畫在下方新窗格") : ""}）`;
-  const badge = el("span", "pine-badge" + (info?.kind === "strategy" ? " strat" : ""), kind);
+  const badge = el("span", "pine-badge", kind);
   top.append(sw, name, badge);
   if (info?.kind === "strategy") top.append(iconBtn("績效", "回測績效：淨利、勝率、回撤、每筆交易", () => openPineReport(ui, s.id)));
   top.append(
@@ -142,11 +143,11 @@ function paintStatus(box: HTMLElement, s: PineScript, host: PineHost) {
   }
   const r = v.result;
   const parts = [v.loading ? "載入其他週期的 K 線…" : `已套用 · 計算 ${r.ms} ms`];
-  if (r.strategy) parts.push(`${r.strategy.trades.length} 筆交易 · 淨利 ${money(r.strategy.netProfit)}`);
+  if (r.strategy) parts.push(`${r.strategy.trades.length} 筆交易 · 淨利 ${signedMoney(r.strategy.netProfit)} ${unitOf(r.strategy.currency)}`);
   box.textContent = parts.join(" · ");
   if (r.warnings.length) {
     box.classList.add("warn");
-    box.textContent += ` · ⚠ ${r.warnings[0]}`;
+    box.textContent += ` · 注意：${r.warnings[0]}`;
     box.title = r.warnings.join("\n");
   }
 }
@@ -363,8 +364,8 @@ export function openPineInputs(ui: PineUi, id: string) {
       if (!s) return;
       const v = ui.host().view(id);
       const defs = v?.result?.inputs ?? [];
-      if (!s.on) body.append(el("div", "pop-note", "這個腳本關著：改了設定，開啟後才看得到。"));
-      if (!defs.length) body.append(el("div", "pop-note", v?.result ? "這個腳本沒有可以調整的參數（input）。" : "腳本還沒在目前的圖表上計算過；開啟腳本、等 K 線載入後再來。"));
+      if (!s.on) body.append(el("div", "pop-note", "這個腳本關著：改了設定，開啟後才看得到"));
+      if (!defs.length) body.append(el("div", "pop-note", v?.result ? "這個腳本沒有可以調整的參數（input）" : "腳本還沒在目前的圖表上計算過；開啟腳本、等 K 線載入後再來"));
       let group = "\u0000";
       let inlineRow: HTMLElement | null = null;
       let inlineKey = "";
@@ -531,11 +532,11 @@ export function openPineReport(ui: PineUi, id: string) {
       const v = host.view(id);
       const r = v?.result;
       const rep = r?.strategy;
-      body.append(el("div", "pop-note", `${ui.chartName()} · 用圖表上已載入的 K 線回測（往左捲動載入更早的 K 線，回測的範圍就更長）`));
+      body.append(el("div", "pine-sub", `${ui.chartName()} · 用圖表上已載入的 K 線回測（往左捲動載入更早的 K 線，回測的範圍就更長）`));
       if (!rep) {
-        body.append(el("div", "pop-note", v?.error ? `腳本有錯誤：${v.error}` : "還沒有結果：腳本要開著，並且在目前的圖表上計算完。"));
+        body.append(el("div", "pop-note", v?.error ? `腳本有錯誤：${v.error}` : "還沒有結果：腳本要開著，並且在目前的圖表上計算完"));
       } else {
-        chart = reportBody(body, rep, r!.decl.title || s0.name);
+        chart = reportBody(body, rep);
       }
       foot.append(el("span", "spacer"), textButton("關閉", "text-btn primary", () => m.close()));
     },
@@ -557,63 +558,100 @@ function money(v: number): string {
   if (!(v === v)) return "—";
   return v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+/** A signed amount with a true minus sign: "+179.72", "−51.79". */
+function signedMoney(v: number): string {
+  if (!(v === v)) return "—";
+  const a = money(Math.abs(v));
+  return `${a === "0.00" ? "" : v > 0 ? "+" : "−"}${a}`;
+}
 function pct(v: number): string {
-  return v === v && Number.isFinite(v) ? `${v >= 0 ? "" : ""}${v.toFixed(2)}%` : "—";
+  return v === v && Number.isFinite(v) ? `${v.toFixed(2)}%` : "—";
+}
+function signedPct(v: number): string {
+  return v === v && Number.isFinite(v) ? `${signed(v)}%` : "—";
 }
 function signCls(v: number) {
   return v > 0 ? "up" : v < 0 ? "down" : "";
 }
+/** The report's currency: USD and USDT are written "U", like everywhere else in the app. */
+const unitOf = (c: string) => (c === "USD" || c === "USDT" || !c ? "U" : c);
 
-function reportBody(body: HTMLElement, rep: StrategyReport, _title: string): IChartApi {
+function reportBody(body: HTMLElement, rep: StrategyReport): IChartApi {
   const t = rep.trades;
   const wins = t.filter((x) => x.profit > 0);
   const losses = t.filter((x) => x.profit < 0);
   const pf = rep.grossLoss > 0 ? rep.grossProfit / rep.grossLoss : rep.grossProfit > 0 ? Infinity : NaN;
   const avgWin = wins.length ? rep.grossProfit / wins.length : NaN;
   const avgLoss = losses.length ? rep.grossLoss / losses.length : NaN;
-  const cur = rep.currency;
-  const cards: [string, string, string?][] = [
-    ["淨利", `${money(rep.netProfit)} ${cur}`, signCls(rep.netProfit)],
-    ["報酬率", pct((rep.netProfit / rep.initialCapital) * 100), signCls(rep.netProfit)],
-    ["總交易", String(t.length)],
-    ["勝率", t.length ? pct((wins.length / t.length) * 100) : "—"],
-    ["獲利因子", pf === Infinity ? "∞" : pf === pf ? pf.toFixed(2) : "—"],
-    ["最大回撤", `${money(rep.maxDrawdown)} (${pct(rep.maxDrawdownPct)})`, rep.maxDrawdown > 0 ? "down" : ""],
-    ["平均每筆", t.length ? `${money(rep.netProfit / t.length)}` : "—", signCls(rep.netProfit)],
-    ["平均獲利 / 虧損", avgWin === avgWin && avgLoss === avgLoss ? (avgWin / avgLoss).toFixed(2) : "—"],
-    ["最大單筆獲利", wins.length ? money(Math.max(...wins.map((x) => x.profit))) : "—", "up"],
-    ["最大單筆虧損", losses.length ? money(Math.min(...losses.map((x) => x.profit))) : "—", "down"],
-    ["手續費", money(rep.commission)],
-    ["未平倉損益", money(rep.openProfit), signCls(rep.openProfit)],
-    ["買進持有", pct(rep.buyHold), signCls(rep.buyHold)],
-    ["初始資金", `${money(rep.initialCapital)} ${cur}`],
-  ];
-  const grid = el("div", "pine-cards");
-  for (const [k, v, cls] of cards) {
-    const c = el("div", "pine-card");
-    c.append(el("div", "pop-lbl", k), el("div", "pine-card-v " + (cls ?? ""), v));
-    grid.append(c);
-  }
-  body.append(grid);
+  const u = unitOf(rep.currency);
+  const amount = (v: number) => (v === v ? `${money(v)} ${u}` : "—");
+  const signedAmount = (v: number) => (v === v ? `${signedMoney(v)} ${u}` : "—");
 
-  body.append(el("div", "pop-section", "權益曲線（每根 K 線收盤時的資金）"));
+  // the four figures that say how it went
+  const lead = el("div", "pine-lead");
+  const leadItem = (k: string, v: string, sub: string, cls = "") => {
+    const c = el("div", "pine-lead-item");
+    c.append(el("div", "pine-lead-k", k), el("div", "pine-lead-v " + cls, v), el("div", "pine-lead-sub", sub));
+    lead.append(c);
+  };
+  leadItem("淨利", signedAmount(rep.netProfit), `報酬率 ${signedPct((rep.netProfit / rep.initialCapital) * 100)}`, signCls(rep.netProfit));
+  leadItem("最大回撤", amount(rep.maxDrawdown), `回撤幅度 ${pct(rep.maxDrawdownPct)}`);
+  leadItem("勝率", t.length ? pct((wins.length / t.length) * 100) : "—", `${t.length} 筆交易，${wins.length} 筆獲利`);
+  leadItem("獲利因子", pf === Infinity ? "∞" : pf === pf ? pf.toFixed(2) : "—", `平均獲利 / 虧損 ${avgWin === avgWin && avgLoss === avgLoss ? (avgWin / avgLoss).toFixed(2) : "—"}`);
+  body.append(lead);
+
+  // the equity curve, with buying and holding the same capital for comparison
+  const chartHead = el("div", "pine-chart-head");
+  const key = (text: string, color: string) => {
+    const k = el("span", "pine-key", text);
+    k.style.setProperty("--key", color);
+    return k;
+  };
+  chartHead.append(el("span", "pine-chart-title", "權益曲線"), key("策略", THEME.data), key("買進持有", THEME.muted), el("span", "pine-chart-note", "每根 K 線收盤時的資金"));
   const box = el("div", "pine-equity");
-  body.append(box);
+  body.append(chartHead, box);
   const chart = createChart(box, {
     autoSize: true,
-    layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#787b86", fontSize: 11, attributionLogo: false },
-    grid: { vertLines: { visible: false }, horzLines: { color: "#2a2e39" } },
-    rightPriceScale: { borderColor: "#2a2e39" },
-    timeScale: { borderColor: "#2a2e39", timeVisible: true },
+    layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: THEME.muted, fontSize: 11, fontFamily: MONO_FONT, attributionLogo: false },
+    grid: { vertLines: { visible: false }, horzLines: { color: THEME.line } },
+    rightPriceScale: { borderVisible: false },
+    timeScale: { borderColor: THEME.line, timeVisible: true, tickMarkFormatter: fmtTick },
+    localization: { timeFormatter: (time: Time) => fmtChartTime(time, false) },
+    crosshair: { vertLine: { labelBackgroundColor: THEME.hover }, horzLine: { labelBackgroundColor: THEME.hover } },
     handleScroll: false,
     handleScale: false,
   });
-  const line = chart.addSeries(LineSeries, { color: "#2962ff", lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+  const hold = chart.addSeries(LineSeries, { color: THEME.muted, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
+  const line = chart.addSeries(LineSeries, { color: THEME.data, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
   const pts: { time: UTCTimestamp; value: number }[] = [];
+  const holdPts: { time: UTCTimestamp; value: number }[] = [];
   const times = rep.equityTimes;
-  for (let i = 0; i < rep.equity.length; i++) if (rep.equity[i] === rep.equity[i]) pts.push({ time: toChartTime(times[i] / 1000), value: rep.equity[i] });
+  for (let i = 0; i < rep.equity.length; i++) {
+    const time = toChartTime(times[i] / 1000);
+    if (rep.equity[i] === rep.equity[i]) pts.push({ time, value: rep.equity[i] });
+    const h = rep.buyHoldEquity[i];
+    if (h === h) holdPts.push({ time, value: h });
+  }
+  hold.setData(holdPts);
   line.setData(pts);
   chart.timeScale().fitContent();
+
+  // the rest, as a short list
+  const stats = el("div", "pine-stats");
+  const stat = (k: string, v: string, cls = "") => {
+    const r = el("div", "pine-stat");
+    r.append(el("span", "pine-stat-k", k), el("span", cls, v));
+    stats.append(r);
+  };
+  // left: per trade; right: against holding, costs, capital
+  stat("平均每筆", t.length ? signedAmount(rep.netProfit / t.length) : "—", t.length ? signCls(rep.netProfit) : "");
+  stat("最大單筆獲利", wins.length ? signedAmount(Math.max(...wins.map((x) => x.profit))) : "—");
+  stat("最大單筆虧損", losses.length ? signedAmount(Math.min(...losses.map((x) => x.profit))) : "—");
+  stat("未平倉損益", signedAmount(rep.openProfit), signCls(rep.openProfit));
+  stat("買進持有", signedPct(rep.buyHold), signCls(rep.buyHold));
+  stat("手續費", amount(rep.commission));
+  stat("初始資金", amount(rep.initialCapital));
+  body.append(stats);
 
   body.append(el("div", "pop-section", `交易紀錄（新的在上面${t.length > 300 ? "，只列最近 300 筆" : ""}）`));
   const tbl = el("table", "pine-trades");
@@ -639,8 +677,8 @@ function reportBody(body: HTMLElement, rep: StrategyReport, _title: string): ICh
       el("td", "", `${fmtT(x.exitTime)} ${x.exitId}`),
       el("td", "", px(x.exitPrice)),
       el("td", "", Number(x.qty.toFixed(6)).toString()),
-      el("td", signCls(x.profit), money(x.profit)),
-      el("td", signCls(x.profit), pct(pctV)),
+      el("td", signCls(x.profit), signedMoney(x.profit)),
+      el("td", signCls(x.profit), signedPct(pctV)),
     );
     tbl.append(tr);
   });

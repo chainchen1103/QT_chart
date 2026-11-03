@@ -3,6 +3,7 @@
 
 import type { Catalog } from "../chart/catalog.ts";
 import type { Instrument } from "../core/api.ts";
+import { fmtChange, shortName } from "../core/format.ts";
 import { TIMEFRAMES } from "../core/timeframes.ts";
 import { clone, DEFAULT_FVG, DEFAULT_OB, DEFAULT_SR, type Groups } from "../settings/model.ts";
 import type { Settings } from "../settings/store.ts";
@@ -49,7 +50,7 @@ export class Toolbar {
       };
       nav.append(b);
     }
-    if (document.activeElement !== this.input) this.input.value = cur.instId;
+    if (document.activeElement !== this.input) this.input.value = shortName(cur.instId);
   }
 
   /** Put the cursor in the symbol box (a new tab: type the symbol it should show). */
@@ -59,17 +60,19 @@ export class Toolbar {
 
   // ------------------------------------------------------------------- symbol search
   private renderList(filter: string) {
-    const q = filter.trim().toUpperCase().replace(/[-\s/]/g, "");
-    this.rows = this.d.catalog.list.filter((i) => !q || i.instId.replace(/-/g, "").includes(q)).slice(0, 80);
+    // "eth", "ETHUSDT.P" and "ETH-USDT-SWAP" all find ETH
+    const key = (s: string) => s.toUpperCase().replace(/[-.\s/]/g, "");
+    const q = key(filter);
+    this.rows = this.d.catalog.list.filter((i) => !q || key(shortName(i.instId)).includes(q) || key(i.instId).includes(q)).slice(0, 80);
     this.active = Math.min(this.active, Math.max(0, this.rows.length - 1));
     this.list.replaceChildren();
     this.rows.forEach((inst, k) => {
       const row = el("div", "symbol-row" + (k === this.active ? " active" : ""));
       const p = inst.last;
       row.append(
-        el("span", "", `${inst.base}USDT 永續`),
+        el("span", "", shortName(inst.instId)),
         el("span", "px", p ? p.toLocaleString("en-US", { maximumFractionDigits: inst.priceDecimals }) : ""),
-        el("span", "chg " + (inst.change24h >= 0 ? "up" : "down"), `${inst.change24h >= 0 ? "+" : ""}${(inst.change24h * 100).toFixed(2)}%`),
+        el("span", "chg " + (inst.change24h >= 0 ? "up" : "down"), fmtChange(inst.change24h)),
       );
       row.onmousedown = (e) => {
         e.preventDefault();
@@ -85,7 +88,7 @@ export class Toolbar {
     this.input.blur();
     const cur = this.d.current();
     if (id !== cur.instId) this.d.switchTo(id, cur.bar);
-    else this.input.value = id;
+    else this.input.value = shortName(id);
   }
 
   private setupSymbolBox() {
@@ -103,7 +106,7 @@ export class Toolbar {
     });
     input.addEventListener("blur", () => {
       this.list.hidden = true;
-      input.value = this.d.current().instId;
+      input.value = shortName(this.d.current().instId);
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
