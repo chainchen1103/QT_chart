@@ -240,7 +240,7 @@ export function alertDialogAt(x: number, y: number, ui: AlertUi, price: number |
 }
 
 // ----------------------------------------------------------------------------- inside a drawing's settings
-const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間；觸及、突破、跌破：碰到通道的任何一條線（上下緣、顯示的中線和等比線）。畫完之後照同樣斜率往右延伸";
+const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間；觸及、突破、跌破：碰到通道的任何一條線。畫完之後照同樣斜率往右延伸";
 const WHAT: Partial<Record<Drawing["kind"], string>> = {
   trend: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
   info: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
@@ -344,7 +344,7 @@ export function renderAlertOptions(service: AlertService): Render {
         "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心；點通知會切回 QT Chart 打開那個幣種",
       ),
       popup,
-      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知（Windows 通知失敗時仍會在程式內顯示）。視窗在背景時工作列按鈕會閃。程式開著才會提醒"),
+      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知。視窗在背景時工作列按鈕會閃。程式開著才會提醒"),
     );
   };
 }

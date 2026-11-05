@@ -115,6 +115,6 @@ export function renderTimeframes(io: TimeframeIo): Render {
     };
     row.append(n, unit, textButton("新增", "text-btn", add, "加到清單和工具列，並切換過去"));
     body.append(row, msg);
-    body.append(el("div", "pop-note", "星號標起來的會放在工具列上。OKX 沒有的週期（例如 10 秒、45 分、3 時）會用比較短的 K 線湊成。"));
+    body.append(el("div", "pop-note", "星號標起來的會放在工具列上。OKX 沒有的週期會用比較短的 K 線湊成。"));
   };
 }

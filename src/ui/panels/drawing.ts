@@ -174,12 +174,12 @@ function channelRows(body: HTMLElement, rerender: () => void, d: ChannelDrawing,
     const dev = el("div", "pop-row");
     const box = numInput(s.dev, CHANNEL_DEV, { title: "上下兩條線離迴歸線幾個標準差", step: "0.1", int: false, width: 64 }, (v) => apply({ dev: v }));
     box.dataset.key = "dev";
-    dev.append(lbl("上下各"), box, lbl("個標準差（收盤價）"));
+    dev.append(lbl("上下各"), box, lbl("個標準差"));
     body.append(dev);
   }
   const opts = el("div", "pop-grid");
   opts.append(
-    labelled(checkbox(s.middle, "", (v) => apply({ middle: v })), d.kind === "regression" ? "迴歸線（虛線）" : "中線（虛線）"),
+    labelled(checkbox(s.middle, "", (v) => apply({ middle: v })), d.kind === "regression" ? "迴歸線" : "中線"),
     labelled(checkbox(s.extendLeft, "", (v) => apply({ extendLeft: v })), "向左延伸"),
     labelled(checkbox(s.extendRight, "", (v) => apply({ extendRight: v })), "向右延伸"),
   );

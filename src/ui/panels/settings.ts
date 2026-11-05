@@ -30,11 +30,11 @@ export type SettingsIo = {
 
 const SECTIONS: { id: SettingsSection; name: string; note: string }[] = [
   { id: "appearance", name: "圖表外觀", note: "背景、格線、文字和 K 線的顏色，所有圖表共用" },
-  { id: "labels", name: "價格標籤", note: "價格標尺上顯示哪些標籤（也可以在價格標尺上按右鍵）" },
+  { id: "labels", name: "價格標籤", note: "價格標尺上顯示哪些標籤" },
   { id: "bars", name: "K 線與週期", note: "工具列上的週期、自己加的週期，和每個圖表載入多少 K 線" },
   { id: "alerts", name: "提醒", note: "所有價格提醒共用的聲音和通知" },
   { id: "position", name: "倉位", note: "新倉位的預設資金和風險，和所有倉位共用的 R 線、顏色" },
-  { id: "account", name: "交易帳戶", note: "下單用的 OKX API（也可以按狀態列右下角的按鈕）" },
+  { id: "account", name: "交易帳戶", note: "下單用的 OKX API" },
   { id: "performance", name: "效能", note: "繪圖方式" },
   { id: "about", name: "關於", note: "QT Chart 用到的套件和它們的授權" },
 ];

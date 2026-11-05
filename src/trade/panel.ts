@@ -130,7 +130,7 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
       el(
         "div",
         "pop-note",
-        "開著時：OKX 上的持倉（包括在 OKX App 開的）會畫在那個幣種的圖上，標實際數量、均價和未實現盈虧，平倉後留著標已實現盈虧；" +
+        "開著時：OKX 上的持倉會畫在那個幣種的圖上，標實際數量、均價和未實現盈虧，平倉後留著標已實現盈虧；" +
           "OKX 上改了止損、止盈，圖上跟著改；在圖上拖 OKX 持倉的止損、止盈，會先問要不要一起改 OKX；加倉單成交時，可以自動把前面那筆的止損、止盈移過去。",
       ),
     );
