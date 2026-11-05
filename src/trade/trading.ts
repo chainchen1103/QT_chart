@@ -34,6 +34,10 @@ export type TradingDeps = {
   note(text: string): void;
   /** An order of ours filled (seen by asking OKX): an add may move the earlier stops now. */
   filled?(instId: string): void;
+  /** An order of ours is about to be sent (its position may show before it does). */
+  placing?(instId: string, side: "buy" | "sell"): void;
+  /** An order of ours changed outside the account's reports (placed, or its state read from OKX). */
+  orderChanged?(instId: string): void;
 };
 
 /** 下單 is the primary action on the chart: off-white with dark text, like the primary buttons. */
@@ -142,6 +146,7 @@ export class Trading {
             const next = withInfo(o, await acct.order(t.instId(), o.ordId));
             if (!t.alive() || (next.state === o.state && next.fillSz === o.fillSz && next.avgPx === o.avgPx)) continue;
             t.setOrder(d.id, next);
+            this.d.orderChanged?.(t.instId());
             if (next.state === "filled") this.d.note(`${t.instId()} 訂單成交：${fmtCoins(next.sz)} 張${next.avgPx ? " @ " + t.fmtPrice(next.avgPx) : ""}`);
             if (next.fillSz > 0 && next.moveOnFill && !next.moved) this.d.filled?.(t.instId());
           } catch (e) {
@@ -173,7 +178,9 @@ export class Trading {
         if (!t.alive()) return;
         t.setOrder(d.id, o);
         d.order = o; // the window's own copy, for its next redraw
+        this.d.orderChanged?.(t.instId());
       },
+      placing: (side) => this.d.placing?.(t.instId(), side),
       note: this.d.note,
     };
   }

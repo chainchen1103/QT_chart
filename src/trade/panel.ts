@@ -40,6 +40,8 @@ export type OrderSpot = {
   prefs: Setting<OrderPrefs>;
   /** Keep the order on the position (saved with the drawings); undefined forgets it. */
   record(o: PositionOrder | undefined): void;
+  /** An order of this side is about to be sent. */
+  placing?(side: "buy" | "sell"): void;
   note(text: string): void;
 };
 
@@ -484,6 +486,7 @@ export async function submitOrder(s: OrderSpot, plan: OrderPlan, prefs: OrderPre
   const demo = acct.keys.demo;
   const clOrdId = newClOrdId();
   const algoClOrdId = `qts${clOrdId.slice(3)}`; // its stop-loss / take-profit, to find them again
+  s.placing?.(plan.side); // a market order's position can show before this answer does
   const r = await acct.place({
     instId: s.instId,
     side: plan.side,

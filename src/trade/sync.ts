@@ -25,6 +25,7 @@ import {
   applySync,
   findClosed,
   isLive,
+  ORDER_GRACE,
   posKeyOf,
   positionOfOrder,
   stopEdits,
@@ -51,6 +52,8 @@ export type SyncDeps = {
 
 const LOOK_AGAIN_MS = 15_000;
 const GIVE_UP_MS = 5 * 60_000;
+/** How long an order being sent holds back drawing a new position of its side on its own. */
+const PLACING_MS = 15_000;
 
 export class AccountSync {
   /** The account as last reported (null: not following). */
@@ -65,6 +68,10 @@ export class AccountSync {
   private readonly looking = new Map<string, [number, number]>();
   /** Adds whose earlier stops are being moved. */
   private readonly moving = new Set<string>();
+  /** Orders of ours being sent: "instId:side" → when (ms). */
+  private readonly placing = new Map<string, number>();
+  /** Symbols to match again at a time (ms) whatever the account does by then. */
+  private readonly later = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<() => void>();
 
   constructor(d: SyncDeps) {
@@ -102,6 +109,8 @@ export class AccountSync {
     const e = this.state;
     const inst = this.d.catalog.get(instId);
     if (!e || !inst || !(inst.ctVal > 0)) return null;
+    const now = Date.now();
+    const placing = (["long", "short"] as const).filter((side) => now - (this.placing.get(`${instId}:${side}`) ?? 0) < PLACING_MS);
     return {
       instId,
       demo: e.demo,
@@ -109,7 +118,21 @@ export class AccountSync {
       algos: e.algos.filter((a) => a.instId === instId),
       tick: Number(inst.tickSz) || 0,
       ctVal: inst.ctVal,
+      placing,
     };
+  }
+
+  /** An order of ours is about to be sent: its position may show before the order does (a market order fills at
+   *  once), so it isn't drawn on its own meanwhile. */
+  orderPlacing(instId: string, side: "buy" | "sell") {
+    this.placing.set(`${instId}:${side === "buy" ? "long" : "short"}`, Date.now());
+  }
+
+  /** An order of ours changed outside the account's reports (just placed, or its state read from OKX): match the
+   *  symbol again, so a filled order is tied to its position and that position isn't shown twice. */
+  orderChanged(instId: string) {
+    if (!this.state) return;
+    this.matchSymbol(instId, []);
   }
 
   /** Is the drawing on OKX now (its entry OKX's; its stops go to OKX when moved)? */
@@ -167,25 +190,45 @@ export class AccountSync {
     if (!this.tied.size) for (const id of this.d.symbols()) this.tied.add(id); // first time: look at them all once
     const ids = new Set<string>([...this.tied, ...e.positions.map((p) => p.instId), ...e.algos.map((a) => a.instId), ...e.orders.map((o) => o.instId)]);
     for (const instId of ids) {
-      const s = this.symbolState(instId);
-      if (!s) {
-        all = false;
-        continue;
-      }
-      let gone: { posId: string; cTime: number }[] = [];
-      let ties = false;
-      this.d.editDrawings(instId, (list) => {
-        const r = applySync(list, s, e.orders.filter((o) => o.instId === instId), now);
-        gone = r.gone;
-        ties = list.some((d) => d.kind === "position" && ((d.okx && !d.okx.closed) || (d.order && !d.order.closed)));
-        return r.changed;
-      });
-      if (ties) this.tied.add(instId);
-      else this.tied.delete(instId);
-      for (const g of gone) void this.lookUp(instId, g);
-      void this.moveStops(instId);
+      if (!this.matchSymbol(instId, e.orders.filter((o) => o.instId === instId), now)) all = false;
     }
     return all;
+  }
+
+  /** One symbol's drawings against the account; false when it had to be left out (no contract size yet). */
+  private matchSymbol(instId: string, orders: SyncEvent["orders"], now = Date.now() / 1000): boolean {
+    const s = this.symbolState(instId);
+    if (!s) return false;
+    let gone: { posId: string; cTime: number }[] = [];
+    let ties = false;
+    let until: number | null = null;
+    this.d.editDrawings(instId, (list) => {
+      const r = applySync(list, s, orders, now);
+      gone = r.gone;
+      until = r.until;
+      ties = list.some((d) => d.kind === "position" && ((d.okx && !d.okx.closed) || (d.order && !d.order.closed)));
+      return r.changed;
+    });
+    if (ties) this.tied.add(instId);
+    else this.tied.delete(instId);
+    for (const g of gone) void this.lookUp(instId, g);
+    void this.moveStops(instId);
+    if (until != null) this.matchAt(instId, until);
+    return true;
+  }
+
+  /** Match a symbol again at `at` (ms), even when the account doesn't change by then: a position held back for
+   *  an order of ours is drawn then if no order went into it. */
+  private matchAt(instId: string, at: number) {
+    const was = this.later.get(instId);
+    if (was && was.at <= at) return; // matched again by then anyway
+    if (was) clearTimeout(was.timer);
+    const wait = Math.min(Math.max(at - Date.now(), 0) + 500, ORDER_GRACE + 1000); // OKX's clock may be ahead
+    const timer = setTimeout(() => {
+      this.later.delete(instId);
+      this.orderChanged(instId);
+    }, wait);
+    this.later.set(instId, { at, timer });
   }
 
   /** How a position that is gone ended (OKX's position history), onto its drawings. */

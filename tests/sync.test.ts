@@ -97,6 +97,33 @@ test("orders of ours: attached stops, the position they go into, stops moved on 
   assert.equal((twice[0] as PositionDrawing).order!.algoId, undefined); // two at that price: not guessed
 });
 
+test("a market order: its position may show before the order is known, and is drawn once", () => {
+  const opened = pos({ cTime: NOW * 1000 - 1_000 });
+  // the order is being sent, the position already shows: not drawn on its own
+  const list: Drawing[] = [drawn("p1")];
+  const held = applySync(list, { ...state([opened], []), placing: ["long"] }, [], NOW);
+  assert.equal(list.length, 1);
+  assert.equal(held.until, opened.cTime + 15_000); // matched again then, drawn if no order of ours went into it
+  assert.equal(applySync([], state([opened], []), [], NOW).until, null);
+  // the other side being sent doesn't hold it back
+  const other: Drawing[] = [];
+  applySync(other, { ...state([opened], []), placing: ["short"] }, [], NOW);
+  assert.equal(other.length, 1);
+  // the answer came: the order is kept as filled (read from OKX, no report of its own): matched to the position
+  const d = list[0] as PositionDrawing;
+  d.order = order({ ordType: "market", px: null, state: "filled", fillSz: 3, avgPx: 78000, fillT: NOW * 1000 - 1_000 });
+  applySync(list, state([opened], []), [], NOW);
+  assert.equal(d.order!.posKey, posKeyOf(opened));
+  assert.equal(list.length, 1);
+  // drawn on its own before the order was known: taken away once the order is read as filled
+  const twice: Drawing[] = [drawn("p2")];
+  applySync(twice, state([opened], []), [], NOW);
+  assert.equal(twice.length, 2);
+  (twice[0] as PositionDrawing).order = order({ ordType: "market", px: null, state: "filled", fillSz: 3, avgPx: 78000, fillT: NOW * 1000 - 1_000 });
+  applySync(twice, state([opened], []), [], NOW + 5);
+  assert.deepEqual(twice.map((x) => x.id), ["p2"]);
+});
+
 test("a waiting order changed on OKX (or by us): the position's entry, stops and size follow", () => {
   const d = drawn("p1", order());
   const list: Drawing[] = [d];

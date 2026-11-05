@@ -117,6 +117,8 @@ const trading = new Trading({
   button: $("account-btn"),
   note: (text) => status.note(text),
   filled: (instId) => sync.orderFilled(instId),
+  placing: (instId, side) => sync.orderPlacing(instId, side),
+  orderChanged: (instId) => sync.orderChanged(instId),
 });
 const drawingHistory = new DrawingHistory(undefined, () => paintUndoButtons());
 /** Change a symbol's saved drawings from outside the charts (OKX): saved, not a step to undo, shown at once. */
