@@ -87,18 +87,36 @@ const planned = (list: Drawing[], o: PaintOptions, extra: Record<string, LabelAs
   return { geo, plans, at: (key: string) => at("drawings", key) };
 };
 
-test("a position's info starts past its entry handle; the result row past its edge handle", () => {
-  const short = { ...pos, b: { t: 24000, p: 178 } }; // to x 400
-  const { geo, at } = planned([short], paint("下單"));
+test("a position's info: past the stop line at the right, the stop label at the left; the result past the edge handle", () => {
+  const narrow = { ...pos, b: { t: 24000, p: 178 } }; // to x 400: too narrow for the stop label and the info side by side
+  const { geo, at } = planned([narrow], paint("下單"));
   const p = geo[0].pos!;
-  assert.equal(at("p:info").x, p.x0 + 10);
-  assert.equal(at("p:info").y + at("p:info").h / 2, p.entryY); // on the entry line
+  const info = at("p:info");
+  const sl = at("p:sl");
+  assert.equal(sl.x, p.x0 + 10); // the stop label at the left end of its row, past the handle
+  assert.equal(sl.y, p.stopY + 4); // a long: under the stop line, outside the box
+  assert.equal(info.x + info.w, p.x1 - 4); // the info at the right end
+  assert.equal(info.y, sl.y + sl.h + 3); // a row further out
   const result = at("p:result");
   assert.ok(result.x >= p.x1 + 10, `${result.x} < ${p.x1 + 10}`);
-  assert.ok(result.x >= at("p:info").x + at("p:info").w + 6);
   // nothing the position writes covers anything else it writes
   const boxes = ["p:info", "p:tp", "p:sl", "p:result", "p:R0", "p:R1"].map(at);
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!overlaps(boxes[i], boxes[j]), `${i} / ${j}`);
+  // wide enough: on the stop label's row; a short: over its stop line
+  const wide = planned([{ ...pos, a: { t: 6000, p: 180 }, b: { t: 42000, p: 182 }, target: 175 }], paint(null));
+  const q = wide.geo[0].pos!;
+  const wi = wide.at("p:info");
+  assert.equal(wi.x + wi.w, q.x1 - 4);
+  assert.equal(wi.y + wi.h, q.stopY - 4);
+  assert.ok(!overlaps(wi, wide.at("p:sl")));
+});
+
+test("the info shows all the time, or only while the position is pointed at", () => {
+  const hover = { ...paint(null), position: { ...DEFAULT_POSITION, infoHover: true } };
+  const geo = computeGeo([pos], pr, { fib, rLevels: [1, 2], fmtPrice: hover.fmtPrice, trades, active: () => false });
+  assert.ok(!labelPlans(geo, hover, 800, 400).some((x) => x.ask.key === "p:info"));
+  assert.ok(labelPlans(geo, paint(null), 800, 400).some((x) => x.ask.key === "p:info"));
+  assert.equal(DEFAULT_POSITION.infoHover, false);
 });
 
 test("a position past the right edge: the result row comes back on screen, clear of the info and the 高 tag", () => {
@@ -113,16 +131,18 @@ test("a position past the right edge: the result row comes back on screen, clear
   assert.ok(at("p:R0").x + at("p:R0").w <= 800 - 4);
 });
 
-test("bells make way: a position's bell goes left of its entry; a price alert's slides left of the 高 tag", () => {
+test("bells make way: next to a drawing's first point where its labels leave room; a price alert's left of the 高 tag", () => {
   const { geo, plans } = planned([pos], paint(null));
   const g = geo[0];
   const at = place({
     scale: [ask("hi", 782, 92, 18, 16, PRIO.fixed)],
+    // something already above right of the entry: the bell goes left of it
+    other: [ask("x", g.ax, g.ay - 30, 60, 26, PRIO.pinned)],
     drawings: plans.map((p) => p.ask),
     alerts: [drawingBellAsk("0", g.ax, g.ay), priceBellAsk("1", 800, 100)],
   });
   const bell = at("alerts", "0");
-  assert.ok(!overlaps(bell, at("drawings", "p:info")));
+  for (const key of ["p:info", "p:tp", "p:sl", "p:result"]) assert.ok(!overlaps(bell, at("drawings", key)), key);
   assert.equal(bell.x + bell.w, g.ax - 10); // left of the entry, clear of its handle
   assert.equal(at("alerts", "1").x, 782 - 2 - 16);
 });

@@ -13,7 +13,7 @@ import { fmtVol, signed } from "../core/format.ts";
 import type { Candle } from "../core/api.ts";
 import type { LiveInfo } from "../trade/sync.ts";
 import { MONO_FONT, THEME } from "../ui/theme.ts";
-import { PRIO, textWidth, type Box, type LabelAsk } from "../chart/labelspace.ts";
+import { PRIO, textWidth, type Box, type LabelAsk, type Spot } from "../chart/labelspace.ts";
 
 /** The button at the right of a position: 下單, or the order placed from it. */
 /** `fg`: the text color (white when not given). */
@@ -454,10 +454,11 @@ function anglePlans(out: LabelPlan[], g: Geo, T: Type) {
   });
 }
 
-/** Position: take-profit and stop labels, the info at the entry (all the time, or while the position is pointed
- *  at, selected or placed), the result and the order button, and the R lines' names. The info, the result and
- *  the order button stay on screen when the box runs past the right edge (a position drawn at the newest bar
- *  usually does), and keep clear of the box's handles; the result goes where it covers no candles when it can.
+/** Position: take-profit and stop labels, the info beyond the stop line (all the time, or while the position is
+ *  pointed at, selected or placed), the result and the order button, and the R lines' names. The info, the
+ *  result and the order button stay on screen when the box runs past the right edge (a position drawn at the
+ *  newest bar usually does), and keep clear of the box's handles; the result goes where it covers no candles
+ *  when it can, and so does the info: past the stop line the price has not been while the trade is on.
  *  A position built up by adds: the last add carries the whole position's numbers (average entry, quantity,
  *  risk, result); earlier parts show only their own part. */
 function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width: number) {
@@ -482,35 +483,41 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
   const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
   /** Top of a box `h` tall on the `sign` side of a line at `y` (−1: above it), 4 px off it. */
   const beside = (y: number, sign: number, h: number) => (sign < 0 ? y - 4 - h : y + 4);
-  /** A take-profit or stop label: past its line outside the box, in the middle of it; else just inside the box,
-   *  or at either end of the line. */
-  const lineTag = (key: string, text: string, y: number, sign: number, bg: string) => {
+  /** A take-profit or stop label: past its line outside the box, in the middle of it (`leftFirst`: at its left end,
+   *  as the stop's, with the info box at the right); else just inside the box, or at the other places along the
+   *  line. Where it goes when it can, and its size. */
+  const lineTag = (key: string, text: string, y: number, sign: number, bg: string, leftFirst = false) => {
     const s = size([text]);
     const cx = fitX(mid - s.w / 2, s.w);
+    const lx = fitX(left + 10, s.w);
+    const mids = [{ x: cx, y: beside(y, sign, s.h) }, { x: cx, y: beside(y, -sign, s.h) }];
+    const ends = [{ x: lx, y: beside(y, sign, s.h) }, { x: fitX(right - 10 - s.w, s.w), y: beside(y, sign, s.h) }];
     out.push({
-      ask: {
-        key: `${d.id}:${key}`, w: s.w, h: s.h, prio: PRIO.drawing,
-        at: [
-          { x: cx, y: beside(y, sign, s.h) },
-          { x: cx, y: beside(y, -sign, s.h) },
-          { x: fitX(left + 10, s.w), y: beside(y, sign, s.h) },
-          { x: fitX(right - 10 - s.w, s.w), y: beside(y, sign, s.h) },
-        ],
-      },
+      ask: { key: `${d.id}:${key}`, w: s.w, h: s.h, prio: PRIO.drawing, at: leftFirst ? [ends[0], ...mids, ends[1]] : [...mids, ...ends] },
       paint: filled([text], bg),
     });
+    return { x: leftFirst ? lx : cx, w: s.w, h: s.h };
   };
-  /** The info box on the entry line, clear of the entry's handle: after it, or before it when the box starts too
-   *  close to the right edge for that. Left out unless it is to show all the time or the position is active. */
-  const infoBox = (lines: string[], y: number, fg = "#ffffff") => {
-    if (!ps.infoAlways && !g.active) return;
+  /** The info box past the stop line, outside the box, at the right end of what is on screen: on the stop label's
+   *  row when both fit, else one row further out; failing those, inside the box by the stop line, or on the entry
+   *  row clear of the entry's handle (also where it goes with no stop drawn). Left out unless it is to show all
+   *  the time or the position is pointed at, selected or placed. */
+  const infoBox = (lines: string[], sl: { x: number; w: number; h: number } | null, fg = "#ffffff") => {
+    if (ps.infoHover && !g.active) return;
     const s = size(lines);
+    const side = -up; // the stop's side: 1 below the entry, −1 above
+    const rx = fitX(right - 4 - s.w, s.w);
+    const at: Spot[] = [];
+    if (sl) {
+      const row = { x: rx, y: beside(p.stopY, side, s.h) };
+      const beyond = { x: rx, y: side > 0 ? p.stopY + 4 + sl.h + 3 : p.stopY - 4 - sl.h - 3 - s.h };
+      at.push(...(sl.x + sl.w + 8 <= rx ? [row, beyond] : [beyond, row]), { x: rx, y: beside(p.stopY, -side, s.h) });
+    }
     const fits = (x: number) => x >= 0 && x + s.w <= width - 4;
     const after = p.x0 + 10;
     const before = p.x0 - 10 - s.w;
-    const x = fits(after) ? after : fits(before) ? before : Math.max(0, Math.min(after, width - 4 - s.w));
-    const b = { x, y: y - s.h / 2, w: s.w, h: s.h };
-    out.push({ ask: { key: `${d.id}:info`, w: s.w, h: s.h, at: [b], prio: PRIO.anchored }, paint: filled(lines, "rgba(25,25,27,0.92)", fg) });
+    at.push({ x: fits(after) ? after : fits(before) ? before : Math.max(0, Math.min(after, width - 4 - s.w)), y: p.entryY - s.h / 2 });
+    out.push({ ask: { key: `${d.id}:info`, w: s.w, h: s.h, at, prio: PRIO.anchored }, paint: filled(lines, "rgba(25,25,27,0.92)", fg) });
   };
   /** What it came to, and the order button after it, on the row at `y`, off the candles when it can be: right of
    *  the box (past its handle); else at the right end of the row, or just inside the take-profit or the stop
@@ -562,13 +569,13 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     };
     const open = !v.closed;
     if (!k.noTp) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
-    if (!k.noSl) lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss);
+    const sl = k.noSl ? null : lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss, true);
     infoBox(
       [
         `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
         `均價 ${fp(v.avg)}${k.noSl ? "  沒有設止損" : ""}${k.noTp ? "  沒有設止盈" : ""}`,
       ],
-      p.entryY,
+      sl,
     );
     const [text, bg] = v.closed
       ? [`已平倉${v.closed.px ? ` @ ${fp(v.closed.px)}  ${money(v.closed.pnl)}` : ""}`, v.closed.px ? (v.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
@@ -587,7 +594,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
   const tpText = `止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})${earlier ? "" : `${tpR}${t ? "  " + money(reward) : ""}`}`;
   const slText = `止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})${earlier ? "" : `${slR}${t ? "  " + money(-risk) : ""}`}`;
   lineTag("tp", tpText, p.targetY, up, earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
-  lineTag("sl", slText, p.stopY, -up, earlier ? hexToRgba(ps.loss, 0.45) : ps.loss);
+  const sl = lineTag("sl", slText, p.stopY, -up, earlier ? hexToRgba(ps.loss, 0.45) : ps.loss, true);
   if (t) {
     const pl = t.plan;
     const side = dir === 1 ? "多單" : "空單";
@@ -609,7 +616,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const warn = pl.capped || (!!sc && sc.full && !earlier);
     // an earlier part's labels go to the stop side of its entry: later adds sit on the profit side, close by
     const rowY = earlier ? p.entryY - up * (size(infoLines).h / 2 + 3) : p.entryY;
-    infoBox(infoLines, rowY, warn ? THEME.down : "#ffffff");
+    infoBox(infoLines, sl, warn ? THEME.down : "#ffffff");
     const pnl = sc ? sc.pnl : t.pnl;
     const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
     const result: Record<string, [string, string]> = {

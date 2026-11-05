@@ -365,9 +365,9 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
     shows.append(
       labelled(checkbox(cur.showPrices, "", (v) => set({ showPrices: v })), "標出價格"),
       labelled(
-        checkbox(cur.infoAlways, "", (v) => set({ infoAlways: v })),
+        checkbox(!cur.infoHover, "", (v) => set({ infoHover: !v })),
         "一直顯示資訊框",
-        "數量、保證金、資金、風險和盈虧比的黑色框。不勾時，滑鼠移到倉位上或選取它才顯示，不會一直擋住 K 線",
+        "數量、保證金、資金、風險和盈虧比的黑色框，放在止損那一側框外的右邊。不勾時，滑鼠移到倉位上或選取它才顯示",
       ),
     );
     body.append(colors, shows);
@@ -384,7 +384,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       // one position's window: only what it shows of the shared settings
       foot.append(el("span", "spacer"), textButton("恢復 R 線和顏色", "link-btn", () => {
         const d = DEFAULT_POSITION;
-        set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoAlways: d.infoAlways });
+        set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoHover: d.infoHover });
         rerender();
       }, "R 線、顏色、透明度、標出價格和資訊框恢復預設；這個倉位的價格、資金、風險、槓桿不變"));
     } else {
