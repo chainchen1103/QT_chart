@@ -11,7 +11,7 @@ import type { Setting } from "../core/setting.ts";
 import type { ScaleLabels } from "../settings/model.ts";
 import { isTyping, menuItem } from "./dom.ts";
 import { openScaleMenu } from "./panels/scale.ts";
-import { popoverAt } from "./popover.ts";
+import { closePopover, popoverAt } from "./popover.ts";
 
 export type PaneMenuDeps = {
   el: HTMLElement;
@@ -46,7 +46,11 @@ export class PaneMenus {
       if (x < view.chart.timeScale().width()) {
         popoverAt(cx, cy, "圖表", (body) => {
           addAlert(body);
-          body.append(menuItem("重設圖表視圖", () => d.resetView(), "Alt+R"), menuItem("圖表外觀…", () => d.appearanceAt(cx, cy)));
+          const reset = () => {
+            closePopover();
+            d.resetView();
+          };
+          body.append(menuItem("重設圖表視圖", reset, "Alt+R"), menuItem("圖表外觀…", () => d.appearanceAt(cx, cy)));
         });
       } else {
         openScaleMenu(cx, cy, d.labels, addAlert);

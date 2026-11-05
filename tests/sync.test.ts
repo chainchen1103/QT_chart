@@ -134,3 +134,26 @@ test("prices as OKX takes them", () => {
   assert.equal(priceArg(77800.04, 0.1), "77800.0");
   assert.equal(priceArg(0.00001234, 0.0000001), "0.0000123");
 });
+
+test("our order filling: the position OKX reports first is not drawn a second time", () => {
+  const d = drawn("p1", order());
+  const list: Drawing[] = [d];
+  const opened = pos({ cTime: NOW * 1000 - 2_000 }); // opened 2 s ago, while our order still shows as waiting
+  applySync(list, state([opened], []), [upd({ state: "live", accFillSz: 0 })], NOW);
+  assert.equal(list.length, 1); // waits for the order
+  // the order shows filled: it is matched to the position, still one drawing
+  applySync(list, state([opened], []), [upd({ fillTime: NOW * 1000 - 2_000, uTime: NOW * 1000 - 2_000 })], NOW);
+  assert.equal(d.order!.posKey, posKeyOf(opened));
+  assert.equal(list.length, 1);
+  // a drawing made from it before the order showed (an older version, or after the wait) goes once matched
+  const twice: Drawing[] = [drawn("p2", order({ ordId: "701" }))];
+  applySync(twice, state([opened], []), [], NOW + 30); // the order never showed in time: drawn on its own
+  assert.equal(twice.length, 2);
+  assert.ok((twice[1] as PositionDrawing).okx);
+  applySync(twice, state([opened], []), [upd({ ordId: "701", fillTime: NOW * 1000 - 2_000, uTime: NOW * 1000 - 2_000 })], NOW + 31);
+  assert.deepEqual(twice.map((x) => x.id), ["p2"]);
+  // with no order of ours waiting, a new position is drawn at once
+  const other: Drawing[] = [];
+  applySync(other, state([opened], []), [], NOW);
+  assert.equal(other.length, 1);
+});

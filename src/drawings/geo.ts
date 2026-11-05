@@ -178,10 +178,16 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
           const y = pr.y(l.price);
           return y == null ? [] : [{ ...l, y }];
         });
-        const x1 = Math.max(bx, ax + 10);
+        // closed on OKX: the box ends when it was closed, and the exit is where (OKX's own record)
+        const real = d.okx?.closed ?? d.order?.closed;
+        const realX = real && real.t > 0 ? pr.x(real.t) : null;
+        const x1 = Math.max(realX ?? bx, ax + 10);
         const t = o.trades.get(d.id);
         let exit: { x: number; y: number } | null = null;
-        if (t && t.outcome.exit != null && t.outcome.exitT != null) {
+        if (real) {
+          const ey = real.px > 0 ? pr.y(real.px) : null;
+          if (realX != null && ey != null) exit = { x: realX, y: ey };
+        } else if (t && t.outcome.exit != null && t.outcome.exitT != null) {
           const ex = pr.x(t.outcome.exitT);
           const ey = pr.y(t.outcome.exit);
           if (ex != null && ey != null) exit = { x: ex, y: ey };
@@ -193,9 +199,10 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
           { x: ax, y: targetY, part: "target" },
           { x: x1, y: ay, part: "edge" },
         ];
-        // drawn from OKX: only the stops OKX has can be moved, and none once it is closed
+        // drawn from OKX: only the stops OKX has can be moved, and none once it is closed; closed on OKX, a record
         const k = d.okx;
         if (k) g.handles = k.closed ? [] : g.handles.filter((h) => (h.part === "stop" && !k.noSl) || (h.part === "target" && !k.noTp));
+        else if (d.order?.closed) g.handles = [];
         break;
       }
       case "hline":

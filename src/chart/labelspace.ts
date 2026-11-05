@@ -4,24 +4,30 @@
 // and paints each label where it was put. Places are handed out once per repaint, over every layer together,
 // lowest priority number first (PRIO): what can't move, the bells of price alerts, labels that stay with their
 // line, a position's info at its entry, labels that may move, R lines' names, the bells of drawings, indicator
-// lines' names. A label takes its first place that covers nothing placed before it, sliding past what is in
-// the way when it may (an indicator line's name slides left along its line); with no free place it takes the
-// one where it covers least, or is left out when it is optional.
+// lines' names. A label takes the first of its places that covers nothing placed before it (nor what it should
+// keep off, such as candles); failing that, it slides from its places past what is in the way when it may (an
+// indicator line's name slides left along its line); with no free place it takes the one where it covers least,
+// or is left out when it is optional.
 
 export type Box = { x: number; y: number; w: number; h: number };
 export type Slide = "left" | "right" | "up" | "down";
+/** How far a label may slide: its left edge (sliding left or right) or its top (up or down) stays from `min` to `max`. */
+export type Range = { min: number; max: number };
+/** A top-left corner to try; `slide` and `range` in place of the label's own for sliding from here ("none": not). */
+export type Spot = { x: number; y: number; slide?: Slide | "none"; range?: Range };
 
 export type LabelAsk = {
   /** Unique within its layer. */
   key: string;
   w: number;
   h: number;
-  /** Top-left corners to try, best first. */
-  at: readonly { x: number; y: number }[];
-  /** From each place, slide this way past what is in the way before trying the next place. */
+  /** Places to try, best first. */
+  at: readonly Spot[];
+  /** When none of them is free: from each place, slide this way past what is in the way. */
   slide?: Slide;
-  /** How far it may slide: its left edge (sliding left or right) or its top (up or down) stays from `min` to `max`. */
-  range?: { min: number; max: number };
+  range?: Range;
+  /** What it should keep off besides other labels (a position's result: the candles). */
+  avoid?: (b: Box) => boolean;
   /** Left out when it has no free place (rather than covering something). */
   optional?: boolean;
   /** Lower numbers are placed first (PRIO). */
@@ -94,32 +100,51 @@ export function layout(asks: ReadonlyMap<string, readonly LabelAsk[]>, size: { w
 }
 
 function place(a: LabelAsk, taken: readonly Box[], W: number, H: number): Box | null {
-  let best: Box | null = null;
-  let least = Infinity;
+  const best = { box: null as Box | null, cost: Infinity };
+  /** What is in the way at `b`, whether it covers what it should keep off, and what it costs there: covering
+   *  another label, then being off the pane (a label out of sight is worse than one partly covered), then
+   *  covering what it keeps off. */
+  const judge = (b: Box) => {
+    const hits = taken.filter((t) => near(b, t));
+    const covers = !!a.avoid && a.avoid(b);
+    const cost = hits.reduce((s, t) => s + overlap(b, t), 0) + 2 * outside(b, W, H) + (covers ? 0.3 * b.w * b.h : 0);
+    if (cost < best.cost) {
+      best.box = b;
+      best.cost = cost;
+    }
+    return { hits, covers, free: !hits.length && cost === 0 };
+  };
+  // each place as it is first
   for (const p of a.at) {
+    const b = { x: p.x, y: p.y, w: a.w, h: a.h };
+    if (judge(b).free) return b;
+  }
+  // then sliding from those that may
+  for (const p of a.at) {
+    const slide = p.slide === "none" ? undefined : (p.slide ?? a.slide);
+    if (!slide) continue;
+    const range = p.range ?? a.range;
     let b: Box = { x: p.x, y: p.y, w: a.w, h: a.h };
-    for (let k = 0; ; k++) {
-      const hits = taken.filter((t) => near(b, t));
-      // off the pane counts double: a label out of sight is worse than one partly covered
-      const cost = hits.reduce((s, t) => s + overlap(b, t), 0) + 2 * outside(b, W, H);
-      if (cost < least) {
-        best = b;
-        least = cost;
-      }
-      if (!hits.length) {
-        if (cost === 0) return b;
-        break; // free but partly off the pane: sliding on won't help
-      }
-      if (!a.slide || k >= MAX_SLIDES || atEdge(b, a.slide, W, H)) break;
-      b = past(b, hits, a.slide);
-      if (a.range) {
-        const v = a.slide === "left" || a.slide === "right" ? b.x : b.y;
-        if (v < a.range.min || v > a.range.max) break; // slid off what it belongs to
+    for (let k = 0; k < MAX_SLIDES; k++) {
+      const j = judge(b);
+      if (j.free) return b;
+      if (!j.hits.length && !j.covers) break; // free but partly off the pane: sliding on won't help
+      if (atEdge(b, slide, W, H)) break;
+      b = j.hits.length ? past(b, j.hits, slide) : step(b, slide);
+      if (range) {
+        const v = slide === "left" || slide === "right" ? b.x : b.y;
+        if (v < range.min || v > range.max) break; // slid off what it belongs to
       }
     }
   }
-  if (a.optional && least > 0) return null;
-  return best ?? { x: a.at[0]?.x ?? 0, y: a.at[0]?.y ?? 0, w: a.w, h: a.h };
+  if (a.optional && best.cost > 0) return null;
+  return best.box ?? { x: a.at[0]?.x ?? 0, y: a.at[0]?.y ?? 0, w: a.w, h: a.h };
+}
+
+/** `b` moved a bit the way it slides (past what it keeps off, which is not a box). */
+function step(b: Box, s: Slide): Box {
+  const d = Math.max(8, Math.round((s === "left" || s === "right" ? b.w : b.h) / 4));
+  return s === "left" ? { ...b, x: b.x - d } : s === "right" ? { ...b, x: b.x + d } : s === "up" ? { ...b, y: b.y - d } : { ...b, y: b.y + d };
 }
 
 /** Closer than GAP (or overlapping). */

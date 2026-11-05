@@ -274,7 +274,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     for (const d of items) {
       if (d.kind !== "position" || d.okx) continue;
       inputs.push({
-        id: d.id, entryT: d.a.t, endT: d.b.t, entry: d.a.p, stop: d.b.p, target: d.target, dir: d.dir,
+        id: d.id, entryT: d.a.t, endT: d.order?.closed?.t || d.b.t, entry: d.a.p, stop: d.b.p, target: d.target, dir: d.dir,
         capital: d.capital, risk: d.risk, riskMode: d.riskMode, leverage: d.leverage,
         fresh: cap.live && d.b.t >= newest, // a position still running sizes from the real account
       });
@@ -382,6 +382,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.host.stopsEdited(d, before, at?.x ?? window.innerWidth / 2, at?.y ?? window.innerHeight / 3);
     }
   }
+  /** A position closed on OKX (drawn from it, or with an order of ours in it): a record now. */
+  private closedOnOkx(id: string): boolean {
+    const d = this.find(id);
+    return d?.kind === "position" && !!(d.okx?.closed || d.order?.closed);
+  }
   /** Is this position on OKX now (see DrawingHost.isLive)? */
   isLive(id: string): boolean {
     const d = this.find(id);
@@ -479,7 +484,24 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       orderTag: (d) => this.host.orderTag(d),
       live: (d) => this.host.live(d),
       textPx: this.host.textSize(),
+      covers: (b) => this.coversBars(b),
     };
+  }
+
+  /** Does a box (chart pixels) cover the high–low of a bar on screen? */
+  private coversBars(b: { x: number; y: number; w: number; h: number }): boolean {
+    const { chart, series } = this.host;
+    const ts = chart.timeScale();
+    const l0 = ts.coordinateToLogical(b.x);
+    const l1 = ts.coordinateToLogical(b.x + b.w);
+    if (l0 == null || l1 == null) return false;
+    const bars = this.host.bars();
+    for (let i = Math.max(0, Math.round(l0)); i <= Math.min(bars.length - 1, Math.round(l1)); i++) {
+      const hi = series.priceToCoordinate(bars[i].high);
+      const lo = series.priceToCoordinate(bars[i].low);
+      if (hi != null && lo != null && hi < b.y + b.h && lo > b.y) return true;
+    }
+    return false;
   }
 
   /** Prices of horizontal lines on the price scale, times of vertical lines on the time scale; all the points
@@ -959,6 +981,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const d = this.find(dr.id);
     if (!d) return;
     if (!dr.moved && Math.hypot(m.x - dr.x0, m.y - dr.y0) < 3) return;
+    if (d.kind === "position" && (d.okx?.closed || d.order?.closed)) {
+      this.host.hint("在 OKX 上已經平倉：照 OKX 的紀錄，不能移動；可以按 Delete 刪除");
+      return;
+    }
     if (d.kind === "position" && (d.okx || this.host.isLive(d)) && dr.part !== "stop" && dr.part !== "target") {
       this.host.hint("OKX 上的倉位：進場和位置照 OKX，只能拖止損、止盈（放開後確認才會改 OKX）");
       return;
@@ -1176,6 +1202,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (info.points === 1) this.host.hint(`${info.name}：點一下放置；${snap}；Esc 取消`);
       else if (this.draft) this.host.hint(`${info.name}：點第二個點；${shift}；${snap}；Esc 取消`);
       else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${shift}；${snap}；Esc 取消`);
+    } else if (this.selected && this.closedOnOkx(this.selected)) {
+      this.host.hint("在 OKX 上已經平倉：框停在平倉時間，出場點是實際平倉價；雙擊或右鍵看設定；Delete 刪除");
     } else if (this.selected && this.isLive(this.selected)) {
       this.host.hint("OKX 上的倉位：進場照 OKX；拖止損、止盈放開後會問要不要一起改 OKX；雙擊或右鍵看設定");
     } else if (this.selected && this.find(this.selected)?.kind === "position") {

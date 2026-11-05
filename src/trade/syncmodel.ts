@@ -5,7 +5,10 @@
 //   stop-loss / take-profit order is found by the id it was given (algoClOrdId), by the id found before
 //   (algoId), or, for an order from before ids were given, by its stop price (the only one there).
 // - When OKX moves a stop-loss or take-profit, the drawing follows.
-// - A position on OKX with no order of ours in it is drawn on its own (OkxPos) and kept up to date.
+// - A position on OKX with no order of ours in it is drawn on its own (OkxPos) and kept up to date. One that
+//   opens while an order of ours on its side is still waiting is most likely that order filling (OKX can report
+//   the position before the order): it is drawn only if no order of ours is in it after a few seconds, and a
+//   drawing made from it before the order showed goes once the order is matched to it.
 // - When a position is gone from OKX, how it ended is looked up (closed positions) and kept on its drawings.
 // - An add that fills moves the earlier orders' stop-loss / take-profit to its own (stopMoves); a stop-loss or
 //   take-profit moved on the chart goes to OKX after a confirmation (stopEdits).
@@ -28,6 +31,8 @@ export type SymbolState = {
 };
 
 const WEEK = 7 * 86_400;
+/** How long a new position waits for an order of ours to show up in it before it is drawn on its own, ms. */
+const ORDER_GRACE = 15_000;
 const ORDER_STATES = new Set(["live", "partially_filled", "filled", "canceled", "mmp_canceled"]);
 
 export const sideOfPos = (p: SyncPos): Side => (p.posSide === "short" || (p.posSide === "net" && p.pos < 0) ? "short" : "long");
@@ -188,7 +193,12 @@ export function applySync(list: Drawing[], s: SymbolState, orders: readonly Sync
   for (const p of s.positions) {
     if (p.instId !== s.instId) continue;
     const key = posKeyOf(p);
-    if (positions.some((d) => d.order?.posKey === key)) continue; // orders of ours are in it
+    const fromIt = (x: PositionDrawing) => !!x.okx && !x.okx.closed && x.okx.demo === s.demo && posKeyOf(x.okx) === key;
+    if (positions.some((d) => d.order?.posKey === key)) {
+      // orders of ours are in it and show it; drawn from it before they were known: not twice
+      if (removeWhere(list, positions, fromIt)) changed = true;
+      continue;
+    }
     const side = sideOfPos(p);
     const dir = dirOf(side);
     const { sl, tp } = stopsOf(p, s.algos);
@@ -201,6 +211,11 @@ export function applySync(list: Drawing[], s: SymbolState, orders: readonly Sync
     const target = tp ?? p.avgPx + dir * s.tick;
     const d = positions.find((x) => x.okx && posKeyOf(x.okx) === key && x.okx.demo === s.demo);
     if (!d) {
+      const waiting = positions.some((x) => {
+        const o = x.order;
+        return !!o && o.demo === s.demo && !o.closed && !o.posKey && sideOfOrder(o) === side && (o.state === "live" || isFilled(o));
+      });
+      if (waiting && now * 1000 - p.cTime < ORDER_GRACE) continue; // likely that order filling: see shortly
       const nd: PositionDrawing = {
         id: newId("okx"), kind: "position", a: { t: Math.floor(p.cTime / 1000), p: p.avgPx }, b: { t: now + WEEK, p: stop }, target,
         capital: null, risk: 1, riskMode: "pct", leverage: Math.min(125, Math.max(1, Math.round(okx.lever))), okx, dir,
@@ -229,8 +244,22 @@ export function applySync(list: Drawing[], s: SymbolState, orders: readonly Sync
   return { changed, gone: [...gone.values()] };
 }
 
+/** Take out the positions `f` picks, from the list and from `positions`; true when any went. */
+function removeWhere(list: Drawing[], positions: PositionDrawing[], f: (d: PositionDrawing) => boolean): boolean {
+  let removed = false;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const d = list[i];
+    if (isPosition(d) && f(d)) {
+      list.splice(i, 1);
+      removed = true;
+    }
+  }
+  for (let i = positions.length - 1; i >= 0; i--) if (f(positions[i])) positions.splice(i, 1);
+  return removed;
+}
+
 /** How a position ended (OKX's position history, or unknown: px 0) onto the drawings that show it; true when any
- *  changed. A position drawn from OKX ends its box there. */
+ *  changed. A position drawn from OKX ends its box there; one with orders of ours shows it ended there. */
 export function applyClosed(list: Drawing[], key: string, end: OkxClosed): boolean {
   let changed = false;
   for (const d of list) {

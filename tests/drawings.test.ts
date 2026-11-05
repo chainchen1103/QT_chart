@@ -91,3 +91,18 @@ test("a measurement: change in price and %, bars and time, volume of the bars it
   // past the newest bar: only the bars that are there count
   assert.deepEqual(measureLines({ t: 14400, p: 100 }, { t: 21600, p: 100 }, o), ["+0.00 (+0.00%)", "2 根，2時", "成交量 5.00K"]);
 });
+
+test("closed on OKX: the box ends at the close, the exit is OKX's, no handles", () => {
+  const closed = { t: 9000, px: 103, pnl: 6 };
+  const order = {
+    ordId: "1", clOrdId: "c", demo: true, side: "buy" as const, ordType: "limit" as const, px: 100, sz: 1, at: 6000, state: "filled",
+    avgPx: 100, fillSz: 1, posKey: "1:1", closed,
+  };
+  const list: Drawing[] = [
+    { id: "p", kind: "position", a: { t: 6000, p: 100 }, b: { t: 30000, p: 98 }, target: 105, capital: null, risk: 1, riskMode: "pct", leverage: 10, order },
+  ];
+  const [p] = computeGeo(list, pr, opts);
+  assert.equal(p.pos?.x1, 150); // 9000 s at 1 px a minute, not the drawn 30000
+  assert.deepEqual(p.pos?.exit, { x: 150, y: 97 });
+  assert.deepEqual(p.handles, []);
+});

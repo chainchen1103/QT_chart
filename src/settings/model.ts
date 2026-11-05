@@ -162,6 +162,9 @@ export const TOOL_INFO: Record<DrawKind, { name: string; key: string; points: 1 
 export type RLevel = { value: number; on: boolean };
 export type PositionSettings = {
   levels: RLevel[]; profit: string; loss: string; transparency: number; showPrices: boolean;
+  /** The info box (size, margin, capital, risk) shows all the time; else only while the position is pointed
+   *  at, selected or being placed. */
+  infoAlways: boolean;
   /** Defaults for new positions; `chain`: a position starts with what the previous one ended with. */
   capital: number; risk: number; riskMode: RiskMode; leverage: number; chain: boolean;
   /** With an OKX API set, the starting capital is the account's equity instead of `capital`. */
@@ -183,6 +186,7 @@ export const DEFAULT_POSITION: PositionSettings = {
   loss: "#f23645",
   transparency: 80,
   showPrices: true,
+  infoAlways: false,
   capital: 1000,
   risk: 1,
   riskMode: "pct",
@@ -643,6 +647,7 @@ export function cleanPosition(raw: unknown): PositionSettings {
     loss: isColor(r.loss) ? r.loss : d.loss,
     transparency: num(r.transparency, { min: 0, max: 100 }, d.transparency),
     showPrices: r.showPrices !== false,
+    infoAlways: r.infoAlways === true,
     capital: num(r.capital, POSITION_LIMITS.capital, d.capital, false),
     risk: num(r.risk, POSITION_LIMITS[r.riskMode === "amount" ? "amount" : "pct"], d.risk, false),
     riskMode: r.riskMode === "amount" ? "amount" : "pct",

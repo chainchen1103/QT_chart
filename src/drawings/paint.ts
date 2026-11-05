@@ -35,6 +35,8 @@ export type PaintOptions = {
   live(d: PositionDrawing): LiveInfo | null;
   /** Size of the labels' text, px. */
   textPx: number;
+  /** Does a box (chart pixels) cover the high–low of a bar on screen? */
+  covers(b: Box): boolean;
 };
 
 /** A drawing's label: the room it asks for among the chart's labels, and how it is painted where it went. */
@@ -216,8 +218,12 @@ export function paintOver(
           if (!d.okx?.noTp) hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
           if (!d.okx?.noSl) hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
           hl(g.pos.entryY, "#b2b5be", "solid");
-          if (g.pos.exit && t && !o.live(d)) { // on OKX: how it really went is in the labels
-            const color = t.outcome.status === "tp" ? ps.profit : t.outcome.status === "sl" ? ps.loss : "#b2b5be";
+          // where it went out: as closed on OKX, else as worked out on the bars (an open one on OKX: none yet)
+          const real = d.okx?.closed ?? d.order?.closed;
+          if (g.pos.exit && (real || (t && !o.live(d)))) {
+            const color = real
+              ? real.pnl >= 0 ? ps.profit : ps.loss
+              : t?.outcome.status === "tp" ? ps.profit : t?.outcome.status === "sl" ? ps.loss : "#b2b5be";
             ctx.beginPath();
             ctx.arc(g.pos.exit.x * hr, g.pos.exit.y * vr, 5 * hr, 0, Math.PI * 2);
             ctx.fillStyle = color;
@@ -448,11 +454,12 @@ function anglePlans(out: LabelPlan[], g: Geo, T: Type) {
   });
 }
 
-/** Position: take-profit and stop labels, the info at the entry, the result and the order button, and the R
- *  lines' names. The info, the result and the order button stay on screen when the box runs past the right
- *  edge (a position drawn at the newest bar usually does), and keep clear of the box's handles. A position built
- *  up by adds: the last add carries the whole position's numbers (average entry, quantity, risk, result);
- *  earlier parts show only their own part. */
+/** Position: take-profit and stop labels, the info at the entry (all the time, or while the position is pointed
+ *  at, selected or placed), the result and the order button, and the R lines' names. The info, the result and
+ *  the order button stay on screen when the box runs past the right edge (a position drawn at the newest bar
+ *  usually does), and keep clear of the box's handles; the result goes where it covers no candles when it can.
+ *  A position built up by adds: the last add carries the whole position's numbers (average entry, quantity,
+ *  risk, result); earlier parts show only their own part. */
 function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width: number) {
   const d = g.d;
   const p = g.pos;
@@ -494,8 +501,9 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     });
   };
   /** The info box on the entry line, clear of the entry's handle: after it, or before it when the box starts too
-   *  close to the right edge for that; where it is. */
-  const infoBox = (lines: string[], y: number, fg = "#ffffff"): Box => {
+   *  close to the right edge for that. Left out unless it is to show all the time or the position is active. */
+  const infoBox = (lines: string[], y: number, fg = "#ffffff") => {
+    if (!ps.infoAlways && !g.active) return;
     const s = size(lines);
     const fits = (x: number) => x >= 0 && x + s.w <= width - 4;
     const after = p.x0 + 10;
@@ -503,25 +511,29 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const x = fits(after) ? after : fits(before) ? before : Math.max(0, Math.min(after, width - 4 - s.w));
     const b = { x, y: y - s.h / 2, w: s.w, h: s.h };
     out.push({ ask: { key: `${d.id}:info`, w: s.w, h: s.h, at: [b], prio: PRIO.anchored }, paint: filled(lines, "rgba(25,25,27,0.92)", fg) });
-    return b;
   };
-  /** What it came to, and the order button after it: right of the box (past its handle) and of the info; else
-   *  pulled back from the right edge, under the info or over it, or before the info on its row. */
-  const resultRow = (text: string, bg: string, info: Box, y: number, order: OrderTag | null) => {
+  /** What it came to, and the order button after it, on the row at `y`, off the candles when it can be: right of
+   *  the box (past its handle); else at the right end of the row, or just inside the take-profit or the stop
+   *  line, moving left along them as far as the box goes; under or over the row, or before the entry. */
+  const resultRow = (text: string, bg: string, y: number, order: OrderTag | null) => {
     const r = size([text]);
     const ow = order ? size([order.text]).w : 0;
     const w = r.w + (order ? 4 + ow : 0);
     const h = r.h;
-    const ux = Math.max(0, Math.min(info.x, width - 4 - w));
+    const lx = fitX(left + 10, w);
+    const rx = fitX(right - 4 - w, w);
+    const along = { slide: "left" as const, range: { min: Math.min(rx, Math.max(0, p.x0 + 10)), max: rx } };
     out.push({
       ask: {
-        key: `${d.id}:result`, w, h, prio: PRIO.drawing,
+        key: `${d.id}:result`, w, h, prio: PRIO.drawing, avoid: o.covers,
         at: [
-          { x: Math.max(p.x1 + 10, info.x + info.w + 6), y: y - h / 2 },
-          { x: width - 4 - w, y: y - h / 2 },
-          { x: ux, y: info.y + info.h + 4 },
-          { x: ux, y: info.y - 4 - h },
-          { x: info.x - 6 - w, y: y - h / 2 },
+          { x: p.x1 + 10, y: y - h / 2 },
+          { x: rx, y: y - h / 2, ...along },
+          { x: rx, y: beside(p.targetY, -up, h), ...along },
+          { x: rx, y: beside(p.stopY, up, h), ...along },
+          { x: lx, y: y + h / 2 + 4 },
+          { x: lx, y: y - h / 2 - 4 - h },
+          { x: p.x0 - 10 - w, y: y - h / 2 },
         ],
       },
       paint: (ctx, b) => {
@@ -551,7 +563,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const open = !v.closed;
     if (!k.noTp) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
     if (!k.noSl) lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss);
-    const info = infoBox(
+    infoBox(
       [
         `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
         `均價 ${fp(v.avg)}${k.noSl ? "  沒有設止損" : ""}${k.noTp ? "  沒有設止盈" : ""}`,
@@ -561,7 +573,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const [text, bg] = v.closed
       ? [`已平倉${v.closed.px ? ` @ ${fp(v.closed.px)}  ${money(v.closed.pnl)}` : ""}`, v.closed.px ? (v.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
       : [v.upl != null ? `持倉中 ${money(v.upl)}` : "持倉中", gray];
-    resultRow(text, bg, info, p.entryY, null);
+    resultRow(text, bg, p.entryY, null);
     return;
   }
   const sc = t?.scale ?? null;
@@ -597,7 +609,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const warn = pl.capped || (!!sc && sc.full && !earlier);
     // an earlier part's labels go to the stop side of its entry: later adds sit on the profit side, close by
     const rowY = earlier ? p.entryY - up * (size(infoLines).h / 2 + 3) : p.entryY;
-    const info = infoBox(infoLines, rowY, warn ? THEME.down : "#ffffff");
+    infoBox(infoLines, rowY, warn ? THEME.down : "#ffffff");
     const pnl = sc ? sc.pnl : t.pnl;
     const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
     const result: Record<string, [string, string]> = {
@@ -619,7 +631,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
             : null
         : null;
     const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : real ?? result[t.outcome.status];
-    resultRow(text, bg, info, rowY, o.orderTag(d));
+    resultRow(text, bg, rowY, o.orderTag(d));
   }
   // R lines' names over the right end of each line on screen, or under it, else further left along it, inside the
   // box; left out when there is no room (the line still shows)

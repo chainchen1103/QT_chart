@@ -78,7 +78,7 @@ const trades = chainPositions(
 );
 const paint = (orderText: string | null): PaintOptions => ({
   fib, position: DEFAULT_POSITION, fmtPrice: (p) => p.toFixed(1), base: "ETH", times: bars.map((b) => b.time), barSec: 3600, trades,
-  orderTag: () => (orderText ? { text: orderText, bg: "#2962ff" } : null), live: () => null, textPx: 11,
+  orderTag: () => (orderText ? { text: orderText, bg: "#2962ff" } : null), live: () => null, textPx: 11, covers: () => false,
 });
 const planned = (list: Drawing[], o: PaintOptions, extra: Record<string, LabelAsk[]> = {}) => {
   const geo = computeGeo(list, pr, { fib, rLevels: [1, 2], fmtPrice: o.fmtPrice, trades, active: () => true });
@@ -134,4 +134,18 @@ test("text sizes: saved, kept in range, older settings get the defaults", () => 
   assert.equal(cleanAppearance({ labelSize: 14, axisSize: 13 }).labelSize, 14);
   assert.equal(cleanAppearance({ labelSize: 40 }).labelSize, 11);
   assert.equal(cleanAppearance({ axisSize: 13.4 }).axisSize, 13);
+});
+
+test("what a label keeps off: the next free place first, then sliding past it", () => {
+  // keeps off x 600..800 (say, candles); its first place is there, its second free
+  const candles = (b: Box) => b.x + b.w > 600;
+  const at = place({
+    d: [{ key: "r", w: 100, h: 18, prio: PRIO.drawing, avoid: candles, at: [{ x: 680, y: 100 }, { x: 680, y: 300 }, { x: 100, y: 100, slide: "none" }] }],
+  });
+  assert.deepEqual(at("d", "r"), { x: 100, y: 100, w: 100, h: 18 }); // the third place: the only free one as it is
+  // none free as it is: slides left from the first until clear of what it keeps off
+  const slid = place({
+    d: [{ key: "r", w: 100, h: 18, prio: PRIO.drawing, avoid: candles, at: [{ x: 680, y: 100, slide: "left", range: { min: 300, max: 680 } }] }],
+  });
+  assert.ok(slid("d", "r").x + 100 <= 600 && slid("d", "r").x >= 300, String(slid("d", "r").x));
 });
