@@ -165,7 +165,7 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     body.append(lr);
 
     const foot = el("div", "pop-foot");
-    foot.append(el("span", "pop-note", "程式開著（可以縮到最小）才會提醒"), el("span", "spacer"));
+    foot.append(el("span", "pop-note", "程式開著才會提醒"), el("span", "spacer"));
     if (ui.settings) {
       const go = ui.settings;
       foot.append(textButton("聲音和通知…", "link-btn", () => {
@@ -344,7 +344,7 @@ export function renderAlertOptions(service: AlertService): Render {
         "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心；點通知會切回 QT Chart 打開那個幣種",
       ),
       popup,
-      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知（Windows 通知失敗時仍會在程式內顯示）。視窗在背景時工作列按鈕會閃。程式開著（可以縮到最小）才會提醒"),
+      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知（Windows 通知失敗時仍會在程式內顯示）。視窗在背景時工作列按鈕會閃。程式開著才會提醒"),
     );
   };
 }
