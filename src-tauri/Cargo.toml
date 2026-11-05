@@ -1,6 +1,6 @@
 [package]
 name = "qtchart"
-version = "0.1.0"
+version = "0.1.12"
 description = "QT Chart：看盤軟體（OKX USDT 永續）"
 edition = "2021"
 
