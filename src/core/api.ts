@@ -121,8 +121,12 @@ export const onSyncStatus = (cb: (s: SyncStatus) => void): Promise<UnlistenFn> =
 export const gpuPref = () => invoke<boolean>("gpu_pref");
 export const setGpuPref = (on: boolean) => invoke<void>("set_gpu_pref", { on });
 
-/** An alert went off: taskbar flash when in the background, plus a Windows notification when `system`. */
-export const alertNotify = (title: string, body: string, system: boolean, sound: boolean) =>
-  invoke<void>("alert_notify", { title, body, system, sound });
+/** An alert went off: taskbar flash when in the background, plus a Windows notification when `system`; clicking
+ *  that brings the window back and opens `instId` (onAlertOpen). */
+export const alertNotify = (title: string, body: string, system: boolean, sound: boolean, instId: string) =>
+  invoke<void>("alert_notify", { title, body, system, sound, instId });
+/** The Windows notification of an alert was clicked: open its symbol. */
+export const onAlertOpen = (cb: (instId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("alert_open", (e) => cb(e.payload));
 export const onStatus = (cb: (s: StreamStatus) => void): Promise<UnlistenFn> =>
   listen<StreamStatus>("stream_status", (e) => cb(e.payload));

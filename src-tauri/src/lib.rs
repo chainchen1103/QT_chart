@@ -8,6 +8,7 @@ mod prefs;
 mod store;
 mod stream;
 mod sync;
+mod toast;
 mod trade;
 mod window;
 mod ws;
@@ -85,21 +86,22 @@ fn set_streams(app: AppHandle, state: State<'_, AppState>, pairs: Vec<Pair>) -> 
 }
 
 /// An alert went off: flash the taskbar button when the window is in the background, and show a Windows
-/// notification when `system` is on (with the system sound when `sound` is on). Text is cut to a sane length.
+/// notification when `system` is on (with the system sound when `sound` is on); clicking it opens `inst_id`
+/// (toast.rs). Text is cut to a sane length.
 #[tauri::command]
-fn alert_notify(app: AppHandle, window: WebviewWindow, title: String, body: String, system: bool, sound: bool) -> Result<(), String> {
+fn alert_notify(
+    app: AppHandle, window: WebviewWindow, title: String, body: String, system: bool, sound: bool, inst_id: Option<String>,
+) -> Result<(), String> {
     if !window.is_focused().unwrap_or(false) {
         let _ = window.request_user_attention(Some(tauri::UserAttentionType::Critical));
     }
     if !system {
         return Ok(());
     }
-    use tauri_plugin_notification::NotificationExt;
-    let mut n = app.notification().builder().title(title.chars().take(80).collect::<String>()).body(body.chars().take(300).collect::<String>());
-    if sound {
-        n = n.sound("Default");
-    }
-    n.show().map_err(|e| format!("系統通知失敗：{e}"))
+    let title: String = title.chars().take(80).collect();
+    let body: String = body.chars().take(300).collect();
+    let inst_id = inst_id.filter(|s| s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_default();
+    toast::show(&app, &window, &title, &body, sound, inst_id)
 }
 
 /// Everything saved (settings, drawings, alerts), read once when the page starts.
@@ -233,6 +235,7 @@ pub fn run() {
             let prefs = prefs::load(&config_dir);
             app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store, trader, sync: sync::Syncer::default() });
             window::create(app.handle(), prefs)?;
+            toast::init(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

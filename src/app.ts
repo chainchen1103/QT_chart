@@ -15,7 +15,7 @@
 //   ui/        the toolbars, menus, status bar and settings windows
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
 
-import { alertNotify, gpuPref, onCandle, onStatus, openTradingView, setGpuPref, setStreams, type CandleEvent } from "./core/api.ts";
+import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, type CandleEvent } from "./core/api.ts";
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
 import { keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
@@ -67,6 +67,10 @@ const notifier = new Notifier({
   system: alertNotify,
   open: (id) => workspace.openSymbol(id),
   fmtClock,
+});
+// the Windows notification of an alert was clicked: the window is back in front, open its symbol
+void onAlertOpen((id) => {
+  if (id) workspace.openSymbol(id);
 });
 const alerts = new AlertService({
   watch: (ids) => hub.want("alerts", ids.map((instId) => ({ instId, bar: "1m" }))),

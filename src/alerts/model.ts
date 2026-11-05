@@ -35,7 +35,8 @@ export type Alert = {
 };
 
 export type LogEntry = { t: number; instId: string; text: string; note: string; alertId: string };
-export type AlertOptions = { sound: boolean; system: boolean };
+/** `system`: a Windows notification; `popup`: a message in the window too (always, when `system` is off). */
+export type AlertOptions = { sound: boolean; system: boolean; popup: boolean };
 
 export const MAX_ALERTS = 200;
 export const MAX_LOG = 100;
@@ -129,5 +130,5 @@ export function cleanLog(raw: unknown): LogEntry[] {
 
 export function cleanOptions(raw: unknown): AlertOptions {
   const r = isObj(raw) ? raw : {};
-  return { sound: r.sound !== false, system: r.system !== false };
+  return { sound: r.sound !== false, system: r.system !== false, popup: r.popup !== false };
 }

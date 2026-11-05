@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { barStart, describe, evaluate, levelHit, moveSince, shapeAt, tradeStep, type Move } from "../src/alerts/engine.ts";
-import { cleanAlerts, condsFor, type Alert } from "../src/alerts/model.ts";
+import { cleanAlerts, cleanOptions, condsFor, type Alert } from "../src/alerts/model.ts";
 import type { Drawing, FibSettings } from "../src/settings/model.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
@@ -143,4 +143,10 @@ test("stored alerts are checked", () => {
   assert.equal(list[1].stage, "wait");
   assert.equal(list[1].note.length, 120);
   assert.deepEqual(condsFor("rect"), ["enter", "exit"]);
+});
+
+test("alert options: on unless turned off, the in-window message too", () => {
+  assert.deepEqual(cleanOptions(undefined), { sound: true, system: true, popup: true });
+  assert.deepEqual(cleanOptions({ sound: false, system: true }), { sound: false, system: true, popup: true }); // saved before it existed
+  assert.deepEqual(cleanOptions({ popup: false, system: false }), { sound: true, system: false, popup: false });
 });

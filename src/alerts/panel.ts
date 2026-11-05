@@ -328,12 +328,23 @@ export function drawingAlertSection(ui: AlertUi, d: Drawing, stage: () => TradeS
 
 /** Sound and Windows notifications for every alert (a section of the settings window). */
 export function renderAlertOptions(service: AlertService): Render {
-  return (body) => {
+  return (body, rerender) => {
     const o = service.options();
+    const box = checkbox(o.popup || !o.system, "", (v) => service.setOptions({ ...service.options(), popup: v }));
+    box.disabled = !o.system;
+    const popup = labelled(box, "程式內訊息", o.system ? "在程式右下角也跳出訊息，直到關掉" : "Windows 通知關掉時，提醒一定會在程式內顯示");
     body.append(
       labelled(checkbox(o.sound, "", (v) => service.setOptions({ ...service.options(), sound: v })), "聲音", "提醒響的時候播放提示音"),
-      labelled(checkbox(o.system, "", (v) => service.setOptions({ ...service.options(), system: v })), "Windows 通知", "視窗在背景時，右下角跳出通知，工作列按鈕也會閃"),
-      el("div", "pop-note", "程式開著（可以縮到最小）才會提醒"),
+      labelled(
+        checkbox(o.system, "", (v) => {
+          service.setOptions({ ...service.options(), system: v });
+          rerender(); // 程式內訊息 is always on without Windows notifications
+        }),
+        "Windows 通知",
+        "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心；點通知會切回 QT Chart 打開那個幣種",
+      ),
+      popup,
+      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知（Windows 通知失敗時仍會在程式內顯示）。視窗在背景時工作列按鈕會閃。程式開著（可以縮到最小）才會提醒"),
     );
   };
 }

@@ -1,5 +1,6 @@
-// How an alert reaches you: a popup in the window (stays until closed), a short chime, and through the backend
-// a Windows notification plus a flashing taskbar button when the window is in the background.
+// How an alert reaches you: a Windows notification of QT Chart's own (clicking it opens the symbol), a popup in
+// the window (stays until closed; can be left out when Windows notifications are on), a short chime, and a
+// flashing taskbar button when the window is in the background.
 
 import { el, textButton } from "../ui/dom.ts";
 import type { AlertOptions } from "./model.ts";
@@ -9,8 +10,8 @@ export type NotifierHost = {
   /** Where the popups stack. */
   box: HTMLElement;
   options(): AlertOptions;
-  /** The backend's notification (see alertNotify in api.ts). */
-  system(title: string, body: string, system: boolean, sound: boolean): Promise<void>;
+  /** The backend's notification (see alertNotify in api.ts); clicking it opens `instId`. */
+  system(title: string, body: string, system: boolean, sound: boolean, instId: string): Promise<void>;
   /** "前往": show this symbol on the chart. */
   open(instId: string): void;
   fmtClock(t: number): string;
@@ -40,10 +41,11 @@ export class Notifier {
     const focused = document.hasFocus();
     // in front: our chime; in the background: Windows plays its own with the notification
     if (o.sound && (focused || !o.system)) this.chime();
-    this.host.system(n.title, n.body, o.system, o.sound && !focused).catch(() => {
-      /* no system notification: the popup is still there */
+    const popup = o.popup || !o.system;
+    if (popup) this.popup(n);
+    this.host.system(n.title, n.body, o.system, o.sound && !focused, n.alert.instId).catch(() => {
+      if (!popup) this.popup(n); // the Windows notification failed: show it here after all
     });
-    this.popup(n);
   }
 
   private popup(n: AlertNotice) {

@@ -31,6 +31,9 @@ webview2-com = "0.39"
 windows-core = "0.62"
 # the API key is kept encrypted with the Windows user's own key (DPAPI)
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+# alerts as QT Chart's own Windows notifications: its app id registered for the user, notifications sent with it (toast.rs)
+tauri-winrt-notification = "0.8"
+windows-registry = "0.6"
 
 [profile.release]
 codegen-units = 1

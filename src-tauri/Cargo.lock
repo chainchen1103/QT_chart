@@ -2909,10 +2909,12 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
+ "tauri-winrt-notification",
  "tokio",
  "tokio-tungstenite",
  "webview2-com",
  "windows-core",
+ "windows-registry",
  "windows-sys 0.61.2",
 ]
 
