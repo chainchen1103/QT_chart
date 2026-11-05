@@ -48,7 +48,7 @@ import {
   type RectStyle,
 } from "../settings/model.ts";
 import { cleanOptions } from "../alerts/model.ts";
-import { ArgError, bool, data, num, obj, oneOf, points, str, text, type Args, type ToolResult } from "./model.ts";
+import { ArgError, bool, data, normalizeTf, num, obj, oneOf, points, str, text, type Args, type ToolResult } from "./model.ts";
 import { drawingOut } from "./read.ts";
 import { CHART, chartArg, chartFor, chartsOf, COLOR, findDrawing, POINT, S, SYMBOL, symbolArg, tfArg, TIMEFRAME, who, type CallCtx, type McpApp, type Tool } from "./tools.ts";
 
@@ -700,6 +700,18 @@ const list = (v: unknown, name: string): unknown[] => {
   if (!Array.isArray(v)) throw new ArgError(`${name} must be a list`);
   return v;
 };
+/** Timeframes as AI apps write them ("1D", "4h") in the app's own names ("" stays: the chart's timeframe). */
+function tfName(v: unknown, where: string): string {
+  if (v === "") return "";
+  const tf = typeof v === "string" ? normalizeTf(v) : null;
+  if (!tf) throw new ArgError(`${where}: unknown timeframe ${String(v)} (use 1m, 15m, 1H, 4H, 1D, 1W and the like)`);
+  return tf;
+}
+/** A list of indicator sets with their `tf` in the app's names. */
+function withTf(v: unknown[], name: string): unknown[] {
+  return v.map((x, i) => (isObj(x) && x.tf != null ? { ...x, tf: tfName(x.tf, `${name}[${i}].tf`) } : x));
+}
+
 /** Moving averages without a color get the next one free. */
 function colored(v: unknown[]): unknown[] {
   const used = v.flatMap((m) => (isObj(m) && typeof m.color === "string" ? [m.color] : []));
@@ -715,7 +727,14 @@ const SIZING_KEYS = ["capital", "risk", "riskMode", "leverage", "chain", "capita
 const SECTIONS: Record<string, Section> = {
   appearance: { about: "{bg, grid, text, up, down: #rrggbb; labelSize 9-18; axisSize 10-16; imageTransparency 0-100; imageFit cover|contain|stretch}", apply: (app, v) => app.settings.appearance.set(cleanAppearance(merged(app.settings.appearance.get(), v, "appearance"))) },
   labels: { about: "Price-scale labels on or off: {last, countdown, maValues, maNames, highLow, crosshair, volume}", apply: (app, v) => app.settings.labels.set(cleanLabels(merged(app.settings.labels.get(), v, "labels"))) },
-  timeframes: { about: "{bar: timeframes on the toolbar, custom: timeframes added by the user}", apply: (app, v) => app.settings.timeframes.set(cleanTimeframes(merged(app.settings.timeframes.get(), v, "timeframes"))) },
+  timeframes: {
+    about: "{bar: timeframes on the toolbar, custom: timeframes added by the user}",
+    apply: (app, v) => {
+      const m = merged(app.settings.timeframes.get(), v, "timeframes");
+      for (const k of ["bar", "custom"]) if (Array.isArray(m[k])) m[k] = (m[k] as unknown[]).map((x, i) => tfName(x, `timeframes.${k}[${i}]`));
+      app.settings.timeframes.set(cleanTimeframes(m));
+    },
+  },
   bars: { about: "{unlimited: keep loading older bars without a cap}", apply: (app, v) => app.settings.bars.set(cleanBars(merged(app.settings.bars.get(), v, "bars"))) },
   fib: { about: "{levels: [{value, color, on}], extend, fill, showPrice, reverse}", apply: (app, v) => app.settings.fib.set(cleanFib(merged(app.settings.fib.get(), v, "fib")) ?? app.settings.fib.get()) },
   magnet: { about: "{on: always snap to open/high/low/close, holdKey: Control|Alt}", apply: (app, v) => app.settings.magnet.set(cleanMagnet(merged(app.settings.magnet.get(), v, "magnet")) ?? app.settings.magnet.get()) },
@@ -730,11 +749,11 @@ const SECTIONS: Record<string, Section> = {
     },
   },
   indicatorSwitches: { about: "{ma, fvg, ob, sr}: the toolbar switches", apply: (app, v) => app.settings.groups.set(cleanGroups(merged(app.settings.groups.get(), v, "indicatorSwitches"))) },
-  movingAverages: { list: true, about: "The whole list, up to 10: [{id (keep it to change one), kind SMA|EMA|WMA, length 1-1000, color, on, tf ('' = the chart's timeframe)}]", apply: (app, v) => app.settings.mas.set(cleanMas(colored(list(v, "movingAverages"))) ?? []) },
+  movingAverages: { list: true, about: "The whole list, up to 10: [{id (keep it to change one), kind SMA|EMA|WMA, length 1-1000, color, on, tf ('' = the chart's timeframe)}]", apply: (app, v) => app.settings.mas.set(cleanMas(colored(withTf(list(v, "movingAverages"), "movingAverages"))) ?? []) },
   maOptions: { about: "{waitClose: higher-timeframe averages move only when their bar closes}", apply: (app, v) => app.settings.maOptions.set(cleanMaOptions(merged(app.settings.maOptions.get(), v, "maOptions"))) },
-  fvg: { list: true, about: "Fair value gap sets, the whole list, up to 4: [{id, on, tf, body, minPct 0-10, maxCount 1-50, showEnded, up, down}]", apply: (app, v) => app.settings.fvgs.set(cleanFvgs(list(v, "fvg")) ?? []) },
-  orderBlocks: { list: true, about: "Order block sets, the whole list, up to 4: [{id, on, tf, swing 1-20, lookback 1-50, maxCount 1-50, showEnded, up, down}]", apply: (app, v) => app.settings.obs.set(cleanObs(list(v, "orderBlocks")) ?? []) },
-  supportResistance: { list: true, about: "Support / resistance sets, the whole list, up to 4: [{id, on, tf, swing 1-50, maxCount 1-50, showEnded, up (support color), down (resistance color)}]", apply: (app, v) => app.settings.srs.set(cleanSrs(list(v, "supportResistance")) ?? []) },
+  fvg: { list: true, about: "Fair value gap sets, the whole list, up to 4: [{id, on, tf, body, minPct 0-10, maxCount 1-50, showEnded, up, down}]", apply: (app, v) => app.settings.fvgs.set(cleanFvgs(withTf(list(v, "fvg"), "fvg")) ?? []) },
+  orderBlocks: { list: true, about: "Order block sets, the whole list, up to 4: [{id, on, tf, swing 1-20, lookback 1-50, maxCount 1-50, showEnded, up, down}]", apply: (app, v) => app.settings.obs.set(cleanObs(withTf(list(v, "orderBlocks"), "orderBlocks")) ?? []) },
+  supportResistance: { list: true, about: "Support / resistance sets, the whole list, up to 4: [{id, on, tf, swing 1-50, maxCount 1-50, showEnded, up (support color), down (resistance color)}]", apply: (app, v) => app.settings.srs.set(cleanSrs(withTf(list(v, "supportResistance"), "supportResistance")) ?? []) },
   alertOptions: { about: "{sound, system (Windows notification), popup (message in the window)}", apply: (app, v) => app.alerts.setOptions(cleanOptions(merged(app.alerts.options(), v, "alertOptions"))) },
   okxSync: { about: "{on: follow the OKX account's positions and stops on the charts}", apply: (app, v) => app.settings.okxSync.set(cleanSync(merged(app.settings.okxSync.get(), v, "okxSync"))) },
 };

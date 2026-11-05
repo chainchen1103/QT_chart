@@ -49,11 +49,12 @@ const SESSION_HEADER: HeaderName = HeaderName::from_static("mcp-session-id");
 
 const INSTRUCTIONS: &str = "QT Chart is a charting and trading app for OKX USDT perpetual swaps (symbols like \
 BTC-USDT-SWAP; timeframes like 1m, 5m, 15m, 1H, 4H, 1D, 1W). Times are UTC seconds; prices are plain numbers. \
-Start with get_app_state: it says which charts are open, whether an OKX API key is set (demo or real money) and \
-what this connection may do (read, change charts, place orders). Drawings belong to a symbol and show on every \
-chart of it. Orders are always placed from a position (entry, stop-loss, take-profit): the size follows the \
-user's risk settings and the stop-loss always goes with the order; the user may have to confirm each order in \
-QT Chart. Never place an order the user did not ask for.";
+Call get_guide once first: it explains the conventions, the workflows and the rules for orders. Then \
+get_app_state says which charts are open, whether an OKX API key is set (demo or real money) and what this \
+connection may do (read, change charts, place orders). Drawings belong to a symbol and show on every chart of \
+it. Orders are always placed from a position (entry, stop-loss, take-profit): the size follows the user's risk \
+settings and the stop-loss always goes with the order; the user may have to confirm each order in QT Chart. \
+Never place an order the user did not ask for, and never ask for API keys or passwords.";
 
 /// The settings page shows this.
 #[derive(Clone, Serialize)]
