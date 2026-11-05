@@ -83,9 +83,9 @@ export class AccountSync {
     this.follow();
   }
 
-  /** Follow when on and a key is set (the backend starts over by itself when the key changes). */
+  /** Follow when on and a key is set and unlocked (the backend starts over by itself when the key changes). */
   private follow() {
-    const on = this.d.setting.get().on && this.d.acct.keys.set;
+    const on = this.d.setting.get().on && this.d.acct.usable();
     if (on === this.following) return;
     this.following = on;
     if (!on) {

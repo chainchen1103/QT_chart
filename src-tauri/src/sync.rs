@@ -286,7 +286,7 @@ async fn run(app: AppHandle) {
     loop {
         let st = app.state::<AppState>();
         let Some(demo) = st.trader.keys_set() else {
-            status(&app, "off", "還沒設定 OKX API");
+            status(&app, "off", if st.trader.status().locked { "API 已鎖定，解鎖後才會同步" } else { "還沒設定 OKX API" });
             return;
         };
         status(&app, "connecting", "");

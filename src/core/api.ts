@@ -52,7 +52,8 @@ export const storeRemove = (key: string) => invoke<void>("store_remove", { key }
 
 // ----------------------------------------------------------------------------- trading (src-tauri/src/trade.rs)
 /** Is an OKX API key set? `hint`: its first and last characters (the secret never comes back). */
-export type KeyStatus = { set: boolean; demo: boolean; hint: string };
+/** `locked`: saved with an unlock password not entered yet; `protected`: has an unlock password at all. */
+export type KeyStatus = { set: boolean; demo: boolean; hint: string; locked: boolean; protected: boolean };
 export type Account = { demo: boolean; equity: number; avail: number; posMode: string; acctLv: string };
 export type OrderReq = {
   instId: string;
@@ -102,8 +103,13 @@ export type AmendReq = {
   instId: string; kind: "algo" | "attached"; ordId?: string; algoId?: string; algoClOrdId?: string; sl?: string; tp?: string;
 };
 export const tradeStatus = () => invoke<KeyStatus>("trade_status");
-export const tradeSetKeys = (key: string, secret: string, passphrase: string, demo: boolean) =>
-  invoke<Account>("trade_set_keys", { key, secret, passphrase, demo });
+export const tradeSetKeys = (key: string, secret: string, passphrase: string, demo: boolean, password: string) =>
+  invoke<Account>("trade_set_keys", { key, secret, passphrase, demo, password });
+export const tradeUnlock = (password: string) => invoke<KeyStatus>("trade_unlock", { password });
+export const tradeLock = () => invoke<KeyStatus>("trade_lock");
+/** Set the unlock password (`current`: the one it has, when it has one). */
+export const tradeSetPassword = (current: string | null, password: string) =>
+  invoke<KeyStatus>("trade_set_password", { current, password });
 export const tradeClearKeys = () => invoke<void>("trade_clear_keys");
 export const tradeAccount = () => invoke<Account>("trade_account");
 export const tradePlace = (order: OrderReq) => invoke<Placed>("trade_place", { order });

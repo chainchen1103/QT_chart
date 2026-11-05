@@ -1,9 +1,13 @@
 //! Orders on OKX with the user's own API key.
 //!
 //! The key is entered once in the app and kept in a file in the app's data folder (not the store folder the
-//! page can read), encrypted on Windows with the Windows user's own key (DPAPI): only this Windows account on
-//! this computer can read it back. The page can only ask whether a key is set (and see the first and last
-//! characters of the key), use it through the commands below, or remove it; the secret never goes back to it.
+//! page can read), sealed with the user's unlock password (Argon2id, then XChaCha20-Poly1305) and, on Windows,
+//! with the Windows user's own key (DPAPI) around that. A program running under the same Windows account can undo
+//! DPAPI but not the password, and a copied file is useless without both. The password is asked at every start;
+//! until then (and after 上鎖) nothing can be signed. Keys in memory, the password and the derived key are wiped
+//! when dropped. A key saved before unlock passwords keeps working (DPAPI only) until one is set. The page can only
+//! ask whether a key is set (and see the first and last characters of the key), unlock, lock, set the password,
+//! use the key through the commands below, or remove it; the secret never goes back to it.
 //!
 //! What the commands can do is narrow on purpose: read the USDT equity and the account's position mode, open a
 //! USDT perpetual position with a limit, post-only or market order that always carries its stop-loss (and the
@@ -22,8 +26,10 @@ use sha2::Sha256;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-#[derive(Clone, Serialize, Deserialize)]
+/// The key, wiped from memory when dropped (every copy).
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 struct Keys {
     key: String,
     secret: String,
@@ -39,6 +45,10 @@ pub struct KeyStatus {
     pub demo: bool,
     /// The key's first and last four characters.
     pub hint: String,
+    /// Saved with an unlock password that wasn't entered yet (or 上鎖 since): nothing can be signed.
+    pub locked: bool,
+    /// Saved with an unlock password (false: a key from before passwords, protected by Windows only).
+    pub protected: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -145,11 +155,27 @@ pub struct ClosedPos {
 }
 
 const NO_KEY: &str = "還沒設定 OKX API";
+const LOCKED: &str = "API 已鎖定，請先輸入解鎖密碼";
+const MIN_PASSWORD: usize = 8;
+
+/// What this computer holds of the user's key.
+enum KeyState {
+    /// The file wasn't read yet.
+    Unread,
+    None,
+    /// Saved before unlock passwords: only Windows protects it.
+    Unprotected(Keys),
+    /// Saved with an unlock password, not entered yet (or locked again).
+    Locked(vault::Sealed),
+    /// Unlocked for this run (with what the file holds, for changing the password).
+    Open(Keys, vault::Sealed),
+}
 
 pub struct Trader {
     file: PathBuf,
-    /// None: not read from the file yet.
-    keys: Mutex<Option<Option<Keys>>>,
+    state: Mutex<KeyState>,
+    /// The cost of turning a password into a key, for new files (old files say their own).
+    kdf: vault::Kdf,
     /// OKX time minus this computer's time (ms), and when it was measured.
     offset: Mutex<Option<(i64, Instant)>>,
     http: reqwest::Client,
@@ -176,49 +202,144 @@ impl Trader {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("HTTP client");
-        Self { file, keys: Mutex::new(None), offset: Mutex::new(None), http }
+        Self { file, state: Mutex::new(KeyState::Unread), kdf: vault::KDF, offset: Mutex::new(None), http }
     }
 
-    pub(crate) fn keys_set(&self) -> Option<bool> {
-        self.keys().map(|k| k.demo)
-    }
-
-    fn keys(&self) -> Option<Keys> {
-        let mut g = self.keys.lock().unwrap_or_else(|e| e.into_inner());
-        if g.is_none() {
-            *g = Some(vault::load(&self.file));
+    /// The key state, read from the file the first time.
+    fn with_state<R>(&self, f: impl FnOnce(&mut KeyState) -> R) -> R {
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(*g, KeyState::Unread) {
+            *g = match vault::load(&self.file) {
+                None => KeyState::None,
+                Some(vault::Stored::Plain(k)) => KeyState::Unprotected(k),
+                Some(vault::Stored::Sealed(s)) => KeyState::Locked(s),
+            };
         }
-        g.clone().flatten()
+        f(&mut g)
+    }
+
+    /// A usable key's demo flag (None: no key, or locked).
+    pub(crate) fn keys_set(&self) -> Option<bool> {
+        self.with_state(|s| match s {
+            KeyState::Unprotected(k) | KeyState::Open(k, _) => Some(k.demo),
+            _ => None,
+        })
+    }
+
+    /// The key to sign with, or why there is none.
+    fn keys(&self) -> Result<Keys, String> {
+        self.with_state(|s| match s {
+            KeyState::Unprotected(k) | KeyState::Open(k, _) => Ok(k.clone()),
+            KeyState::Locked(_) => Err(LOCKED.to_string()),
+            _ => Err(NO_KEY.to_string()),
+        })
     }
 
     pub fn status(&self) -> KeyStatus {
-        match self.keys() {
-            Some(k) => KeyStatus { set: true, demo: k.demo, hint: hint(&k.key) },
-            None => KeyStatus { set: false, demo: false, hint: String::new() },
-        }
+        let st = |demo: bool, hint: String, locked: bool, protected: bool| KeyStatus { set: true, demo, hint, locked, protected };
+        self.with_state(|s| match s {
+            KeyState::Unprotected(k) => st(k.demo, hint(&k.key), false, false),
+            KeyState::Locked(v) => st(v.demo, v.hint.clone(), true, true),
+            KeyState::Open(k, _) => st(k.demo, hint(&k.key), false, true),
+            _ => KeyStatus { set: false, demo: false, hint: String::new(), locked: false, protected: false },
+        })
     }
 
-    /// Try the key on the account first; it is saved only when OKX accepts it.
-    pub async fn set_keys(&self, key: String, secret: String, passphrase: String, demo: bool) -> Result<Account, String> {
-        let k = Keys { key: key.trim().to_string(), secret: secret.trim().to_string(), passphrase, demo };
+    /// Try the key on the account first; it is saved only when OKX accepts it, sealed with `password`.
+    pub async fn set_keys(&self, key: String, secret: String, passphrase: String, demo: bool, password: String) -> Result<Account, String> {
+        let (key, secret, passphrase, password) = (Zeroizing::new(key), Zeroizing::new(secret), Zeroizing::new(passphrase), Zeroizing::new(password));
+        check_password(&password)?;
+        let k = Keys { key: key.trim().to_string(), secret: secret.trim().to_string(), passphrase: passphrase.to_string(), demo };
         for (name, v) in [("API Key", &k.key), ("Secret Key", &k.secret), ("Passphrase", &k.passphrase)] {
             if v.is_empty() || v.len() > 128 || !v.chars().all(|c| c.is_ascii_graphic() || c == ' ') {
                 return Err(format!("{name} 格式不對"));
             }
         }
         let account = self.account_with(&k).await?;
-        vault::save(&self.file, &k)?;
-        *self.keys.lock().unwrap_or_else(|e| e.into_inner()) = Some(Some(k));
+        let sealed = self.seal(k.clone(), password).await?;
+        vault::save(&self.file, &sealed)?;
+        self.with_state(|s| *s = KeyState::Open(k, sealed));
         Ok(account)
     }
 
+    /// Seal the key with a password on a thread of its own (Argon2id takes a moment on purpose).
+    async fn seal(&self, k: Keys, password: Zeroizing<String>) -> Result<vault::Sealed, String> {
+        let kdf = self.kdf;
+        tauri::async_runtime::spawn_blocking(move || vault::seal(&k, &password, kdf)).await.map_err(|e| e.to_string())?
+    }
+
+    /// Unlock with the password (nothing to do when it is open already).
+    pub async fn unlock(&self, password: String) -> Result<KeyStatus, String> {
+        let password = Zeroizing::new(password);
+        let sealed = self.with_state(|s| match s {
+            KeyState::Locked(v) => Ok(Some(v.clone())),
+            KeyState::Unprotected(_) | KeyState::Open(..) => Ok(None),
+            _ => Err(NO_KEY.to_string()),
+        })?;
+        if let Some(v) = sealed {
+            let opened = tauri::async_runtime::spawn_blocking(move || vault::unseal(&v, &password).map(|k| (k, v)))
+                .await
+                .map_err(|e| e.to_string())??;
+            self.with_state(|s| {
+                if matches!(s, KeyState::Locked(_)) {
+                    *s = KeyState::Open(opened.0, opened.1);
+                }
+            });
+        }
+        Ok(self.status())
+    }
+
+    /// Forget the unlocked key until the password is entered again.
+    pub fn lock(&self) -> Result<KeyStatus, String> {
+        self.with_state(|s| match std::mem::replace(s, KeyState::Unread) {
+            KeyState::Open(k, v) => {
+                drop(k); // wiped
+                *s = KeyState::Locked(v);
+                Ok(())
+            }
+            other => {
+                let unprotected = matches!(other, KeyState::Unprotected(_));
+                *s = other;
+                if unprotected { Err("這組 API 還沒有解鎖密碼，不能上鎖".to_string()) } else { Ok(()) }
+            }
+        })?;
+        Ok(self.status())
+    }
+
+    /// Set the unlock password of a key saved without one, or change it (with the current one) while unlocked.
+    pub async fn set_password(&self, current: Option<String>, password: String) -> Result<KeyStatus, String> {
+        let (current, password) = (current.map(Zeroizing::new), Zeroizing::new(password));
+        check_password(&password)?;
+        let (k, old) = self.with_state(|s| match s {
+            KeyState::Unprotected(k) => Ok((k.clone(), None)),
+            KeyState::Open(k, v) => Ok((k.clone(), Some(v.clone()))),
+            KeyState::Locked(_) => Err(LOCKED.to_string()),
+            _ => Err(NO_KEY.to_string()),
+        })?;
+        if let Some(old) = old {
+            let current = current.filter(|c| !c.is_empty()).ok_or("請輸入目前的解鎖密碼")?;
+            tauri::async_runtime::spawn_blocking(move || vault::unseal(&old, &current).map(drop))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|_| "目前的解鎖密碼不對".to_string())?;
+        }
+        let sealed = self.seal(k.clone(), password).await?;
+        vault::save(&self.file, &sealed)?;
+        self.with_state(|s| {
+            if matches!(s, KeyState::Unprotected(_) | KeyState::Open(..)) {
+                *s = KeyState::Open(k, sealed);
+            }
+        });
+        Ok(self.status())
+    }
+
     pub fn clear(&self) -> Result<(), String> {
-        *self.keys.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+        self.with_state(|s| *s = KeyState::None);
         vault::remove(&self.file)
     }
 
     pub async fn account(&self) -> Result<Account, String> {
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         self.account_with(&k).await
     }
 
@@ -245,7 +366,7 @@ impl Trader {
     /// Set the leverage, then place the order with its stop-loss (and take-profit) attached.
     pub async fn place(&self, r: OrderReq) -> Result<Placed, String> {
         r.check()?;
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         let cfg = self.call(&k, "GET", "/api/v5/account/config", "", None).await?;
         let c = cfg.first().ok_or("OKX 沒有回帳戶設定")?;
         if c["acctLv"].as_str() == Some("1") {
@@ -282,7 +403,7 @@ impl Trader {
 
     /// The private WebSocket's login message (signed with OKX's time), and whether the key is a demo one.
     pub(crate) async fn ws_login(&self) -> Result<(Value, bool), String> {
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         let ts = (self.now_ms().await / 1000).to_string();
         let sig = sign(&k.secret, &format!("{ts}GET/users/self/verify"));
         Ok((json!({"op": "login", "args": [{"apiKey": k.key, "passphrase": k.passphrase, "timestamp": ts, "sign": sig}]}), k.demo))
@@ -290,13 +411,13 @@ impl Trader {
 
     /// Open USDT perpetual positions (OKX's records, as they come).
     pub(crate) async fn positions(&self) -> Result<Vec<Value>, String> {
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         Ok(self.call(&k, "GET", "/api/v5/account/positions", "instType=SWAP", None).await?)
     }
 
     /// Stop-loss and take-profit orders waiting (conditional and OCO), as they come.
     pub(crate) async fn algos(&self) -> Result<Vec<Value>, String> {
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         let mut out = Vec::new();
         for t in ["conditional", "oco"] {
             out.extend(self.call(&k, "GET", "/api/v5/trade/orders-algo-pending", &format!("instType=SWAP&ordType={t}"), None).await?);
@@ -309,7 +430,7 @@ impl Trader {
         if !okx::valid_inst(inst_id) {
             return Err("商品不對".into());
         }
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         let data = self.call(&k, "GET", "/api/v5/account/positions-history", &format!("instType=SWAP&instId={inst_id}&limit=50"), None).await?;
         Ok(data.iter().filter_map(closed_pos).collect())
     }
@@ -317,14 +438,14 @@ impl Trader {
     /// Move the trigger prices of a stop-loss / take-profit (see AmendReq).
     pub async fn amend_stops(&self, r: AmendReq) -> Result<(), String> {
         let (path, body) = r.request()?;
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         self.call(&k, "POST", path, "", Some(&body)).await?;
         Ok(())
     }
 
     pub async fn order(&self, inst_id: &str, ord_id: &str) -> Result<OrderInfo, String> {
         check_ids(inst_id, ord_id)?;
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         let data = self.call(&k, "GET", "/api/v5/trade/order", &format!("instId={inst_id}&ordId={ord_id}"), None).await?;
         let d = data.into_iter().next().ok_or("查不到這筆單")?;
         serde_json::from_value(d).map_err(|e| format!("訂單資料格式不對：{e}"))
@@ -332,7 +453,7 @@ impl Trader {
 
     pub async fn cancel(&self, inst_id: &str, ord_id: &str) -> Result<(), String> {
         check_ids(inst_id, ord_id)?;
-        let k = self.keys().ok_or(NO_KEY)?;
+        let k = self.keys()?;
         self.call(&k, "POST", "/api/v5/trade/cancel-order", "", Some(&json!({"instId": inst_id, "ordId": ord_id}))).await?;
         Ok(())
     }
@@ -572,6 +693,18 @@ fn check_ids(inst_id: &str, ord_id: &str) -> Result<(), String> {
     }
 }
 
+/// An unlock password: at least MIN_PASSWORD characters, any kind.
+fn check_password(p: &str) -> Result<(), String> {
+    let n = p.chars().count();
+    if n < MIN_PASSWORD {
+        return Err(format!("解鎖密碼至少要 {MIN_PASSWORD} 個字"));
+    }
+    if n > 128 {
+        return Err("解鎖密碼太長".into());
+    }
+    Ok(())
+}
+
 fn hint(key: &str) -> String {
     let c: Vec<char> = key.chars().collect();
     if c.len() <= 10 {
@@ -623,18 +756,113 @@ fn explain(code: &str, msg: &str) -> String {
     }
 }
 
-/// The key file: DPAPI on Windows; elsewhere (development builds) plain, readable by this user only.
+/// The key file. Inside: the key sealed with the unlock password (Argon2id makes a 256-bit key of it, then
+/// XChaCha20-Poly1305), with the key's hint and demo flag beside it, bound to it, for the page while locked; or,
+/// from before passwords, the key as it is. Around that, DPAPI on Windows; elsewhere (development builds) the file
+/// is readable by this user only.
 mod vault {
     use super::Keys;
+    use argon2::{Algorithm, Argon2, Params, Version};
+    use base64::Engine as _;
+    use chacha20poly1305::aead::rand_core::RngCore;
+    use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng, Payload};
+    use chacha20poly1305::XChaCha20Poly1305;
+    use serde::{Deserialize, Serialize};
     use std::path::Path;
+    use zeroize::Zeroizing;
 
-    pub fn load(file: &Path) -> Option<Keys> {
-        let sealed = std::fs::read(file).ok()?;
-        serde_json::from_slice(&open(&sealed)?).ok()
+    /// Argon2id's cost: memory (KiB), passes, lanes.
+    #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+    pub struct Kdf {
+        pub m: u32,
+        pub t: u32,
+        pub p: u32,
+    }
+    /// 64 MiB, 3 passes: about half a second on a laptop, and as much for every guess of an attacker.
+    pub const KDF: Kdf = Kdf { m: 64 * 1024, t: 3, p: 1 };
+
+    /// The file's content with an unlock password.
+    #[derive(Clone, Serialize, Deserialize)]
+    pub struct Sealed {
+        /// Format: 2.
+        pub v: u32,
+        pub demo: bool,
+        pub hint: String,
+        pub kdf: Kdf,
+        salt: String,
+        nonce: String,
+        ct: String,
     }
 
-    pub fn save(file: &Path, k: &Keys) -> Result<(), String> {
-        let sealed = seal(&serde_json::to_vec(k).map_err(|e| e.to_string())?)?;
+    pub enum Stored {
+        Plain(Keys),
+        Sealed(Sealed),
+    }
+
+    const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
+    /// What the sealed key is bound to besides the password: the format, demo flag and hint (changing them in the
+    /// file makes it fail to open).
+    fn aad(demo: bool, hint: &str) -> Vec<u8> {
+        format!("qtchart okx api v2|{demo}|{hint}").into_bytes()
+    }
+
+    fn derive(password: &str, salt: &[u8], kdf: Kdf) -> Result<Zeroizing<[u8; 32]>, String> {
+        // a file asking for absurd costs is not one this program wrote
+        if kdf.m > 1 << 20 || kdf.t > 20 || kdf.p > 16 {
+            return Err("金鑰檔損壞".into());
+        }
+        let params = Params::new(kdf.m, kdf.t, kdf.p, Some(32)).map_err(|_| "金鑰檔損壞".to_string())?;
+        let mut out = Zeroizing::new([0u8; 32]);
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            .hash_password_into(password.as_bytes(), salt, out.as_mut())
+            .map_err(|e| format!("解鎖密碼處理失敗：{e}"))?;
+        Ok(out)
+    }
+
+    /// Seal the key with a password (a new random salt and nonce each time).
+    pub fn seal(k: &Keys, password: &str, kdf: Kdf) -> Result<Sealed, String> {
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
+        let key = derive(password, &salt, kdf)?;
+        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let plain = Zeroizing::new(serde_json::to_vec(k).map_err(|e| e.to_string())?);
+        let hint = super::hint(&k.key);
+        let ct = XChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt(&nonce, Payload { msg: &plain, aad: &aad(k.demo, &hint) })
+            .map_err(|_| "加密失敗，沒有存 API".to_string())?;
+        Ok(Sealed { v: 2, demo: k.demo, hint, kdf, salt: B64.encode(salt), nonce: B64.encode(nonce), ct: B64.encode(ct) })
+    }
+
+    /// The key, with the right password; "密碼不對" otherwise.
+    pub fn unseal(s: &Sealed, password: &str) -> Result<Keys, String> {
+        let bad = || "金鑰檔損壞".to_string();
+        let salt = B64.decode(&s.salt).map_err(|_| bad())?;
+        let nonce = B64.decode(&s.nonce).map_err(|_| bad())?;
+        let ct = B64.decode(&s.ct).map_err(|_| bad())?;
+        if nonce.len() != 24 || salt.len() < 8 {
+            return Err(bad());
+        }
+        let key = derive(password, &salt, s.kdf)?;
+        let plain = Zeroizing::new(
+            XChaCha20Poly1305::new(key.as_ref().into())
+                .decrypt(nonce.as_slice().into(), Payload { msg: &ct, aad: &aad(s.demo, &s.hint) })
+                .map_err(|_| "解鎖密碼不對".to_string())?,
+        );
+        serde_json::from_slice(&plain).map_err(|_| bad())
+    }
+
+    /// What the file holds (None: no file, or it can't be read).
+    pub fn load(file: &Path) -> Option<Stored> {
+        let data = Zeroizing::new(unprotect(&std::fs::read(file).ok()?)?);
+        if let Ok(s) = serde_json::from_slice::<Sealed>(&data) {
+            return (s.v == 2).then_some(Stored::Sealed(s));
+        }
+        serde_json::from_slice::<Keys>(&data).ok().map(Stored::Plain)
+    }
+
+    pub fn save(file: &Path, s: &Sealed) -> Result<(), String> {
+        let sealed = protect(&serde_json::to_vec(s).map_err(|e| e.to_string())?)?;
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("存不了 API：{e}"))?;
         }
@@ -659,7 +887,7 @@ mod vault {
     const ENTROPY: &[u8] = b"qtchart okx api";
 
     #[cfg(windows)]
-    fn seal(data: &[u8]) -> Result<Vec<u8>, String> {
+    fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
         use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB};
         let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
         let entropy = CRYPT_INTEGER_BLOB { cbData: ENTROPY.len() as u32, pbData: ENTROPY.as_ptr() as *mut u8 };
@@ -673,35 +901,37 @@ mod vault {
     }
 
     #[cfg(windows)]
-    fn open(data: &[u8]) -> Option<Vec<u8>> {
+    fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
         use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB};
         let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
         let entropy = CRYPT_INTEGER_BLOB { cbData: ENTROPY.len() as u32, pbData: ENTROPY.as_ptr() as *mut u8 };
         let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
-        // SAFETY: as in seal
+        // SAFETY: as in protect
         let ok = unsafe {
             CryptUnprotectData(&input, std::ptr::null_mut(), &entropy, std::ptr::null(), std::ptr::null(), CRYPTPROTECT_UI_FORBIDDEN, &mut out)
         };
         (ok != 0).then(|| take(out))
     }
 
-    /// Copy a blob DPAPI allocated, then free it.
+    /// Copy a blob DPAPI allocated, wipe it, then free it.
     #[cfg(windows)]
     fn take(b: windows_sys::Win32::Security::Cryptography::CRYPT_INTEGER_BLOB) -> Vec<u8> {
         // SAFETY: DPAPI returned cbData bytes at pbData, allocated with LocalAlloc
         unsafe {
-            let v = std::slice::from_raw_parts(b.pbData, b.cbData as usize).to_vec();
+            let bytes = std::slice::from_raw_parts_mut(b.pbData, b.cbData as usize);
+            let v = bytes.to_vec();
+            zeroize::Zeroize::zeroize(bytes);
             windows_sys::Win32::Foundation::LocalFree(b.pbData as _);
             v
         }
     }
 
     #[cfg(not(windows))]
-    fn seal(data: &[u8]) -> Result<Vec<u8>, String> {
+    fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
         Ok(data.to_vec())
     }
     #[cfg(not(windows))]
-    fn open(data: &[u8]) -> Option<Vec<u8>> {
+    fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
         Some(data.to_vec())
     }
 }
@@ -825,15 +1055,82 @@ mod tests {
         assert_eq!((c.direction.as_str(), c.c_time, c.close_avg_px, c.realized_pnl, c.kind.as_str()), ("long", 1_793_426_400_000, 2260.5, 3.2, "2"));
     }
 
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tauri::async_runtime::block_on(f)
+    }
+
+    /// Cheap Argon2 for tests (the real one takes half a second on purpose).
+    const QUICK: vault::Kdf = vault::Kdf { m: 256, t: 1, p: 1 };
+
+    fn test_keys() -> Keys {
+        Keys { key: "abcd1234efgh5678".into(), secret: "s3cr3t".into(), passphrase: "p p".into(), demo: true }
+    }
+    fn fields(k: &Keys) -> (String, String, String, bool) {
+        (k.key.clone(), k.secret.clone(), k.passphrase.clone(), k.demo)
+    }
+
     #[test]
-    fn key_file_round_trip() {
+    fn sealed_with_the_password() {
+        let k = test_keys();
+        let s = vault::seal(&k, "correct horse", QUICK).unwrap();
+        assert_eq!((s.v, s.demo, s.hint.as_str()), (2, true, "abcd…5678"));
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("s3cr3t") && !json.contains("abcd1234efgh5678")); // only the hint shows
+        assert_eq!(fields(&vault::unseal(&s, "correct horse").unwrap()), fields(&k));
+        assert_eq!(vault::unseal(&s, "correct hors").err().unwrap(), "解鎖密碼不對");
+        // the demo flag and hint beside it are bound to it
+        let flipped: vault::Sealed = serde_json::from_str(&json.replace("\"demo\":true", "\"demo\":false")).unwrap();
+        assert!(vault::unseal(&flipped, "correct horse").is_err());
+        let rehinted: vault::Sealed = serde_json::from_str(&json.replace("abcd…5678", "zzzz…5678")).unwrap();
+        assert!(vault::unseal(&rehinted, "correct horse").is_err());
+        // a new salt and nonce every time
+        assert_ne!(serde_json::to_string(&vault::seal(&k, "correct horse", QUICK).unwrap()).unwrap(), json);
+        // absurd costs in a file are refused, not tried
+        let costly: vault::Sealed = serde_json::from_str(&json.replace("\"m\":256", "\"m\":4000000000")).unwrap();
+        assert_eq!(vault::unseal(&costly, "correct horse").err().unwrap(), "金鑰檔損壞");
+    }
+
+    #[test]
+    fn key_file_states() {
         let file = std::env::temp_dir().join(format!("qtchart-key-{}.bin", std::process::id()));
-        let k = Keys { key: "k".into(), secret: "s".into(), passphrase: "p p".into(), demo: true };
-        vault::save(&file, &k).unwrap();
-        let back = vault::load(&file).unwrap();
-        assert_eq!((back.key, back.secret, back.passphrase, back.demo), ("k".into(), "s".into(), "p p".into(), true));
-        vault::remove(&file).unwrap();
-        vault::remove(&file).unwrap(); // already gone: fine
+        // a file from before passwords: usable, not protected, can't be locked
+        std::fs::write(&file, serde_json::to_vec(&test_keys()).unwrap()).unwrap();
+        let mut t = Trader::new(file.clone());
+        t.kdf = QUICK;
+        let st = t.status();
+        assert!(st.set && !st.locked && !st.protected && st.demo);
+        assert_eq!(t.keys_set(), Some(true));
+        assert!(t.lock().is_err());
+        // a password for it: sealed in the file, still open
+        assert_eq!(run(t.set_password(None, "short".into())).err().unwrap(), "解鎖密碼至少要 8 個字");
+        let st = run(t.set_password(None, "correct horse".into())).unwrap();
+        assert!(st.protected && !st.locked);
+        assert!(matches!(vault::load(&file), Some(vault::Stored::Sealed(_))));
+        assert!(!std::fs::read_to_string(&file).unwrap().contains("s3cr3t"));
+        // locked: nothing to sign with
+        assert!(t.lock().unwrap().locked);
+        assert_eq!(t.keys_set(), None);
+        assert_eq!(t.keys().err().unwrap(), LOCKED);
+        assert_eq!(t.status().hint, "abcd…5678"); // still shown while locked
+        assert!(run(t.unlock("wrong password".into())).is_err());
+        assert!(t.status().locked);
+        assert!(!run(t.unlock("correct horse".into())).unwrap().locked);
+        assert_eq!(fields(&t.keys().unwrap()), fields(&test_keys()));
+        // changing it takes the current one
+        assert!(run(t.set_password(None, "battery staple".into())).is_err());
+        assert!(run(t.set_password(Some("wrong password".into()), "battery staple".into())).is_err());
+        run(t.set_password(Some("correct horse".into()), "battery staple".into())).unwrap();
+        // the next start: locked until the new password
+        let mut again = Trader::new(file.clone());
+        again.kdf = QUICK;
+        assert!(again.status().locked);
+        assert!(run(again.unlock("correct horse".into())).is_err());
+        assert!(!run(again.unlock("battery staple".into())).unwrap().locked);
+        // removed: gone in any state
+        assert!(again.lock().unwrap().locked);
+        again.clear().unwrap();
+        assert!(!again.status().set);
         assert!(vault::load(&file).is_none());
+        vault::remove(&file).unwrap(); // already gone: fine
     }
 }

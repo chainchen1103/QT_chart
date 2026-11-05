@@ -85,8 +85,8 @@ export class Trading {
       openOrderDetails(x, y, this.spot(t, d));
       return;
     }
-    if (!this.d.acct.keys.set) {
-      this.d.note("先設定 OKX API 才能下單");
+    if (!this.d.acct.usable()) {
+      this.d.note(this.d.acct.keys.locked ? "先輸入解鎖密碼才能下單" : "先設定 OKX API 才能下單");
       this.openAccount();
       return;
     }
@@ -100,7 +100,7 @@ export class Trading {
   /** Ask OKX about every order still open on these charts (once each, one at a time). */
   async poll(targets: readonly OrderTarget[]) {
     const { acct } = this.d;
-    if (this.polling || !acct.keys.set) return;
+    if (this.polling || !acct.usable()) return;
     this.polling = true;
     try {
       const seen = new Set<string>();

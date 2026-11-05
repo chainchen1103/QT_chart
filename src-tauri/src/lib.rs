@@ -127,12 +127,36 @@ fn trade_status(state: State<'_, AppState>) -> KeyStatus {
     state.trader.status()
 }
 
-/// Check the key on the account, then keep it (encrypted). Returns the account.
+/// Check the key on the account, then keep it sealed with the unlock password. Returns the account.
 #[tauri::command]
-async fn trade_set_keys(app: AppHandle, state: State<'_, AppState>, key: String, secret: String, passphrase: String, demo: bool) -> Result<Account, String> {
-    let account = state.trader.set_keys(key, secret, passphrase, demo).await?;
+async fn trade_set_keys(
+    app: AppHandle, state: State<'_, AppState>, key: String, secret: String, passphrase: String, demo: bool, password: String,
+) -> Result<Account, String> {
+    let account = state.trader.set_keys(key, secret, passphrase, demo, password).await?;
     state.sync.restart(&app); // follow the new key's account
     Ok(account)
+}
+
+/// Unlock the key with its password for this run ("解鎖密碼不對" when wrong).
+#[tauri::command]
+async fn trade_unlock(app: AppHandle, state: State<'_, AppState>, password: String) -> Result<KeyStatus, String> {
+    let st = state.trader.unlock(password).await?;
+    state.sync.restart(&app);
+    Ok(st)
+}
+
+/// Forget the unlocked key until the password is entered again.
+#[tauri::command]
+fn trade_lock(app: AppHandle, state: State<'_, AppState>) -> Result<KeyStatus, String> {
+    let st = state.trader.lock()?;
+    state.sync.restart(&app);
+    Ok(st)
+}
+
+/// Set the unlock password of a key saved without one, or change it (`current` needed then).
+#[tauri::command]
+async fn trade_set_password(state: State<'_, AppState>, current: Option<String>, password: String) -> Result<KeyStatus, String> {
+    state.trader.set_password(current, password).await
 }
 
 #[tauri::command]
@@ -248,6 +272,9 @@ pub fn run() {
             store_remove,
             trade_status,
             trade_set_keys,
+            trade_unlock,
+            trade_lock,
+            trade_set_password,
             trade_clear_keys,
             trade_account,
             trade_place,

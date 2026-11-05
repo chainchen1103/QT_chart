@@ -1,15 +1,19 @@
-// The OKX account behind the user's API key: whether a key is set, the account (equity, free margin,
-// position mode; refreshed every minute while the window is open), and the calls that place, look up and
-// cancel orders. The key itself stays in the backend (src-tauri/src/trade.rs); nothing here keeps it.
+// The OKX account behind the user's API key: whether a key is set and unlocked, the account (equity, free
+// margin, position mode; refreshed every minute while the window is open), and the calls that unlock, lock,
+// place, look up and cancel orders. The key and the unlock password stay in the backend (src-tauri/src/trade.rs);
+// nothing here keeps them.
 
 import {
   tradeAccount,
   tradeCancel,
   tradeClearKeys,
+  tradeLock,
   tradeOrder,
   tradePlace,
   tradeSetKeys,
+  tradeSetPassword,
   tradeStatus,
+  tradeUnlock,
   type Account,
   type KeyStatus,
   type OrderInfo,
@@ -19,8 +23,10 @@ import {
 
 const REFRESH_MS = 60_000;
 
+const NO_KEYS: KeyStatus = { set: false, demo: false, hint: "", locked: false, protected: false };
+
 export class TradeAccount {
-  keys: KeyStatus = { set: false, demo: false, hint: "" };
+  keys: KeyStatus = NO_KEYS;
   account: Account | null = null;
   /** The last refresh failed: why. */
   error: string | null = null;
@@ -39,8 +45,13 @@ export class TradeAccount {
     }, REFRESH_MS);
   }
 
+  /** A key is set and unlocked: orders and the account can be used. */
+  usable(): boolean {
+    return this.keys.set && !this.keys.locked;
+  }
+
   async refresh() {
-    if (!this.keys.set) return;
+    if (!this.usable()) return;
     try {
       this.account = await tradeAccount();
       this.error = null;
@@ -50,25 +61,45 @@ export class TradeAccount {
     this.emit();
   }
 
-  /** Check the key on the account and keep it; throws OKX's answer when it isn't accepted. */
-  async setKeys(key: string, secret: string, passphrase: string, demo: boolean) {
-    this.account = await tradeSetKeys(key, secret, passphrase, demo);
+  /** Check the key on the account and keep it sealed with `password`; throws OKX's answer when it isn't accepted. */
+  async setKeys(key: string, secret: string, passphrase: string, demo: boolean, password: string) {
+    this.account = await tradeSetKeys(key, secret, passphrase, demo, password);
     this.keys = await tradeStatus();
     this.error = null;
     this.emit();
   }
 
+  /** Throws "解鎖密碼不對" when it is wrong. */
+  async unlock(password: string) {
+    this.keys = await tradeUnlock(password);
+    this.error = null;
+    this.emit();
+    await this.refresh();
+  }
+
+  async lock() {
+    this.keys = await tradeLock();
+    this.account = null;
+    this.emit();
+  }
+
+  /** Set the unlock password, or change it (`current`: the one it has). */
+  async setPassword(current: string | null, password: string) {
+    this.keys = await tradeSetPassword(current, password);
+    this.emit();
+  }
+
   async clearKeys() {
     await tradeClearKeys();
-    this.keys = { set: false, demo: false, hint: "" };
+    this.keys = NO_KEYS;
     this.account = null;
     this.error = null;
     this.emit();
   }
 
-  /** USDT equity, when a key is set and the account was read. */
+  /** USDT equity, when a key is set, unlocked and the account was read. */
   equity(): number | null {
-    return this.keys.set && this.account ? this.account.equity : null;
+    return this.usable() && this.account ? this.account.equity : null;
   }
 
   async place(o: OrderReq): Promise<Placed> {

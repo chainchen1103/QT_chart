@@ -7,6 +7,7 @@ import { fmtMoney, type PositionResult } from "../drawings/trade.ts";
 import type { PositionDrawing, PositionOrder, PositionSettings, SyncSettings } from "../settings/model.ts";
 import type { AccountSync } from "./sync.ts";
 import { checkbox, el, labelled, lbl, textButton } from "../ui/dom.ts";
+import { readRaw, writeRaw } from "../core/storage.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import type { TradeAccount } from "./account.ts";
 import {
@@ -70,10 +71,16 @@ export function paintAccountButton(btn: HTMLElement, acct: TradeAccount) {
   const { keys, account, error } = acct;
   btn.classList.toggle("live", keys.set && !keys.demo);
   btn.classList.toggle("demo", keys.set && keys.demo);
-  btn.classList.toggle("failed", keys.set && !!error);
+  btn.classList.toggle("failed", acct.usable() && !!error);
+  btn.classList.toggle("locked", keys.locked);
   if (!keys.set) {
     btn.textContent = "API 未設定";
     btn.title = "設定 OKX API：從倉位直接下單，倉位資金帶入帳戶權益";
+    return;
+  }
+  if (keys.locked) {
+    btn.textContent = `${envText(keys.demo)} 已鎖定`;
+    btn.title = "按一下輸入解鎖密碼，才能下單和同步持倉";
     return;
   }
   btn.textContent = `${envText(keys.demo)} ${account ? fmtMoney(account.equity) + " U" : error ? "連線失敗" : "…"}`;
@@ -140,25 +147,45 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
 /** The account window's contents (also a section of the settings window). */
 export function renderAccount(acct: TradeAccount, position: Setting<PositionSettings>): Render {
   let following = false;
+  /** The change-password boxes are open; the security notes are shown (kept across redraws). */
+  let changing = false;
+  let showSafety = false;
   return (body, rerender) => {
     if (!following) {
-      // follow the account's refreshes while the window is open (not while a key is being typed in)
+      // follow the account's refreshes while the window is open, but never while something is being typed
       following = true;
       const stop = acct.subscribe(() => {
-        if (acct.keys.set) rerender();
+        const typing = [...body.querySelectorAll<HTMLInputElement>("input.trade-key")].some((i) => i.value);
+        if (acct.keys.set && !typing) rerender();
       });
       body.addEventListener(POPOVER_CLOSED, () => {
         stop();
         following = false; // the next time the window opens, follow again
       }, { once: true });
     }
+    const safety = () => {
+      showSafety = !showSafety;
+      rerender();
+    };
     if (!acct.keys.set) {
-      keyForm(body, acct, rerender);
+      keyForm(body, acct, rerender, showSafety, safety);
+      return;
+    }
+    if (acct.keys.locked) {
+      unlockForm(body, acct, rerender);
       return;
     }
     const { keys, account, error } = acct;
+    body.classList.add("trade-form");
     body.append(el("div", `trade-env ${keys.demo ? "demo" : "live"}`, keys.demo ? "模擬盤（OKX 模擬交易）" : "實盤：下單會用真的錢"));
     body.append(row(lbl("API Key"), keys.hint));
+    if (!keys.protected) {
+      // a key from before unlock passwords
+      body.append(el("div", "trade-warn", "這組 API 還沒有解鎖密碼，只有 Windows 帳號保護。設一個解鎖密碼，之後每次開 QT Chart 輸入一次。"));
+      passwordForm(body, acct, rerender, false, () => {});
+      body.append(safetyLink(showSafety, safety));
+      if (showSafety) body.append(safetyNotes());
+    }
     if (account) {
       body.append(
         row(lbl("帳戶權益"), `${fmtMoney(account.equity)} U`, lbl("可用"), `${fmtMoney(account.avail)} U`),
@@ -176,50 +203,142 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
       ),
       el("div", "pop-note", "下單：在倉位右邊按「下單」，確認後才會送出；止損一定會一起設"),
     );
-    const foot = el("div", "pop-foot");
-    foot.append(
-      textButton("重新整理", "text-btn", () => void acct.refresh()),
-      el("span", "spacer"),
-      textButton("移除 API", "text-btn danger", async () => {
-        await acct.clearKeys();
+    if (keys.protected && changing) {
+      body.append(el("div", "pop-section", "改解鎖密碼"));
+      passwordForm(body, acct, rerender, true, () => {
+        changing = false;
         rerender();
-      }, "從這台電腦刪掉這組 API（OKX 上的 API 不受影響）"),
-    );
+      });
+    }
+    const foot = el("div", "pop-foot");
+    foot.append(textButton("重新整理", "text-btn", () => void acct.refresh()), el("span", "spacer"));
+    if (keys.protected) {
+      foot.append(
+        textButton(changing ? "取消改密碼" : "改解鎖密碼", "text-btn", () => {
+          changing = !changing;
+          rerender();
+        }),
+        textButton("上鎖", "text-btn", async () => {
+          await acct.lock();
+          rerender();
+        }, "先把 API 鎖起來，要下單時再輸入解鎖密碼"),
+      );
+    }
+    foot.append(removeButton(acct, rerender));
     body.append(foot);
   };
 }
 
-function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
-  body.classList.add("trade-form");
-  body.append(
-    el("div", "pop-note", "填你 OKX 帳戶的 API，就能從倉位直接下單，倉位的初始資金也會帶入帳戶權益"),
-    el("div", "pop-note", "到 OKX「API 管理」建立：權限只勾「交易」，不要勾「提現」；最好綁定這台電腦的 IP。手單建議用子帳戶的 API。"),
-  );
-  const input = (placeholder: string, secret: boolean) => {
-    const i = el("input");
-    i.type = secret ? "password" : "text";
-    i.placeholder = placeholder;
-    i.autocomplete = "off";
-    i.spellcheck = false;
-    i.className = "trade-key";
-    return i;
+/** A box for a key, a secret or a password. */
+function keyInput(placeholder: string, secret: boolean, autocomplete: AutoFill = "off"): HTMLInputElement {
+  const i = el("input");
+  i.type = secret ? "password" : "text";
+  i.placeholder = placeholder;
+  i.autocomplete = autocomplete;
+  i.spellcheck = false;
+  i.className = "trade-key";
+  return i;
+}
+
+const MIN_PASSWORD = 8;
+/** Why a new unlock password typed twice can't be used, or null. */
+function passwordProblem(a: string, b: string): string | null {
+  if ([...a].length < MIN_PASSWORD) return `解鎖密碼至少要 ${MIN_PASSWORD} 個字`;
+  if (a !== b) return "兩次輸入的解鎖密碼不一樣";
+  return null;
+}
+
+/** 移除 API: the first press arms it for 3 seconds, the second removes the key from this computer. */
+function removeButton(acct: TradeAccount, rerender: () => void, text = "移除 API"): HTMLButtonElement {
+  let armed = 0;
+  const b = textButton(text, "text-btn danger", async () => {
+    if (Date.now() > armed) {
+      armed = Date.now() + 3000;
+      b.textContent = "再按一次確認移除";
+      setTimeout(() => {
+        if (Date.now() > armed) b.textContent = text;
+      }, 3100);
+      return;
+    }
+    await acct.clearKeys();
+    rerender();
+  }, "從這台電腦刪掉這組 API，OKX 上的 API 不受影響");
+  return b;
+}
+
+/** The security notes: how the key is kept, what that can't stop, and what to set on OKX. */
+function safetyNotes(): HTMLElement {
+  const box = el("div", "trade-safety");
+  const part = (title: string, lines: string[]) => {
+    box.append(el("div", "trade-safety-title", title));
+    const ul = el("ul");
+    for (const l of lines) ul.append(el("li", "", l));
+    box.append(ul);
   };
-  const key = input("API Key", false);
-  const secret = input("Secret Key", true);
-  const pass = input("Passphrase（建立 API 時設的密碼）", true);
+  part("金鑰怎麼存", [
+    "只存在這台電腦，先用你設的解鎖密碼加密，再用 Windows 帳號加密",
+    "每次開 QT Chart 要輸入解鎖密碼，才能下單和同步持倉",
+    "金鑰檔被複製走，沒有解鎖密碼也打不開；Secret Key 不會再顯示在畫面上",
+    "只會連到 OKX，金鑰不會傳到其他地方",
+  ]);
+  part("擋不住的情況", ["電腦已經中毒，在你解鎖之後被讀取記憶體或側錄鍵盤；所以 OKX 那邊也要設好限制"]);
+  part("在 OKX 建立 API 時", [
+    "權限只勾「讀取」和「交易」，不要勾「提現」",
+    "綁定這台電腦的 IP，金鑰就算被偷也不能從別的地方用",
+    "用子帳戶的 API，子帳戶只放要拿來交易的資金",
+    "不再使用或懷疑外洩時，到 OKX 刪掉這組 API",
+  ]);
+  part("忘記解鎖密碼", ["無法找回，只能移除 API 再重新輸入一次"]);
+  return box;
+}
+
+function safetyLink(open: boolean, toggle: () => void): HTMLElement {
+  const r = el("div", "pop-row");
+  r.append(textButton(open ? "收起安全性說明" : "安全性說明", "link-btn", toggle));
+  return r;
+}
+
+/** The first time an API is added: the security notes first, then the boxes. */
+const SAFETY_SEEN = "apiSafetySeen";
+
+function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, showSafety: boolean, toggleSafety: () => void) {
+  body.classList.add("trade-form");
+  if (readRaw(SAFETY_SEEN) !== "1") {
+    body.append(el("div", "pop-note", "設定之前，先看一下 QT Chart 怎麼保護你的 API："), safetyNotes());
+    const foot = el("div", "pop-foot");
+    foot.append(el("span", "spacer"), textButton("我了解，開始設定", "text-btn primary", () => {
+      writeRaw(SAFETY_SEEN, "1");
+      rerender();
+    }));
+    body.append(foot);
+    return;
+  }
+  body.append(el("div", "pop-note", "填你 OKX 帳戶的 API，就能從倉位直接下單，倉位的初始資金也會帶入帳戶權益"), safetyLink(showSafety, toggleSafety));
+  if (showSafety) body.append(safetyNotes());
+  const key = keyInput("API Key", false);
+  const secret = keyInput("Secret Key", true);
+  const pass = keyInput("Passphrase：建立 API 時設的密碼", true);
+  const pw = keyInput(`解鎖密碼：至少 ${MIN_PASSWORD} 個字`, true, "new-password");
+  const pw2 = keyInput("再輸入一次解鎖密碼", true, "new-password");
   let demo = false;
   const env = select<"live" | "demo">({ live: "實盤", demo: "模擬盤（OKX 模擬交易的 API）" }, "live", (v) => (demo = v === "demo"));
   const msg = el("div", "pop-msg");
-  const save = textButton("連線並儲存", "text-btn", async () => {
+  const save = textButton("連線並儲存", "text-btn primary", async () => {
     if (!key.value.trim() || !secret.value.trim() || !pass.value) {
-      msg.textContent = "三個都要填";
+      msg.textContent = "API Key、Secret Key、Passphrase 都要填";
+      return;
+    }
+    const bad = passwordProblem(pw.value, pw2.value);
+    if (bad) {
+      msg.textContent = bad;
       return;
     }
     save.disabled = true;
     save.textContent = "連線中…";
     msg.textContent = "";
     try {
-      await acct.setKeys(key.value, secret.value, pass.value, demo);
+      await acct.setKeys(key.value, secret.value, pass.value, demo, pw.value);
+      for (const i of [key, secret, pass, pw, pw2]) i.value = "";
       rerender(); // the boxes (and what was typed in them) are gone
     } catch (e) {
       msg.textContent = String(e);
@@ -227,12 +346,84 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
       save.textContent = "連線並儲存";
     }
   });
-  body.append(row(key), row(secret), row(pass), row(lbl("環境"), env), msg);
-  body.append(el("div", "pop-note", "先用 OKX 讀一次帳戶確認可以用才存。金鑰用 Windows 加密存在這台電腦，只有程式本身讀得到，畫面上不會再顯示。"));
+  body.append(row(key), row(secret), row(pass), row(lbl("環境"), env), row(pw), row(pw2), msg);
+  body.append(el("div", "pop-note", "先用 OKX 讀一次帳戶確認可以用才存。之後每次開 QT Chart 要輸入解鎖密碼；忘記了只能移除 API 再重新輸入。"));
   const foot = el("div", "pop-foot");
   foot.append(el("span", "spacer"), save);
   body.append(foot);
   setTimeout(() => key.focus(), 0);
+}
+
+/** A key saved with a password, not unlocked yet: the password box (asked at every start). */
+function unlockForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
+  const { keys } = acct;
+  body.classList.add("trade-form");
+  body.append(el("div", `trade-env ${keys.demo ? "demo" : "live"}`, keys.demo ? "模擬盤（OKX 模擬交易）" : "實盤：下單會用真的錢"));
+  body.append(row(lbl("API Key"), keys.hint), el("div", "pop-note", "API 已鎖定：輸入解鎖密碼才能下單和同步持倉"));
+  const pw = keyInput("解鎖密碼", true, "current-password");
+  const msg = el("div", "pop-msg");
+  const go = textButton("解鎖", "text-btn primary", async () => {
+    if (!pw.value) {
+      msg.textContent = "請輸入解鎖密碼";
+      return;
+    }
+    go.disabled = true;
+    go.textContent = "解鎖中…";
+    msg.textContent = "";
+    try {
+      await acct.unlock(pw.value);
+      pw.value = "";
+      rerender();
+    } catch (e) {
+      msg.textContent = String(e);
+      pw.value = "";
+      pw.focus();
+      go.disabled = false;
+      go.textContent = "解鎖";
+    }
+  });
+  pw.onkeydown = (e) => {
+    if (e.key === "Enter" && !go.disabled) go.click();
+  };
+  body.append(row(pw), msg);
+  const foot = el("div", "pop-foot");
+  foot.append(removeButton(acct, rerender, "忘記密碼：移除 API"), el("span", "spacer"), go);
+  body.append(foot);
+  setTimeout(() => pw.focus(), 0);
+}
+
+/** Set an unlock password (a key from before them), or change it (`change`: the current one is asked). */
+function passwordForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, change: boolean, done: () => void) {
+  const cur = keyInput("目前的解鎖密碼", true, "current-password");
+  const pw = keyInput(`新的解鎖密碼：至少 ${MIN_PASSWORD} 個字`, true, "new-password");
+  const pw2 = keyInput("再輸入一次新的解鎖密碼", true, "new-password");
+  const msg = el("div", "pop-msg");
+  const save = textButton(change ? "儲存新密碼" : "設定解鎖密碼", "text-btn primary", async () => {
+    const bad = passwordProblem(pw.value, pw2.value);
+    if (bad) {
+      msg.textContent = bad;
+      return;
+    }
+    if (change && !cur.value) {
+      msg.textContent = "請輸入目前的解鎖密碼";
+      return;
+    }
+    save.disabled = true;
+    msg.textContent = "";
+    try {
+      await acct.setPassword(change ? cur.value : null, pw.value);
+      for (const i of [cur, pw, pw2]) i.value = "";
+      done();
+      rerender();
+    } catch (e) {
+      msg.textContent = String(e);
+      save.disabled = false;
+    }
+  });
+  if (change) body.append(row(cur));
+  const r = row(pw2);
+  r.append(save);
+  body.append(row(pw), r, msg);
 }
 
 // ----------------------------------------------------------------------------- the order window

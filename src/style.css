@@ -33,6 +33,7 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --font: Geist, -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
   --mono: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, "Microsoft JhengHei", monospace;
+  --icon-lock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Crect x='3.5' y='7' width='9' height='6.5' rx='1.5'/%3E%3Cpath d='M5.5 7V5a2.5 2.5 0 0 1 5 0v2'/%3E%3C/svg%3E");
   --icon-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M4.5 4.5l7 7M11.5 4.5l-7 7'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
@@ -255,6 +256,15 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .account-btn:hover, .account-btn.open { color: var(--text); border-color: var(--line-strong); }
 .account-btn.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--down); } /* real money */
 .account-btn.failed { color: var(--down); }
+/* saved with an unlock password, not entered yet */
+.account-btn.locked { color: var(--text); }
+.account-btn.locked::before { content: ""; width: 12px; height: 12px; border-radius: 0; background: currentColor;
+  -webkit-mask: var(--icon-lock) center / 12px no-repeat; mask: var(--icon-lock) center / 12px no-repeat; }
+/* how the API is kept, shown the first time one is added */
+.trade-safety { margin: 8px 0; padding: 4px 12px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); }
+.trade-safety-title { margin-top: 8px; color: var(--text); font-size: 12px; font-weight: 500; line-height: 18px; }
+.trade-safety ul { margin: 2px 0 0; padding-left: 18px; }
+.trade-safety li { color: var(--text-2); font-size: 12px; line-height: 18px; }
 .trade-env { margin: 4px 0 8px; padding: 4px 8px; border-radius: var(--r-ctl); font-size: 12px; }
 .trade-env.live { background: rgba(239, 83, 80, 0.14); color: var(--down); }
 .trade-env.demo { background: var(--raised); color: var(--text-2); }

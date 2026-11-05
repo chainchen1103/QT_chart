@@ -297,7 +297,11 @@ async function start() {
   await onStatus((s) => status.setStream(s));
   await onCandle(route);
   alerts.start();
-  void account.start().then(() => sync.start());
+  void account.start().then(() => {
+    // the API is saved with an unlock password: ask for it right away (Esc: later, from the account button)
+    if (account.keys.locked) trading.openAccount();
+    return sync.start();
+  });
   try {
     await catalog.load();
     workspace.catalogReady();

@@ -24,6 +24,10 @@ tauri-plugin-notification = "2"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
+# the key file sealed with the user's unlock password (Argon2id, then XChaCha20-Poly1305), secrets wiped from memory
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
 
 # Windows only: ask WebView2 to use less memory while the window is minimized (window.rs)
 [target.'cfg(windows)'.dependencies]
@@ -41,3 +45,13 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# unlocking derives the key with Argon2id: built for speed even where the rest is built small (or not optimized)
+[profile.release.package.argon2]
+opt-level = 3
+[profile.release.package.blake2]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
