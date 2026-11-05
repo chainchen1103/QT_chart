@@ -42,6 +42,8 @@ export type LayerHost = {
   bars(): Candle[];
   times(): number[];
   barSec(): number;
+  /** Text grows or shrinks with the chart's label size (1 at the default). */
+  textScale(): number;
 };
 
 const FONT = UI_FONT;
@@ -111,6 +113,11 @@ export class PineLayer implements ISeriesPrimitive<Time> {
     for (const b of s.boxes) if (inView(b.left, b.right, b.xloc)) (take(b.top), take(b.bottom));
     for (const l of s.labels) if (l.yloc === "price" && inView(l.x, l.x, l.xloc)) take(l.y);
     return lo <= hi ? { priceRange: { minValue: lo, maxValue: hi } } : null;
+  }
+
+  /** A text size in px at the chart's label size, to the half pixel. */
+  private tx(px: number): number {
+    return Math.round(px * this.host.textScale() * 2) / 2;
   }
 
   // ------------------------------------------------------------------- coordinates
@@ -421,7 +428,7 @@ export class PineLayer implements ISeriesPrimitive<Time> {
     if (b.text) {
       const tc = cssColor(b.text_color);
       if (!tc) return;
-      const size = b.text_size === "auto" ? Math.max(8, Math.min(14, h * 0.5)) : TEXT_PX[b.text_size] ?? 12;
+      const size = b.text_size === "auto" ? Math.max(8, Math.min(14, h * 0.5)) : this.tx(TEXT_PX[b.text_size] ?? 12);
       ctx.font = `${size}px ${FONT}`;
       ctx.fillStyle = tc;
       const lines = b.text_wrap === "auto" ? wrap(ctx, b.text, w - 6) : b.text.split("\n");
@@ -533,11 +540,12 @@ export class PineLayer implements ISeriesPrimitive<Time> {
       if (s.text && !(s.shape === "labelup" || s.shape === "labeldown")) {
         const tc = cssColor(s.textcolors[i]);
         if (!tc) continue;
-        ctx.font = `${TEXT_PX.small}px ${FONT}`;
+        const px = this.tx(TEXT_PX.small);
+        ctx.font = `${px}px ${FONT}`;
         ctx.textAlign = "center";
         ctx.fillStyle = tc;
         const lines = s.text.split("\n");
-        const lh = TEXT_PX.small * 1.2;
+        const lh = px * 1.2;
         ctx.textBaseline = up ? "bottom" : "top";
         lines.forEach((t, k) => {
           const yy = up ? y - size / 2 - 2 - (lines.length - 1 - k) * lh : y + size / 2 + 2 + k * lh;
@@ -545,7 +553,7 @@ export class PineLayer implements ISeriesPrimitive<Time> {
         });
       } else if (s.text && c) {
         const tc = cssColor(s.textcolors[i]) ?? "#fff";
-        labelBox(ctx, s.text, x, y + (s.shape === "labelup" ? -size / 2 : size / 2), s.shape === "labelup" ? "label_up" : "label_down", c, tc, TEXT_PX.small, "center");
+        labelBox(ctx, s.text, x, y + (s.shape === "labelup" ? -size / 2 : size / 2), s.shape === "labelup" ? "label_up" : "label_down", c, tc, this.tx(TEXT_PX.small), "center");
       }
     }
   }
@@ -599,7 +607,7 @@ export class PineLayer implements ISeriesPrimitive<Time> {
     if (y == null) return;
     const bg = cssColor(l.color);
     const tc = cssColor(l.textcolor);
-    const size = TEXT_PX[l.size] ?? 13;
+    const size = this.tx(TEXT_PX[l.size] ?? 13);
     const box = l.style.startsWith("label_") || l.style === "none" || l.style === "text_outline";
     if (box) {
       labelBox(ctx, l.text, x, y, l.style, bg, tc, size, l.textalign);
@@ -628,7 +636,7 @@ export class PineLayer implements ISeriesPrimitive<Time> {
     const size = 6;
     // several fills on one bar stack away from it
     const stack = new Map<string, number>();
-    ctx.font = `10px ${FONT}`;
+    ctx.font = `${this.tx(10)}px ${FONT}`;
     ctx.textAlign = "center";
     for (const f of trades) {
       if (f.bar < v.from || f.bar > v.to) continue;
@@ -674,7 +682,7 @@ export class PineLayer implements ISeriesPrimitive<Time> {
     const pad = 4;
     const colW = new Array(t.columns).fill(0);
     const rowH = new Array(t.rows).fill(0);
-    const fontOf = (size: string) => TEXT_PX[size] ?? 13;
+    const fontOf = (size: string) => this.tx(TEXT_PX[size] ?? 13);
     for (const [key, cell] of t.cells) {
       if (covered.has(key) || spans.has(key)) continue;
       const [c, r] = key.split(",").map(Number);

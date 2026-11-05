@@ -29,7 +29,7 @@ export type SettingsIo = {
 };
 
 const SECTIONS: { id: SettingsSection; name: string; note: string }[] = [
-  { id: "appearance", name: "圖表外觀", note: "背景、格線、文字和 K 線的顏色，所有圖表共用" },
+  { id: "appearance", name: "圖表外觀", note: "背景、格線、文字和 K 線的顏色與文字大小，所有圖表共用" },
   { id: "labels", name: "價格標籤", note: "價格標尺上顯示哪些標籤" },
   { id: "bars", name: "K 線與週期", note: "工具列上的週期、自己加的週期，和每個圖表載入多少 K 線" },
   { id: "alerts", name: "提醒", note: "所有價格提醒共用的聲音和通知" },

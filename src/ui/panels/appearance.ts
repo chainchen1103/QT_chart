@@ -1,7 +1,7 @@
-// Chart appearance: background color and picture, grid and text, candle colors.
+// Chart appearance: background color and picture, grid and text, candle colors, text sizes.
 // Each change is applied and saved at once through the callbacks; nothing waits for an OK button.
 
-import { DEFAULT_APPEARANCE, IMAGE_FITS, type Appearance, type ImageFit } from "../../settings/model.ts";
+import { AXIS_SIZES, DEFAULT_APPEARANCE, IMAGE_FITS, LABEL_SIZES, type Appearance, type ImageFit } from "../../settings/model.ts";
 import { colorInput, el, lbl, textButton } from "../dom.ts";
 import { popoverAt, togglePopover, type Render } from "../popover.ts";
 
@@ -116,13 +116,31 @@ export function renderAppearance(io: AppearanceIo, extra?: Render): Render {
       colorInput(a.down, (v) => set({ down: v }), "下跌 K 線、成交量和最新價的顏色"),
     );
     body.append(lines, candles);
+
+    body.append(el("div", "pop-section", "文字大小"));
+    const sizes = el("div", "pop-row");
+    const sizeSelect = (value: number, options: number[], fallback: number, title: string, pick: (v: number) => void) => {
+      const sel = el("select");
+      for (const v of options) sel.append(new Option(`${v} px`, String(v), false, v === value));
+      sel.title = `${title}，預設 ${fallback} px`;
+      sel.onchange = () => pick(Number(sel.value));
+      return sel;
+    };
+    sizes.append(
+      lbl("圖上標籤"),
+      sizeSelect(a.labelSize, LABEL_SIZES, DEFAULT_APPEARANCE.labelSize, "畫圖工具、指標和高低價的標籤", (v) => set({ labelSize: v })),
+      lbl("座標軸"),
+      sizeSelect(a.axisSize, AXIS_SIZES, DEFAULT_APPEARANCE.axisSize, "價格和時間座標軸", (v) => set({ axisSize: v })),
+    );
+    body.append(sizes, el("div", "pop-note", "圖上標籤包括畫圖工具、指標和高低價的標籤，Pine 腳本的文字也跟著等比縮放。標籤會自動避開彼此。"));
     extra?.(body, rerender);
 
     const foot = el("div", "pop-foot");
     foot.append(el("span", "spacer"), textButton("恢復預設顏色", "link-btn", () => {
-      io.set({ ...DEFAULT_APPEARANCE });
+      const cur = io.get();
+      io.set({ ...DEFAULT_APPEARANCE, labelSize: cur.labelSize, axisSize: cur.axisSize });
       rerender();
-    }, "背景圖片不會被移除"));
+    }, "背景圖片和文字大小不會變"));
     body.append(foot);
   };
 }

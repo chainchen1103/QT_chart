@@ -1,14 +1,18 @@
-// Painting the drawings: fills under the candles (Fib bands, rectangles, position zones), and lines, handles
-// and labels over them. Pure drawing from the geometry in geo.ts; nothing here changes any state.
+// Painting the drawings: fills under the candles (Fib bands, rectangles, position zones), and lines, labels and
+// handles over them. Pure drawing from the geometry in geo.ts; nothing here changes any state. The labels are
+// planned when the views update (labelPlans: what each drawing writes and the places it may go), get their
+// places among all the chart's labels (LabelSpace), and are painted there; the handles of the drawing being
+// edited go over them.
 
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
-import type { Dash, FibSettings, PositionDrawing, PositionSettings } from "../settings/model.ts";
+import { isChannelDrawing, type Dash, type FibSettings, type PositionDrawing, type PositionSettings } from "../settings/model.ts";
 import { extendSeg, type Geo, type Seg } from "./geo.ts";
 import { fmtLevel, fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
 import { signed } from "../core/format.ts";
 import type { LiveInfo } from "../trade/sync.ts";
 import { MONO_FONT, THEME } from "../ui/theme.ts";
+import { PRIO, textWidth, type Box, type LabelAsk } from "../chart/labelspace.ts";
 
 /** The button at the right of a position: 下單, or the order placed from it. */
 /** `fg`: the text color (white when not given). */
@@ -28,9 +32,25 @@ export type PaintOptions = {
   orderTag(d: PositionDrawing): OrderTag | null;
   /** A position on OKX: what OKX says of it (size, average, unrealized PnL, or how it ended). */
   live(d: PositionDrawing): LiveInfo | null;
+  /** Size of the labels' text, px. */
+  textPx: number;
 };
 
-const FONT = `11px ${MONO_FONT}`;
+/** A drawing's label: the room it asks for among the chart's labels, and how it is painted where it went. */
+export type LabelPlan = {
+  ask: LabelAsk;
+  paint(ctx: CanvasRenderingContext2D, b: Box): void;
+  /** An order button at the label's right end: where it starts from the label's left, and how wide it is. */
+  spot?: { id: string; dx: number; w: number };
+};
+
+export const labelFont = (px: number) => `${px}px ${MONO_FONT}`;
+/** The labels' font and what goes with its size: line height in boxes, height of a bare text, text width. */
+type Type = { font: string; lh: number; th: number; tw(s: string): number };
+function typeOf(px: number): Type {
+  const font = labelFont(px);
+  return { font, lh: Math.round((px * 15) / 11), th: Math.round(px * 1.3), tw: (s) => textWidth(font, s) };
+}
 /** Handles and axis labels of the drawing being edited. */
 export const ACCENT = THEME.data;
 const FAR = 100000; // px: endless lines are drawn this far out and the canvas clips them
@@ -104,9 +124,15 @@ export function paintUnder(target: CanvasRenderingTarget2D, geo: readonly Geo[],
   });
 }
 
-/** Lines, borders, labels and handles over the candles. */
-/** Lines, handles and labels over the candles; returns where the order buttons were painted. */
-export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], o: PaintOptions): HotSpot[] {
+/** Lines, labels and handles over the candles; returns where the order buttons were painted. `at`: where each
+ *  label went (LabelSpace). */
+export function paintOver(
+  target: CanvasRenderingTarget2D,
+  geo: readonly Geo[],
+  plans: readonly LabelPlan[],
+  at: (key: string) => Box | null,
+  o: PaintOptions,
+): HotSpot[] {
   const spots: HotSpot[] = [];
   target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
     const W = bitmapSize.width;
@@ -229,69 +255,33 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
           break;
         }
       }
-      if (g.active) {
-        for (const h of g.handles) {
-          ctx.beginPath();
-          ctx.arc(h.x * hr, h.y * vr, 4.5 * hr, 0, Math.PI * 2);
-          ctx.fillStyle = "#131722";
-          ctx.fill();
-          ctx.lineWidth = Math.max(1, Math.round(1.5 * hr));
-          ctx.strokeStyle = ACCENT;
-          ctx.stroke();
-        }
+    }
+  });
+  target.useMediaCoordinateSpace(({ context: ctx }) => {
+    ctx.font = labelFont(o.textPx);
+    for (const p of plans) {
+      const b = at(p.ask.key);
+      if (!b) continue; // left out: no room for it
+      p.paint(ctx, b);
+      if (p.spot) spots.push({ id: p.spot.id, x: b.x + p.spot.dx, y: b.y, w: p.spot.w, h: b.h });
+    }
+  });
+  // the handles of what is being edited, over every label: they can always be seen and grabbed
+  target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+    for (const g of geo) {
+      if (!g.active) continue;
+      for (const h of g.handles) {
+        ctx.beginPath();
+        ctx.arc(h.x * hr, h.y * vr, 4.5 * hr, 0, Math.PI * 2);
+        ctx.fillStyle = "#131722";
+        ctx.fill();
+        ctx.lineWidth = Math.max(1, Math.round(1.5 * hr));
+        ctx.strokeStyle = ACCENT;
+        ctx.stroke();
       }
     }
   });
-  target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-    ctx.font = FONT;
-    for (const g of geo) {
-      if (g.d.kind === "fib") fibLabels(ctx, g, mediaSize.height);
-      else if (g.d.kind === "info") infoBox(ctx, g, mediaSize.width, mediaSize.height, o);
-      else if (g.d.kind === "angle") angleLabel(ctx, g);
-      else if (g.d.kind === "position") positionLabels(ctx, g, o, spots, mediaSize.width);
-      else if (g.ch) channelLabels(ctx, g, mediaSize.width, mediaSize.height);
-    }
-  });
   return spots;
-}
-
-/** A channel: the value of each line in proportion to its width, at the left end (outside it when there is
- *  room, as Fib labels), and a regression trend's Pearson's R under the start of its lower line. */
-function channelLabels(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: number) {
-  const d = g.d;
-  const ch = g.ch;
-  if (!ch || !(d.kind === "channel" || d.kind === "regression" || d.kind === "flat" || d.kind === "disjoint")) return;
-  const s = d.style;
-  /** The left end of a line on screen, or where it comes in from the left edge. */
-  const leftEnd = (l: Seg) => {
-    const e = extendSeg(l, s.extendLeft, s.extendRight, width);
-    const x = Math.max(e.x0, 0);
-    return { x, y: e.x1 === e.x0 ? e.y0 : e.y0 + ((e.y1 - e.y0) * (x - e.x0)) / (e.x1 - e.x0) };
-  };
-  ctx.fillStyle = s.color;
-  ctx.textBaseline = "middle";
-  for (const l of ch.levels) {
-    const { x, y } = leftEnd(l.seg);
-    if (y < -10 || y > height + 10) continue;
-    const text = fmtLevel(l.value);
-    const outside = x - 6 - ctx.measureText(text).width >= 0;
-    ctx.textAlign = outside ? "right" : "left";
-    ctx.fillText(text, outside ? x - 6 : x + 6, outside ? y : y - 8);
-  }
-  if (d.kind === "regression" && s.pearson && ch.r != null) {
-    // under the start of the lower line, on a dark backing so it reads over the candles
-    const { x, y } = leftEnd(ch.lines[0]);
-    const text = `R ${ch.r >= 0 ? "" : "−"}${Math.abs(ch.r).toFixed(3)}`;
-    const w = ctx.measureText(text).width + 8;
-    const left = Math.max(0, Math.min(x + 2, width - w - 2));
-    const top = Math.max(0, Math.min(y + 5, height - 18));
-    ctx.fillStyle = "rgba(20,20,21,0.85)";
-    ctx.fillRect(left, top, w, 16);
-    ctx.fillStyle = s.color;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, left + 4, top + 8);
-  }
 }
 
 function fibLines(ctx: CanvasRenderingContext2D, g: Geo, hr: number, vr: number) {
@@ -318,22 +308,100 @@ function fibLines(ctx: CanvasRenderingContext2D, g: Geo, hr: number, vr: number)
   ctx.setLineDash([]);
 }
 
-function fibLabels(ctx: CanvasRenderingContext2D, g: Geo, height: number) {
-  if (!g.fib) return;
+// ----------------------------------------------------------------------------- labels
+/** What every drawing writes on the chart, as labels to be placed and painted. `width` × `height`: the pane. */
+export function labelPlans(geo: readonly Geo[], o: PaintOptions, width: number, height: number): LabelPlan[] {
+  const T = typeOf(o.textPx);
+  const out: LabelPlan[] = [];
+  for (const g of geo) {
+    const k = g.d.kind;
+    if (k === "fib") fibPlans(out, g, T, height);
+    else if (k === "info") infoPlans(out, g, T, width, height, o);
+    else if (k === "angle") anglePlans(out, g, T);
+    else if (k === "position") positionPlans(out, g, T, o, width);
+    else if (g.ch) channelPlans(out, g, T, width, height);
+  }
+  return out;
+}
+
+/** Text with no backing. */
+const bare = (text: string, color: string) => (ctx: CanvasRenderingContext2D, b: Box) => {
+  ctx.fillStyle = color;
+  ctx.textAlign = "left";
   ctx.textBaseline = "middle";
+  ctx.fillText(text, b.x, b.y + b.h / 2);
+};
+/** Lines of text on a filled box. */
+function boxed(ctx: CanvasRenderingContext2D, T: Type, lines: readonly string[], b: Box, bg: string, fg: string) {
+  ctx.fillStyle = bg;
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.fillStyle = fg;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  lines.forEach((s, k) => ctx.fillText(s, b.x + 5, b.y + (T.lh + 3) / 2 + k * T.lh));
+}
+
+/** A level's name at the left end of its line: outside the drawing when there is room, as on TradingView. */
+function levelName(out: LabelPlan[], key: string, T: Type, text: string, color: string, x: number, y: number) {
+  const w = T.tw(text);
+  const outside = x - 6 - w >= 0;
+  out.push({
+    ask: { key, w, h: T.th, at: [{ x: outside ? x - 6 - w : x + 6, y: (outside ? y : y - 8) - T.th / 2 }], prio: PRIO.pinned },
+    paint: bare(text, color),
+  });
+}
+
+function fibPlans(out: LabelPlan[], g: Geo, T: Type, height: number) {
+  if (!g.fib) return;
   const left = Math.max(g.fib.xl, 0); // drawing starts off screen: keep the labels at the pane's left edge
-  for (const l of g.fib.levels) {
-    if (l.y < -10 || l.y > height + 10) continue;
-    const w = ctx.measureText(l.label).width;
-    const outside = left - 6 - w >= 0; // to the left of the drawing, as on TradingView
-    ctx.textAlign = outside ? "right" : "left";
-    ctx.fillStyle = l.color;
-    ctx.fillText(l.label, outside ? left - 6 : left + 6, outside ? l.y : l.y - 8);
+  g.fib.levels.forEach((l, k) => {
+    if (l.y < -10 || l.y > height + 10) return;
+    levelName(out, `${g.d.id}:f${k}`, T, l.label, l.color, left, l.y);
+  });
+}
+
+/** A channel: the value of each line in proportion to its width, at the left end (outside it when there is
+ *  room, as Fib labels), and a regression trend's Pearson's R under the start of its lower line. */
+function channelPlans(out: LabelPlan[], g: Geo, T: Type, width: number, height: number) {
+  const d = g.d;
+  const ch = g.ch;
+  if (!ch || !isChannelDrawing(d)) return;
+  const s = d.style;
+  /** The left end of a line on screen, or where it comes in from the left edge. */
+  const leftEnd = (l: Seg) => {
+    const e = extendSeg(l, s.extendLeft, s.extendRight, width);
+    const x = Math.max(e.x0, 0);
+    return { x, y: e.x1 === e.x0 ? e.y0 : e.y0 + ((e.y1 - e.y0) * (x - e.x0)) / (e.x1 - e.x0) };
+  };
+  ch.levels.forEach((l, k) => {
+    const { x, y } = leftEnd(l.seg);
+    if (y < -10 || y > height + 10) return;
+    levelName(out, `${d.id}:c${k}`, T, fmtLevel(l.value), s.color, x, y);
+  });
+  if (d.kind === "regression" && s.pearson && ch.r != null) {
+    // under the start of the lower line, on a dark backing so it reads over the candles
+    const { x, y } = leftEnd(ch.lines[0]);
+    const text = `R ${ch.r >= 0 ? "" : "−"}${Math.abs(ch.r).toFixed(3)}`;
+    const w = T.tw(text) + 8;
+    const h = T.lh + 1;
+    const at = { x: Math.max(0, Math.min(x + 2, width - w - 2)), y: Math.max(0, Math.min(y + 5, height - h - 2)) };
+    out.push({
+      ask: { key: `${d.id}:r`, w, h, at: [at], prio: PRIO.pinned },
+      paint: (ctx, b) => {
+        ctx.fillStyle = "rgba(20,20,21,0.85)";
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = s.color;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, b.x + 4, b.y + b.h / 2);
+      },
+    });
   }
 }
 
-/** Info line: change in price and %, bars and time, in a box next to the second point. */
-function infoBox(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: number, o: PaintOptions) {
+/** Info line: change in price and %, bars and time, in a box next to the second point (above right of it, else
+ *  below it or on its left). */
+function infoPlans(out: LabelPlan[], g: Geo, T: Type, width: number, height: number, o: PaintOptions) {
   const d = g.d;
   if (d.kind !== "info") return;
   const times = o.times;
@@ -344,27 +412,47 @@ function infoBox(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: n
   const bars = Math.abs(Math.round(timeToIndex(times, d.b.t, bs) - timeToIndex(times, d.a.t, bs)));
   const lines = [`${sign}${o.fmtPrice(Math.abs(dp))} (${sign}${pct.toFixed(2)}%)`, `${bars} 根，${fmtSpan(d.b.t - d.a.t)}`];
   const pad = 6;
-  const lh = 15;
-  const w = Math.max(...lines.map((s) => ctx.measureText(s).width)) + pad * 2;
-  const h = lines.length * lh + pad * 2 - 3;
-  const x = Math.min(Math.max(0, g.bx + 10), width - w - 2);
-  const y = Math.min(Math.max(0, g.by - h - 8), height - h - 2);
-  ctx.fillStyle = "rgba(19,23,34,0.9)";
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = d.style.color;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx.fillStyle = "#d1d4dc";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  lines.forEach((s, k) => ctx.fillText(s, x + pad, y + pad + k * lh));
+  const w = Math.max(...lines.map(T.tw)) + pad * 2;
+  const h = lines.length * T.lh + pad * 2 - 3;
+  const fit = (x: number, y: number) => ({ x: Math.min(Math.max(0, x), width - w - 2), y: Math.min(Math.max(0, y), height - h - 2) });
+  const color = d.style.color;
+  out.push({
+    ask: {
+      key: `${d.id}:i`, w, h, prio: PRIO.drawing,
+      at: [fit(g.bx + 10, g.by - h - 8), fit(g.bx + 10, g.by + 8), fit(g.bx - 10 - w, g.by - h - 8), fit(g.bx - 10 - w, g.by + 8)],
+    },
+    paint: (ctx, b) => {
+      ctx.fillStyle = "rgba(19,23,34,0.9)";
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      ctx.fillStyle = "#d1d4dc";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      lines.forEach((s, k) => ctx.fillText(s, b.x + pad, b.y + pad + k * T.lh));
+    },
+  });
 }
 
-/** Position: take-profit, stop and entry labels, the result, the order button, and the R lines' names. The
- *  info, the result and the order button stay on screen when the box runs past the right edge (a position
- *  drawn at the newest bar usually does). A position built up by adds: the last add carries the whole
- *  position's numbers (average entry, quantity, risk, result); earlier parts show only their own part. */
-function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, spots: HotSpot[], width: number) {
+/** Trend angle: the angle as drawn on screen, next to the arc. */
+function anglePlans(out: LabelPlan[], g: Geo, T: Type) {
+  const d = g.d;
+  if (d.kind !== "angle") return;
+  const deg = screenAngle(g.ax, g.ay, g.bx, g.by);
+  const text = `${deg.toFixed(1)}°`;
+  out.push({
+    ask: { key: `${d.id}:a`, w: T.tw(text), h: T.th, at: [{ x: g.ax + 32, y: deg >= 0 ? g.ay - 3 - T.th : g.ay + 3 }], prio: PRIO.pinned },
+    paint: bare(text, d.style.color),
+  });
+}
+
+/** Position: take-profit and stop labels, the info at the entry, the result and the order button, and the R
+ *  lines' names. The info, the result and the order button stay on screen when the box runs past the right
+ *  edge (a position drawn at the newest bar usually does), and keep clear of the box's handles. A position built
+ *  up by adds: the last add carries the whole position's numbers (average entry, quantity, risk, result);
+ *  earlier parts show only their own part. */
+function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width: number) {
   const d = g.d;
   const p = g.pos;
   if (d.kind !== "position" || !p) return;
@@ -377,30 +465,78 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   const dir = posDir(d);
   const rr = rewardRisk(d.a.p, d.b.p, d.target);
   const t = o.trades.get(d.id);
-  const size = (lines: string[]) => ({ w: Math.max(...lines.map((s) => ctx.measureText(s).width)) + 10, h: lines.length * 15 + 3 });
-  /** A box of text lines; `align` says which side of x the box goes. Returns the box. A centered one stays
-   *  inside the pane: a box running past the right edge would hide behind the price scale. */
-  const box = (lines: string[], x: number, y: number, bg: string, align: "center" | "left" = "center", fg = "#ffffff") => {
-    const { w, h } = size(lines);
-    const left = align === "center" ? Math.max(2, Math.min(x - w / 2, width - w - 2)) : x;
-    ctx.fillStyle = bg;
-    ctx.fillRect(left, y - h / 2, w, h);
-    ctx.fillStyle = fg;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    lines.forEach((s, k) => ctx.fillText(s, left + 5, y - h / 2 + 9 + k * 15));
-    return { x: left, y: y - h / 2, w, h };
+  const size = (lines: string[]) => ({ w: Math.max(...lines.map(T.tw)) + 10, h: lines.length * T.lh + 3 });
+  const filled = (lines: string[], bg: string, fg = "#ffffff") => (ctx: CanvasRenderingContext2D, b: Box) => boxed(ctx, T, lines, b, bg, fg);
+  const left = Math.max(p.x0, 0);
+  const right = Math.min(p.x1, width);
+  const mid = (left + right) / 2; // the middle of what is on screen (an open OKX position runs on)
+  const fitX = (x: number, w: number) => Math.max(2, Math.min(x, width - w - 2));
+  const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
+  /** Top of a box `h` tall on the `sign` side of a line at `y` (−1: above it), 4 px off it. */
+  const beside = (y: number, sign: number, h: number) => (sign < 0 ? y - 4 - h : y + 4);
+  /** A take-profit or stop label: past its line outside the box, in the middle of it; else just inside the box,
+   *  or at either end of the line. */
+  const lineTag = (key: string, text: string, y: number, sign: number, bg: string) => {
+    const s = size([text]);
+    const cx = fitX(mid - s.w / 2, s.w);
+    out.push({
+      ask: {
+        key: `${d.id}:${key}`, w: s.w, h: s.h, prio: PRIO.drawing,
+        at: [
+          { x: cx, y: beside(y, sign, s.h) },
+          { x: cx, y: beside(y, -sign, s.h) },
+          { x: fitX(left + 10, s.w), y: beside(y, sign, s.h) },
+          { x: fitX(right - 10 - s.w, s.w), y: beside(y, sign, s.h) },
+        ],
+      },
+      paint: filled([text], bg),
+    });
   };
-  const tag = (...a: Parameters<typeof box>) => {
-    const b = box(...a);
-    return b.x + b.w;
+  /** The info box on the entry line, clear of the entry's handle: after it, or before it when the box starts too
+   *  close to the right edge for that; where it is. */
+  const infoBox = (lines: string[], y: number, fg = "#ffffff"): Box => {
+    const s = size(lines);
+    const fits = (x: number) => x >= 0 && x + s.w <= width - 4;
+    const after = p.x0 + 10;
+    const before = p.x0 - 10 - s.w;
+    const x = fits(after) ? after : fits(before) ? before : Math.max(0, Math.min(after, width - 4 - s.w));
+    const b = { x, y: y - s.h / 2, w: s.w, h: s.h };
+    out.push({ ask: { key: `${d.id}:info`, w: s.w, h: s.h, at: [b], prio: PRIO.anchored }, paint: filled(lines, "rgba(25,25,27,0.92)", fg) });
+    return b;
   };
-  const mid = (Math.max(p.x0, 0) + Math.min(p.x1, width)) / 2; // the middle of what is on screen (an open OKX position runs on)
+  /** What it came to, and the order button after it: right of the box (past its handle) and of the info; else
+   *  pulled back from the right edge, under the info or over it, or before the info on its row. */
+  const resultRow = (text: string, bg: string, info: Box, y: number, order: OrderTag | null) => {
+    const r = size([text]);
+    const ow = order ? size([order.text]).w : 0;
+    const w = r.w + (order ? 4 + ow : 0);
+    const h = r.h;
+    const ux = Math.max(0, Math.min(info.x, width - 4 - w));
+    out.push({
+      ask: {
+        key: `${d.id}:result`, w, h, prio: PRIO.drawing,
+        at: [
+          { x: Math.max(p.x1 + 10, info.x + info.w + 6), y: y - h / 2 },
+          { x: width - 4 - w, y: y - h / 2 },
+          { x: ux, y: info.y + info.h + 4 },
+          { x: ux, y: info.y - 4 - h },
+          { x: info.x - 6 - w, y: y - h / 2 },
+        ],
+      },
+      paint: (ctx, b) => {
+        boxed(ctx, T, [text], { x: b.x, y: b.y, w: r.w, h }, bg, "#ffffff");
+        if (!order) return;
+        const ob = { x: b.x + r.w + 4, y: b.y, w: ow, h };
+        boxed(ctx, T, [order.text], ob, order.bg, order.fg ?? "#ffffff");
+        ctx.strokeStyle = "rgba(255,255,255,0.35)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(ob.x + 0.5, ob.y + 0.5, ob.w - 1, ob.h - 1);
+      },
+      ...(order ? { spot: { id: d.id, dx: r.w + 4, w: ow } } : {}),
+    });
+  };
   const show = ps.showPrices;
   const money = (v: number) => `${v >= 0 ? "+" : "−"}${fmtMoney(Math.abs(v))} U`;
-  // labels sit just outside the box, past the take-profit and the stop
-  const outward = (y: number, sign: number) => y + sign * 13;
-  const up = dir === 1 ? -1 : 1; // screen direction of the take-profit
   const live = o.live(d);
   const gray = "rgba(45,45,48,0.95)";
   if (d.okx) {
@@ -412,27 +548,19 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
       return `${r >= 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}%`;
     };
     const open = !v.closed;
-    if (!k.noTp) tag([`止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`], mid, outward(p.targetY, up), ps.profit);
-    if (!k.noSl) tag([`止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`], mid, outward(p.stopY, -up), ps.loss);
-    const lines = [
-      `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
-      `均價 ${fp(v.avg)}${k.noSl ? "  沒有設止損" : ""}${k.noTp ? "  沒有設止盈" : ""}`,
-    ];
-    const bx = box(lines, Math.max(0, Math.min(p.x0 + 4, width - 4 - size(lines).w)), p.entryY, "rgba(25,25,27,0.92)", "left");
+    if (!k.noTp) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
+    if (!k.noSl) lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss);
+    const info = infoBox(
+      [
+        `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
+        `均價 ${fp(v.avg)}${k.noSl ? "  沒有設止損" : ""}${k.noTp ? "  沒有設止盈" : ""}`,
+      ],
+      p.entryY,
+    );
     const [text, bg] = v.closed
       ? [`已平倉${v.closed.px ? ` @ ${fp(v.closed.px)}  ${money(v.closed.pnl)}` : ""}`, v.closed.px ? (v.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
       : [v.upl != null ? `持倉中 ${money(v.upl)}` : "持倉中", gray];
-    const w = size([text]).w;
-    let x = Math.max(p.x1, bx.x + bx.w) + 6;
-    let y = p.entryY;
-    if (x + w > width - 4) {
-      x = width - 4 - w;
-      if (x < bx.x + bx.w + 6) {
-        x = Math.max(0, Math.min(bx.x, width - 4 - w));
-        y = bx.y + bx.h + 11;
-      }
-    }
-    tag([text], x, y, bg, "left");
+    resultRow(text, bg, info, p.entryY, null);
     return;
   }
   const sc = t?.scale ?? null;
@@ -445,87 +573,68 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   const slR = risk > 0 || !sc ? "  −1.00R" : "";
   const tpText = `止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})${earlier ? "" : `${tpR}${t ? "  " + money(reward) : ""}`}`;
   const slText = `止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})${earlier ? "" : `${slR}${t ? "  " + money(-risk) : ""}`}`;
-  tag([tpText], mid, outward(p.targetY, up), earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
-  tag([slText], mid, outward(p.stopY, -up), earlier ? hexToRgba(ps.loss, 0.45) : ps.loss);
-  if (!t) return;
-  const pl = t.plan;
-  const side = dir === 1 ? "多單" : "空單";
-  const capped = pl.capped ? "（保證金不夠，已減量）" : "";
-  const infoLines = !sc
-    ? [
-        `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
-        `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
-      ]
-    : earlier
+  lineTag("tp", tpText, p.targetY, up, earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
+  lineTag("sl", slText, p.stopY, -up, earlier ? hexToRgba(ps.loss, 0.45) : ps.loss);
+  if (t) {
+    const pl = t.plan;
+    const side = dir === 1 ? "多單" : "空單";
+    const capped = pl.capped ? "（保證金不夠，已減量）" : "";
+    const infoLines = !sc
       ? [
-          `${side}${sc.step > 1 ? `加倉（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
-          `已加倉：整筆改用第 ${sc.count} 筆的止損、止盈`,
+          `${side}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
+          `資金 ${fmtMoney(t.capital)} U${t.chained ? "（接續）" : ""}  風險 ${fmtMoney(pl.riskAmount)} U  盈虧比 ${rr.toFixed(2)}`,
         ]
-      : [
-          `${side}加倉${sc.count > 2 ? `（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${sc.full ? "（風險已滿，不加）" : capped}`,
-          `${t.outcome.status === "pending" ? "成交後" : "合併"} ${fmtQty(sc.qty)} ${o.base}  均價 ${fp(sc.avg)}  ${risk > 0 ? `整筆風險 ${fmtMoney(risk)} U` : `止損時 ${money(-risk)}`}`,
-        ];
-  const infoX = Math.max(0, Math.min(p.x0 + 4, width - 4 - size(infoLines).w));
-  const warn = pl.capped || (!!sc && sc.full && !earlier);
-  // an earlier part's labels go to the stop side of its entry: later adds sit on the profit side, close by
-  const rowY = earlier ? p.entryY - up * (size(infoLines).h / 2 + 3) : p.entryY;
-  const info = box(infoLines, infoX, rowY, "rgba(25,25,27,0.92)", "left", warn ? THEME.down : "#ffffff");
-  const infoRight = info.x + info.w;
-  const pnl = sc ? sc.pnl : t.pnl;
-  const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
-  const result: Record<string, [string, string]> = {
-    tp: [`止盈出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
-    sl: [`止損出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
-    expired: [`到期出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, gray],
-    open: [`持倉中 ${inR}${money(pnl)}`, gray],
-    pending: ["等待進場", gray],
-    unfilled: ["沒有成交", gray],
-    nodata: ["K 線不夠，無法結算", gray],
-  };
-  // on OKX: what OKX says wins over the what-if
-  const real: [string, string] | null =
-    live && !earlier
-      ? live.closed
-        ? [`OKX 已平倉${live.closed.px ? ` @ ${fp(live.closed.px)}  ${money(live.closed.pnl)}` : ""}`, live.closed.px ? (live.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
-        : live.upl != null
-          ? [`OKX 持倉中 ${money(live.upl)}`, gray]
-          : null
-      : null;
-  const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : real ?? result[t.outcome.status];
-  const order = o.orderTag(d);
-  const total = size([text]).w + (order ? 4 + size([order.text]).w : 0);
-  let x = Math.max(p.x1, infoRight) + 6; // past the info box when that is wider than the position
-  let y = rowY;
-  if (x + total > width - 4) {
-    // past the right edge: pull them back on screen, after the info box, or under it when there is no room
-    x = width - 4 - total;
-    if (x < infoRight + 6) {
-      x = Math.max(0, Math.min(info.x, width - 4 - total));
-      y = info.y + info.h + 11;
-    }
+      : earlier
+        ? [
+            `${side}${sc.step > 1 ? `加倉（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${capped}`,
+            `已加倉：整筆改用第 ${sc.count} 筆的止損、止盈`,
+          ]
+        : [
+            `${side}加倉${sc.count > 2 ? `（第 ${sc.step} 筆）` : ""}  ${fmtQty(pl.qty)} ${o.base}  ${d.leverage}x  保證金 ${fmtMoney(pl.margin)} U${sc.full ? "（風險已滿，不加）" : capped}`,
+            `${t.outcome.status === "pending" ? "成交後" : "合併"} ${fmtQty(sc.qty)} ${o.base}  均價 ${fp(sc.avg)}  ${risk > 0 ? `整筆風險 ${fmtMoney(risk)} U` : `止損時 ${money(-risk)}`}`,
+          ];
+    const warn = pl.capped || (!!sc && sc.full && !earlier);
+    // an earlier part's labels go to the stop side of its entry: later adds sit on the profit side, close by
+    const rowY = earlier ? p.entryY - up * (size(infoLines).h / 2 + 3) : p.entryY;
+    const info = infoBox(infoLines, rowY, warn ? THEME.down : "#ffffff");
+    const pnl = sc ? sc.pnl : t.pnl;
+    const inR = risk > 0 ? `${signed(pnl / risk)}R  ` : "";
+    const result: Record<string, [string, string]> = {
+      tp: [`止盈出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.profit],
+      sl: [`止損出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, ps.loss],
+      expired: [`到期出場 ${inR}${money(pnl)} → ${fmtMoney(t.endCapital)} U`, gray],
+      open: [`持倉中 ${inR}${money(pnl)}`, gray],
+      pending: ["等待進場", gray],
+      unfilled: ["沒有成交", gray],
+      nodata: ["K 線不夠，無法結算", gray],
+    };
+    // on OKX: what OKX says wins over the what-if
+    const real: [string, string] | null =
+      live && !earlier
+        ? live.closed
+          ? [`OKX 已平倉${live.closed.px ? ` @ ${fp(live.closed.px)}  ${money(live.closed.pnl)}` : ""}`, live.closed.px ? (live.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
+          : live.upl != null
+            ? [`OKX 持倉中 ${money(live.upl)}`, gray]
+            : null
+        : null;
+    const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : real ?? result[t.outcome.status];
+    resultRow(text, bg, info, rowY, o.orderTag(d));
   }
-  const resultRight = tag([text], x, y, bg, "left");
-  if (order) {
-    const b = box([order.text], resultRight + 4, y, order.bg, "left", order.fg);
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-    spots.push({ id: d.id, ...b });
-  }
-  ctx.font = FONT;
-  ctx.textAlign = "right";
-  ctx.textBaseline = "bottom";
-  ctx.fillStyle = ps.profit;
-  for (const l of p.levels) ctx.fillText(`${l.k}R${show ? "  " + fp(l.price) : ""}`, p.x1 - 4, l.y - 2);
-}
-
-/** Trend angle: the angle as drawn on screen, next to the arc. */
-function angleLabel(ctx: CanvasRenderingContext2D, g: Geo) {
-  const d = g.d;
-  if (d.kind !== "angle") return;
-  const deg = screenAngle(g.ax, g.ay, g.bx, g.by);
-  ctx.fillStyle = d.style.color;
-  ctx.textAlign = "left";
-  ctx.textBaseline = deg >= 0 ? "bottom" : "top";
-  ctx.fillText(`${deg.toFixed(1)}°`, g.ax + 32, deg >= 0 ? g.ay - 3 : g.ay + 3);
+  // R lines' names over the right end of each line on screen, or under it, else further left along it, inside the
+  // box; left out when there is no room (the line still shows)
+  p.levels.forEach((l, k) => {
+    const text = `${l.k}R${show ? "  " + fp(l.price) : ""}`;
+    const w = T.tw(text);
+    const x = right - 4 - w;
+    out.push({
+      ask: {
+        key: `${d.id}:R${k}`, w, h: T.th, prio: PRIO.minor,
+        at: [{ x, y: l.y - 2 - T.th }, { x, y: l.y + 2 }],
+        slide: "left",
+        range: { min: left + 4, max: x },
+        optional: true,
+      },
+      paint: bare(text, ps.profit),
+    });
+  });
 }

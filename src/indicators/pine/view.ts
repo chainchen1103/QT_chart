@@ -33,6 +33,8 @@ export type ViewHost = {
   toChartTime(t: number): UTCTimestamp;
   fmtPrice(p: number): string;
   tick(): number;
+  /** Text grows or shrinks with the chart's label size (1 at the default). */
+  textScale(): number;
 };
 
 type Kind = "line" | "hist" | "area";
@@ -257,7 +259,7 @@ export class ScriptView {
       fmtQty: fmtQty,
     });
     const { candles, chart } = this.h;
-    const layerHost = { chart, bars: this.h.bars, times: this.h.times, barSec: this.h.barSec };
+    const layerHost = { chart, bars: this.h.bars, times: this.h.times, barSec: this.h.barSec, textScale: this.h.textScale };
     if (this.overlay) {
       const all = scene(true);
       const s = { ...all, bgs: o.bgs.filter((b) => b.kind === "bg"), shapes: o.shapes, trades };

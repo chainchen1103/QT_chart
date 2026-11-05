@@ -1,6 +1,7 @@
 // Price-scale labels the chart library doesn't draw by itself: the countdown to the bar close (under the
 // last price label) and the highest / lowest price of the bars on screen, with dotted lines and a 高 / 低 tag,
-// as on TradingView. Which labels show is set by right-clicking the price scale.
+// as on TradingView. Which labels show is set by right-clicking the price scale. The tags take their room on
+// the chart first (LabelSpace): other labels make way for them.
 
 import type {
   IChartApi,
@@ -16,6 +17,7 @@ import type { Candle } from "../core/api.ts";
 import type { ScaleLabels } from "../settings/model.ts";
 import { fmtCountdown } from "../core/timeframes.ts";
 import { MONO_FONT, THEME } from "../ui/theme.ts";
+import { PRIO, textWidth, type Box, type LabelSpace } from "./labelspace.ts";
 
 export type ScaleLabelHost = {
   chart: IChartApi;
@@ -27,18 +29,23 @@ export type ScaleLabelHost = {
   colors(): { up: string; down: string };
   /** False in a bar replay: no countdown (the newest bar shown is in the past). */
   live(): boolean;
+  space: LabelSpace;
+  /** Size of the chart's labels and of the axis text, px. */
+  textSize(): number;
+  axisSize(): number;
 };
 
-const LABEL_H = 17; // height of a price label with the 12 px axis font (font + 2.5 px padding above and below)
+/** Height of a price label: the axis font and 2.5 px for every 12 px of it above and below, as the library draws them. */
+const priceLabelHeight = (axisPx: number) => Math.round((axisPx * 17) / 12);
 const TAG_BG = THEME.hover;
 const TAG_TEXT = THEME.text;
-const TAG_FONT = `11px ${MONO_FONT}`;
 
 export class ScaleLabelLayer implements ISeriesPrimitive<Time> {
   private requestUpdate: (() => void) | null = null;
   private readonly timer: number;
   private cd = { y: 0, text: "", color: "", visible: false, countdown: false };
   private hl = { hi: 0, lo: 0, hiY: 0, loY: 0, visible: false };
+  private tagFont = "";
 
   private readonly axis: ISeriesPrimitiveAxisView[] = [
     {
@@ -130,6 +137,15 @@ export class ScaleLabelLayer implements ISeriesPrimitive<Time> {
       const loY = to >= from ? series.priceToCoordinate(lo) : null;
       if (hiY != null && loY != null) this.hl = { hi, lo, hiY, loY, visible: true };
     }
+
+    // the 高 / 低 tags just left of the price scale, as tall as its labels (or the text, when that is larger)
+    const px = this.host.textSize();
+    this.tagFont = `${px}px ${MONO_FONT}`;
+    const w = Math.max(18, Math.ceil(textWidth(this.tagFont, "高")) + 7);
+    const h = Math.max(priceLabelHeight(this.host.axisSize()) - 1, px + 5);
+    const x = this.host.chart.timeScale().width() - w;
+    const tag = (key: string, y: number) => ({ key, w, h, at: [{ x, y: Math.round(y - h / 2) }], prio: PRIO.fixed });
+    this.host.space.set("scale", this.hl.visible ? [tag("hi", this.hl.hiY), tag("lo", this.hl.loY)] : []);
   }
 
   private drawHighLow(target: CanvasRenderingTarget2D) {
@@ -148,17 +164,16 @@ export class ScaleLabelLayer implements ISeriesPrimitive<Time> {
       }
       ctx.setLineDash([]);
       // 高 / 低 tag just left of the price scale, as on TradingView
-      ctx.font = TAG_FONT;
+      ctx.font = this.tagFont;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const w = 18;
-      const h = LABEL_H - 1;
-      for (const [y, t] of [[this.hl.hiY, "高"], [this.hl.loY, "低"]] as const) {
-        const x = mediaSize.width - w;
+      for (const [key, t] of [["hi", "高"], ["lo", "低"]] as const) {
+        const b: Box | null = this.host.space.at("scale", key);
+        if (!b) continue;
         ctx.fillStyle = TAG_BG;
-        ctx.fillRect(x, Math.round(y - h / 2), w, h);
+        ctx.fillRect(b.x, b.y, b.w, b.h);
         ctx.fillStyle = TAG_TEXT;
-        ctx.fillText(t, x + w / 2, y + 0.5);
+        ctx.fillText(t, b.x + b.w / 2, b.y + b.h / 2 + 0.5);
       }
       ctx.restore();
     });

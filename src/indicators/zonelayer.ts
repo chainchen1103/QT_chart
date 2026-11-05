@@ -1,9 +1,12 @@
 // Draws price zones (FVG, order blocks) as boxes under the candles: from the bar where a zone starts to the
-// bar that ended it, or to the right edge while it is still running.
+// bar that ended it, or to the right edge while it is still running. Levels (support and resistance) are lines
+// named at their right end; the names make way for other labels on the chart (LabelSpace), moving left along
+// their line past the 高 / 低 tags, drawings' labels and each other.
 
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, IPrimitivePaneView, SeriesAttachedParameter, Time } from "lightweight-charts";
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { xOfLogical } from "../chart/coords.ts";
+import { PRIO, textWidth, type LabelAsk, type LabelSpace } from "../chart/labelspace.ts";
 import { hexToRgba, timeToIndex } from "../drawings/geometry.ts";
 import { UI_FONT } from "../ui/theme.ts";
 
@@ -18,13 +21,15 @@ export type ZoneHost = {
   /** Start times (UTC seconds, ascending) of the chart's bars. */
   times(): number[];
   barSec(): number;
+  space: LabelSpace;
+  /** Size of the chart's labels, px (zones are named a pixel smaller). */
+  textSize(): number;
 };
-
-const LABEL_FONT = `10px ${UI_FONT}`;
 
 export class ZoneLayer implements ISeriesPrimitive<Time> {
   private zones: DrawZone[] = [];
   private geo: Geo[] = [];
+  private font = "";
   private requestUpdate: (() => void) | null = null;
   private readonly views: IPrimitivePaneView[] = [
     { zOrder: () => "bottom", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => this.draw(t) }) },
@@ -66,6 +71,23 @@ export class ZoneLayer implements ISeriesPrimitive<Time> {
       }
     }
     this.geo = out;
+    // levels' names: over the right end of the line (under it when that is off the top), else further left along it
+    const px = this.host.textSize() - 1;
+    this.font = `${px}px ${UI_FONT}`;
+    const h = Math.round(px * 1.3);
+    const asks: LabelAsk[] = [];
+    out.forEach((g, i) => {
+      if (!g.line || !g.label) return;
+      const w = textWidth(this.font, g.label);
+      const x = g.x1 - 4 - w;
+      asks.push({
+        key: String(i), w, h, prio: PRIO.indicator,
+        at: [{ x, y: g.y0 - 2 - h }, { x, y: g.y0 + 2 }],
+        slide: "left",
+        range: { min: Math.max(g.x0, 0) + 2, max: x },
+      });
+    });
+    this.host.space.set("zones", asks);
   }
 
   private draw(target: CanvasRenderingTarget2D) {
@@ -87,10 +109,11 @@ export class ZoneLayer implements ISeriesPrimitive<Time> {
       ctx.setLineDash([]);
     });
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      ctx.font = LABEL_FONT;
+      ctx.font = this.font;
       ctx.textBaseline = "top";
+      const thin = parseFloat(this.font) + 2;
       for (const g of this.geo) {
-        if (g.line || !g.label || Math.abs(g.y1 - g.y0) < 12) continue; // too thin to label
+        if (g.line || !g.label || Math.abs(g.y1 - g.y0) < thin) continue; // too thin to label
         ctx.fillStyle = hexToRgba(g.color, g.ended ? 0.55 : 0.95);
         // at the start of the box; when that is off screen, at its right end (clear of the legend)
         const atStart = g.x0 >= 0;
@@ -100,7 +123,7 @@ export class ZoneLayer implements ISeriesPrimitive<Time> {
     });
   }
 
-  /** Levels: a line from the swing bar to where it was broken (dashed) or to the right edge, labelled at the right. */
+  /** Levels: a line from the swing bar to where it was broken (dashed) or to the right edge, named at the right. */
   private drawLines(target: CanvasRenderingTarget2D) {
     const lines = this.geo.filter((g) => g.line);
     if (!lines.length) return;
@@ -120,14 +143,16 @@ export class ZoneLayer implements ISeriesPrimitive<Time> {
       ctx.setLineDash([]);
     });
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      ctx.font = LABEL_FONT;
-      ctx.textAlign = "right";
-      ctx.textBaseline = "bottom";
-      for (const g of lines) {
-        if (!g.label) continue;
+      ctx.font = this.font;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      this.geo.forEach((g, i) => {
+        if (!g.line || !g.label) return;
+        const b = this.host.space.at("zones", String(i));
+        if (!b) return;
         ctx.fillStyle = hexToRgba(g.color, g.ended ? 0.6 : 1);
-        ctx.fillText(g.label, g.x1 - 4, g.y0 - 2);
-      }
+        ctx.fillText(g.label, b.x, b.y + b.h / 2);
+      });
     });
   }
 }

@@ -49,7 +49,7 @@ export class ChartView {
         // see-through: the background color and picture are behind the chart
         background: { type: ColorType.Solid, color: "rgba(0,0,0,0)" },
         textColor: a.text,
-        fontSize: 12,
+        fontSize: a.axisSize,
         fontFamily: MONO_FONT, // figures on the axes, like every price in the app
         panes: { separatorColor: THEME.line, separatorHoverColor: THEME.hover, enableResize: true },
         attributionLogo: false, // the credit TradingView's licence asks for is in the status bar instead
@@ -157,10 +157,10 @@ export class ChartView {
     return p == null || !(p > 0) ? null : p;
   }
 
-  /** Text, grid and candle colors. */
+  /** Text color and size, grid and candle colors. */
   applyAppearance() {
     const a = this.o.appearance.get();
-    this.chart.applyOptions({ layout: { textColor: a.text }, grid: { vertLines: { color: a.grid }, horzLines: { color: a.grid } } });
+    this.chart.applyOptions({ layout: { textColor: a.text, fontSize: a.axisSize }, grid: { vertLines: { color: a.grid }, horzLines: { color: a.grid } } });
     this.candles.applyOptions({ upColor: a.up, downColor: a.down, wickUpColor: a.up, wickDownColor: a.down });
     this.volume.setData(this.bars.map(this.vol));
   }

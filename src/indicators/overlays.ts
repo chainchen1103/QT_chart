@@ -8,6 +8,7 @@ import type { FvgConf, Groups, MaConf, MaOptions, ObConf, ScaleLabels, SrConf } 
 import { SourceStore } from "./sources.ts";
 import { alignToChart, tfLabel, tfSec } from "../core/timeframes.ts";
 import { ZoneLayer, type DrawZone } from "./zonelayer.ts";
+import type { LabelSpace } from "../chart/labelspace.ts";
 import { findFvgs, findLevels, findOrderBlocks, pickZones, type Zone } from "./zones.ts";
 
 /** ok; loading (bars on the way); lower (timeframe smaller than the chart's: not shown); error. */
@@ -39,6 +40,9 @@ export type OverlayHost = {
   settings: () => OverlaySettings;
   /** Values changed outside a live tick (bars arrived, settings changed): refresh the legend. */
   changed: () => void;
+  /** Room for the labels on the chart, and their size in px. */
+  space: LabelSpace;
+  textSize: () => number;
 };
 
 export class Overlays {
@@ -55,7 +59,9 @@ export class Overlays {
 
   constructor(private readonly h: OverlayHost) {
     this.sources = new SourceStore(() => this.queueRefresh());
-    this.zoneLayer = new ZoneLayer({ chart: h.chart, series: h.series, times: () => this.times, barSec: () => tfSec(this.bar) });
+    this.zoneLayer = new ZoneLayer({
+      chart: h.chart, series: h.series, times: () => this.times, barSec: () => tfSec(this.bar), space: h.space, textSize: h.textSize,
+    });
     h.series.attachPrimitive(this.zoneLayer);
   }
 

@@ -590,13 +590,20 @@ export const IMAGE_FITS: { key: ImageFit; label: string }[] = [
   { key: "contain", label: "完整顯示" },
   { key: "stretch", label: "拉伸" },
 ];
-/** `imageTransparency`: 0 = the picture at full strength, 100 = invisible. */
+/** `imageTransparency`: 0 = the picture at full strength, 100 = invisible. `labelSize`: text on the chart
+ *  (drawings' and indicators' labels, the 高 / 低 tags; Pine scripts' text in proportion), `axisSize`: the axes'
+ *  text, px. */
 export type Appearance = {
   bg: string; grid: string; text: string; up: string; down: string; imageTransparency: number; imageFit: ImageFit;
+  labelSize: number; axisSize: number;
 };
 export const DEFAULT_APPEARANCE: Appearance = {
   bg: "#141415", grid: "#1d1d1f", text: "#85858b", up: "#26a69a", down: "#ef5350", imageTransparency: 70, imageFit: "cover",
+  labelSize: 11, axisSize: 12,
 };
+/** The text sizes offered, px. */
+export const LABEL_SIZES = [9, 10, 11, 12, 13, 14, 15, 16, 18];
+export const AXIS_SIZES = [10, 11, 12, 13, 14, 15, 16];
 /** The defaults before the graphite look: saved as they were, they become the new defaults. */
 const OLD_APPEARANCE = { bg: "#131722", grid: "#1e222d", text: "#b2b5be" };
 export function cleanAppearance(raw: unknown): Appearance {
@@ -611,6 +618,8 @@ export function cleanAppearance(raw: unknown): Appearance {
     down: color(r.down, d.down),
     imageTransparency: num(r.imageTransparency, { min: 0, max: 100 }, d.imageTransparency),
     imageFit: IMAGE_FITS.some((f) => f.key === r.imageFit) ? (r.imageFit as ImageFit) : d.imageFit,
+    labelSize: num(r.labelSize, { min: LABEL_SIZES[0], max: LABEL_SIZES[LABEL_SIZES.length - 1] }, d.labelSize),
+    axisSize: num(r.axisSize, { min: AXIS_SIZES[0], max: AXIS_SIZES[AXIS_SIZES.length - 1] }, d.axisSize),
   };
 }
 

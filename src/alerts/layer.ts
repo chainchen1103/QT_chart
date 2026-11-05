@@ -1,5 +1,7 @@
 // Alerts on the chart: a dashed line with its price on the price scale for each price alert that is on, and a
-// small bell next to every drawing that has an alert.
+// small bell next to every drawing that has an alert. The bells take room among the chart's labels
+// (LabelSpace): a price alert's at the right end of its line, moving left past the 高 / 低 tags; a drawing's
+// next to its first point, on whichever side its labels leave free.
 
 import type {
   IChartApi,
@@ -12,6 +14,7 @@ import type {
 } from "lightweight-charts";
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { xOfLogical } from "../chart/coords.ts";
+import { PRIO, type LabelAsk, type LabelSpace } from "../chart/labelspace.ts";
 import { timeToIndex } from "../drawings/geometry.ts";
 import type { Drawing } from "../settings/model.ts";
 import type { Alert } from "./model.ts";
@@ -25,12 +28,27 @@ export type AlertLayerHost = {
   times(): number[];
   barSec(): number;
   fmtPrice(p: number): string;
+  space: LabelSpace;
 };
 
 export const ALERT_COLOR = "#f7a600";
+/** A bell's disc. */
+const BELL = 16;
+
+/** A price alert's bell: over the right end of its line, else further left along it. */
+export function priceBellAsk(key: string, width: number, y: number): LabelAsk {
+  return { key, w: BELL, h: BELL, at: [{ x: width - 4 - BELL, y: y - 1 - BELL }], slide: "left", prio: PRIO.scaleBell };
+}
+/** A drawing's bell: above right of its first point (x, y); else left of it, below right, above left. */
+export function drawingBellAsk(key: string, x: number, y: number): LabelAsk {
+  return {
+    key, w: BELL, h: BELL, prio: PRIO.bell,
+    at: [{ x: x + 2, y: y - 6 - BELL }, { x: x - 10 - BELL, y: y - BELL / 2 }, { x: x + 2, y: y + 6 }, { x: x - 10 - BELL, y: y - 6 - BELL }],
+  };
+}
 
 type Line = { y: number; price: number };
-type Bell = { x: number; y: number };
+type Bell = { key: string };
 
 export class AlertLayer implements ISeriesPrimitive<Time> {
   private readonly host: AlertLayerHost;
@@ -66,21 +84,31 @@ export class AlertLayer implements ISeriesPrimitive<Time> {
     const { series, chart } = this.host;
     const times = this.host.times();
     const bs = this.host.barSec();
+    const width = chart.timeScale().width();
     this.lines = [];
     this.bells = [];
+    const asks: LabelAsk[] = [];
     for (const a of this.host.alerts()) {
       if (!a.on) continue;
       if (a.target.kind === "price") {
         const y = series.priceToCoordinate(a.target.price);
-        if (y != null) this.lines.push({ y, price: a.target.price });
+        if (y == null) continue;
+        this.lines.push({ y, price: a.target.price });
+        const key = String(asks.length);
+        this.bells.push({ key });
+        asks.push(priceBellAsk(key, width, y));
         continue;
       }
       const d = this.host.drawing(a);
       if (!d || !times.length) continue;
       const x = xOfLogical(chart, timeToIndex(times, d.a.t, bs));
       const y = series.priceToCoordinate(d.a.p);
-      if (x != null && y != null) this.bells.push({ x, y });
+      if (x == null || y == null) continue;
+      const key = String(asks.length);
+      this.bells.push({ key });
+      asks.push(drawingBellAsk(key, x, y));
     }
+    this.host.space.set("alerts", asks);
     this.axis = this.lines.map((l) => ({
       coordinate: () => l.y,
       text: () => this.host.fmtPrice(l.price),
@@ -103,8 +131,10 @@ export class AlertLayer implements ISeriesPrimitive<Time> {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      for (const l of this.lines) bell(ctx, mediaSize.width - 12, l.y - 9);
-      for (const b of this.bells) bell(ctx, b.x + 10, b.y - 14);
+      for (const { key } of this.bells) {
+        const b = this.host.space.at("alerts", key);
+        if (b) bell(ctx, b.x + b.w / 2, b.y + b.h / 2);
+      }
       ctx.restore();
     });
   }

@@ -15,7 +15,7 @@ import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
 import { PineHost } from "../indicators/pine/host.ts";
 import type { Cell } from "../layout/model.ts";
-import { DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, defaultChannelStyle, isChannel, type Drawing } from "../settings/model.ts";
+import { DEFAULT_APPEARANCE, DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, defaultChannelStyle, isChannel, type Drawing } from "../settings/model.ts";
 import { loadDrawings, saveDrawings, type Settings } from "../settings/store.ts";
 import { el } from "../ui/dom.ts";
 import { PaneMenus } from "../ui/menus.ts";
@@ -27,6 +27,7 @@ import type { OrderTarget, Trading } from "../trade/trading.ts";
 import type { Catalog } from "./catalog.ts";
 import { MarketFeed, MAX_BARS } from "./feed.ts";
 import { Replay } from "./replay.ts";
+import { LabelSpace } from "./labelspace.ts";
 import { Legend } from "./legend.ts";
 import { ScaleLabelLayer } from "./scalelabels.ts";
 import { ChartView } from "./view.ts";
@@ -128,6 +129,9 @@ export class ChartPane {
     const seconds = () => feed.tf.sec < 60;
     this.view = new ChartView({ el: chartEl, appearance: settings.appearance, labels: settings.labels, daily, seconds });
     const { chart, candles } = this.view;
+    // the labels every layer writes on the price pane share it (see labelspace.ts), at the size set in 圖表外觀
+    const space = new LabelSpace(() => ({ width: chart.timeScale().width(), height: chart.panes()[0]?.getHeight() ?? 0 }));
+    const textSize = () => settings.appearance.get().labelSize;
 
     this.overlays = new Overlays({
       chart,
@@ -146,6 +150,8 @@ export class ChartPane {
       changed: () => {
         if (!this.hovering) this.legend.render();
       },
+      space,
+      textSize,
     });
 
     this.pine = new PineHost({
@@ -162,6 +168,7 @@ export class ChartPane {
       instId: () => feed.instId,
       bar: () => feed.bar,
       barColors: (c) => this.view.setBarColors(c),
+      textScale: () => textSize() / DEFAULT_APPEARANCE.labelSize,
       changed: () => {
         if (!this.hovering) this.legend.render();
       },
@@ -176,6 +183,9 @@ export class ChartPane {
       labels: () => settings.labels.get(),
       colors: () => ({ up: settings.appearance.get().up, down: settings.appearance.get().down }),
       live: () => !feed.replaying,
+      space,
+      textSize,
+      axisSize: () => settings.appearance.get().axisSize,
     });
     candles.attachPrimitive(this.scaleLabels);
 
@@ -247,6 +257,8 @@ export class ChartPane {
       hint: (text) => {
         if (inUse()) shared.status.hint(text);
       },
+      space,
+      textSize,
     });
     candles.attachPrimitive(this.drawings);
     this.orders = {
@@ -279,6 +291,7 @@ export class ChartPane {
       times: () => feed.times,
       barSec: () => feed.tf.sec,
       fmtPrice: feed.fmtPrice,
+      space,
     });
     candles.attachPrimitive(this.alertLayer);
 

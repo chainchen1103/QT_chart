@@ -31,7 +31,8 @@ import {
   type Anchor, type Fit,
 } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
-import { ACCENT, paintOver, paintUnder, type HotSpot, type OrderTag, type PaintOptions } from "./paint.ts";
+import { ACCENT, labelPlans, paintOver, paintUnder, type HotSpot, type LabelPlan, type OrderTag, type PaintOptions } from "./paint.ts";
+import type { LabelSpace } from "../chart/labelspace.ts";
 import { isTyping } from "../ui/dom.ts";
 import {
   clone,
@@ -107,6 +108,9 @@ export type DrawingHost = {
   openSettings(d: Drawing, x: number, y: number): void;
   /** Status bar hint; null restores the default. */
   hint(text: string | null): void;
+  /** Room for the labels on the chart, and their size in px. */
+  space: LabelSpace;
+  textSize(): number;
 };
 
 type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor; c: Anchor; target: number }; moved: boolean };
@@ -148,11 +152,20 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private active = true;
   /** Order buttons as last painted. */
   private spots: HotSpot[] = [];
+  /** What the drawings write on the chart, planned with their geometry. */
+  private plans: LabelPlan[] = [];
   private readonly offs: (() => void)[] = [];
 
   private readonly views: IPrimitivePaneView[] = [
     { zOrder: () => "bottom", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => paintUnder(t, this.geo, this.paintOptions()) }) },
-    { zOrder: () => "normal", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => (this.spots = paintOver(t, this.geo, this.paintOptions())) }) },
+    {
+      zOrder: () => "normal",
+      renderer: () => ({
+        draw: (t: CanvasRenderingTarget2D) => {
+          this.spots = paintOver(t, this.geo, this.plans, (key) => this.host.space.at("drawings", key), this.paintOptions());
+        },
+      }),
+    },
   ];
   private readonly host: DrawingHost;
 
@@ -214,6 +227,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.trades = this.computeTrades();
     this.geo = this.computeGeo();
     this.buildAxisLabels();
+    const { chart } = this.host;
+    this.plans = labelPlans(this.geo, this.paintOptions(), chart.timeScale().width(), chart.panes()[0]?.getHeight() ?? 0);
+    this.host.space.set("drawings", this.plans.map((p) => p.ask));
   }
 
   /** Size and outcome of one position, as last drawn (for the settings window). */
@@ -433,6 +449,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       trades: this.trades,
       orderTag: (d) => this.host.orderTag(d),
       live: (d) => this.host.live(d),
+      textPx: this.host.textSize(),
     };
   }
 
