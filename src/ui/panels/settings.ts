@@ -105,7 +105,7 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
             "開啟無上限的 K 線量",
             "往左捲動時一直載入更早的 K 線，直到 OKX 沒有資料為止",
           ),
-          el("div", "pop-note", `關閉時每個圖表最多 ${MAX_BARS.toLocaleString()} 根。開啟後往左捲動會一直載入更早的 K 線，直到 OKX 沒有資料為止；載入越多越吃記憶體，指標和 Pine 腳本也會算得比較久。`),
+          el("div", "pop-note", `關閉時每個圖表最多 ${MAX_BARS.toLocaleString()} 根。開啟後往左捲動會一直載入更早的 K 線，直到 OKX 沒有資料為止。載入越多越吃記憶體，指標和 Pine 腳本也會算得比較久。`),
         );
       };
     case "alerts":
@@ -125,7 +125,7 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
           el("div", "pop-section", "字型"),
           aboutRow(el("span", "", "Geist、Geist Mono"), "SIL Open Font License 1.1。Copyright (c) 2023 Vercel, in collaboration with basement.studio"),
           el("div", "pop-section", "行情和下單"),
-          aboutRow(el("span", "", "OKX API"), "公開行情直接向 OKX 取得；下單用你自己的 API Key，金鑰只存在這台電腦"),
+          aboutRow(el("span", "", "OKX API"), "公開行情直接向 OKX 取得。下單用你自己的 API Key，金鑰只存在這台電腦"),
         );
         // the licences ask for their full text to go along with the program
         const full = el("pre", "set-license");

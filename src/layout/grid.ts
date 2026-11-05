@@ -59,7 +59,7 @@ export class Grid {
 
   private newLine(k: number): HTMLElement {
     const line = el("div", "divider");
-    line.title = "拖曳調整大小；雙擊恢復平分";
+    line.title = "拖曳調整大小，雙擊恢復平分";
     line.addEventListener("mousedown", (e) => {
       const d = this.divider(k);
       if (e.button !== 0 || !d) return;

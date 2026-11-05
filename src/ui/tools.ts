@@ -60,7 +60,7 @@ export class Tools {
     lb.innerHTML = ICONS[this.lastLine]; // our own fixed SVG
     lb.classList.toggle("active", isLine);
     const info = TOOL_INFO[this.lastLine];
-    lb.title = `${info.name}${info.key ? "（" + info.key + "）" : ""}；右下角小三角或按右鍵選其他線、通道`;
+    lb.title = `${info.name}${info.key ? "（" + info.key + "）" : ""}，右下角小三角或按右鍵選其他線、通道`;
   }
 
   /** The magnet is in effect (always on, or its key is held). */
@@ -69,7 +69,7 @@ export class Tools {
     const b = $("tool-magnet");
     b.classList.toggle("on", m.on);
     b.classList.toggle("held", active && !m.on);
-    b.title = `吸附到 K 線開高低收：${m.on ? "常開（按一下關閉）" : "常關（按一下開啟）"}；按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附；右邊小箭頭或按右鍵改設定`;
+    b.title = `吸附到 K 線開高低收：${m.on ? "常開（按一下關閉）" : "常關（按一下開啟）"}，按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附，右邊小箭頭或按右鍵改設定`;
   }
 
   /** Double-click or right-click on a drawing of `drawings`: its settings, with its alert section. */

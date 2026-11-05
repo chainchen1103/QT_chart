@@ -88,20 +88,20 @@ export function toggleFvgPanel(anchor: HTMLElement, sets: { get: () => FvgConf[]
   zoneSetsPanel(
     anchor,
     "FVG",
-    "三根 K 線中，第一根和第三根沒有重疊的空白。第三根收完才畫；之後價格穿過整個缺口就算回補，框停在那根。",
+    "三根 K 線中，第一根和第三根沒有重疊的空白。第三根收完才畫。之後價格穿過整個缺口就算回補，框停在那根。",
     sets,
     DEFAULT_FVG,
     chartBar,
     (c, p) => {
       const kind = el("select");
-      kind.title = "影線：看最高、最低價；實體：看開盤和收盤（影線可以重疊）";
+      kind.title = "影線：看最高、最低價。實體：看開盤和收盤（影線可以重疊）";
       kind.append(new Option("影線不重疊", "wick", false, !c.body), new Option("實體不重疊", "body", false, c.body));
       kind.onchange = () => p({ body: kind.value === "body" });
       return [
         lbl("缺口"),
         kind,
         lbl("最小"),
-        numInput(c.minPct, ZONE_LIMITS.minPct, { title: "比這個小的缺口不畫（價格的 %；0 = 全部畫）", width: 64, step: "0.01", int: false }, (v) => p({ minPct: v })),
+        numInput(c.minPct, ZONE_LIMITS.minPct, { title: "比這個小的缺口不畫（價格的 %，0 = 全部畫）", width: 64, step: "0.01", int: false }, (v) => p({ minPct: v })),
         lbl("%"),
       ];
     },
@@ -138,7 +138,7 @@ export function toggleSrPanel(anchor: HTMLElement, sets: { get: () => SrConf[]; 
     chartBar,
     (c, p) => [
       lbl("波段左右各"),
-      numInput(c.swing, ZONE_LIMITS.srSwing, { title: "波段高點：比左右各這麼多根都高；低點相反。數字越大，線越少、越重要", width: 52 }, (v) => p({ swing: v })),
+      numInput(c.swing, ZONE_LIMITS.srSwing, { title: "波段高點：比左右各這麼多根都高，低點相反。數字越大，線越少、越重要", width: 52 }, (v) => p({ swing: v })),
       lbl("根"),
     ],
     "也顯示已突破的",

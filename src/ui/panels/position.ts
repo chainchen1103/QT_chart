@@ -95,8 +95,8 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
   const k = d.okx;
   const fixed: Partial<Record<PriceKey, string>> = {
     ...(live || k ? { entry: "進場照 OKX（成交均價），不能改" } : {}),
-    ...(k?.noSl ? { stop: "OKX 上沒有止損單；要設請到 OKX" } : {}),
-    ...(k?.noTp ? { target: "OKX 上沒有止盈單；要設請到 OKX" } : {}),
+    ...(k?.noSl ? { stop: "OKX 上沒有止損單，要設請到 OKX" } : {}),
+    ...(k?.noTp ? { target: "OKX 上沒有止盈單，要設請到 OKX" } : {}),
     ...(k?.closed ? { stop: "已平倉", target: "已平倉" } : {}),
   };
   for (const { key, name, title } of PRICE_ROWS) {
@@ -386,12 +386,12 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         const d = DEFAULT_POSITION;
         set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoHover: d.infoHover });
         rerender();
-      }, "R 線、顏色、透明度、標出價格和資訊框恢復預設；這個倉位的價格、資金、風險、槓桿不變"));
+      }, "R 線、顏色、透明度、標出價格和資訊框恢復預設，這個倉位的價格、資金、風險、槓桿不變"));
     } else {
       foot.append(el("span", "spacer"), textButton("恢復預設", "link-btn", () => {
         io.set(clone(DEFAULT_POSITION));
         rerender();
-      }, "R 線、顏色和新倉位的預設；不會改已經畫好的倉位自己的資金、風險、槓桿"));
+      }, "R 線、顏色和新倉位的預設，不會改已經畫好的倉位自己的資金、風險、槓桿"));
     }
     body.append(foot);
   };

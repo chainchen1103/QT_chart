@@ -989,7 +989,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!d) return;
     if (!dr.moved && Math.hypot(m.x - dr.x0, m.y - dr.y0) < 3) return;
     if (d.kind === "position" && (d.okx?.closed || d.order?.closed)) {
-      this.host.hint("在 OKX 上已經平倉：照 OKX 的紀錄，不能移動；可以按 Delete 刪除");
+      this.host.hint("在 OKX 上已經平倉：照 OKX 的紀錄，不能移動。可以按 Delete 刪除");
       return;
     }
     if (d.kind === "position" && (d.okx || this.host.isLive(d)) && dr.part !== "stop" && dr.part !== "target") {
@@ -1186,41 +1186,41 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (this.measure?.done) {
       this.host.hint("點一下圖表或按 Esc 清除測量");
     } else if (this.measure) {
-      this.host.hint(`測量：點終點；${snap}；Esc 取消`);
+      this.host.hint(`測量：點終點，${snap}，Esc 取消`);
     } else if (this.tool === "measure") {
-      this.host.hint(`測量：點起點，或按住拖到終點；也可以直接按住 Shift 點圖表；${snap}；Esc 取消`);
+      this.host.hint(`測量：點起點，或按住拖到終點。也可以直接按住 Shift 點圖表，${snap}，Esc 取消`);
     } else if (this.tool === "position") {
-      if (!this.draft) this.host.hint(`倉位：點進場價；${snap}；Esc 取消`);
-      else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單；按住 Shift 只改價格；${snap}；Esc 取消`);
-      else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線；按住 Shift 只改價格；${snap}；Esc 取消`);
+      if (!this.draft) this.host.hint(`倉位：點進場價，${snap}，Esc 取消`);
+      else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單。按住 Shift 只改價格，${snap}，Esc 取消`);
+      else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線。按住 Shift 只改價格，${snap}，Esc 取消`);
     } else if (this.tool === "regression") {
       const dev = this.host.styleFor("regression") as ChannelStyle;
-      if (!this.draft) this.host.hint(`迴歸趨勢：點起點的 K 線，或按住拖到終點；用收盤價算迴歸線，上下各 ${dev.dev} 個標準差；Esc 取消`);
-      else this.host.hint("迴歸趨勢：點終點的 K 線；Esc 取消");
+      if (!this.draft) this.host.hint(`迴歸趨勢：點起點的 K 線，或按住拖到終點。用收盤價算迴歸線，上下各 ${dev.dev} 個標準差。Esc 取消`);
+      else this.host.hint("迴歸趨勢：點終點的 K 線，Esc 取消");
     } else if (isChannel(this.tool)) {
       const name = TOOL_INFO[this.tool].name;
       const second = this.tool === "channel" ? "平行的第二條線" : this.tool === "flat" ? "水平的第二條線" : "反方向對稱的第二條線";
-      if (!this.draft) this.host.hint(`${name}：點第一條線的起點，或按住拖到終點；${snap}；Esc 取消`);
-      else if (this.stage === 1) this.host.hint(`${name}：點第一條線的終點；按住 Shift 畫水平或 45° 線；${snap}；Esc 取消`);
-      else this.host.hint(`${name}：移動滑鼠放${second}，點一下完成；${snap}；Esc 取消`);
+      if (!this.draft) this.host.hint(`${name}：點第一條線的起點，或按住拖到終點。${snap}，Esc 取消`);
+      else if (this.stage === 1) this.host.hint(`${name}：點第一條線的終點，按住 Shift 畫水平或 45° 線，${snap}，Esc 取消`);
+      else this.host.hint(`${name}：移動滑鼠放${second}，點一下完成。${snap}，Esc 取消`);
     } else if (this.tool !== "cursor") {
       const info = TOOL_INFO[this.tool];
       const shift = this.tool === "rect" ? "按住 Shift 畫正方形" : "按住 Shift 畫水平、垂直或 45° 線";
-      if (info.points === 1) this.host.hint(`${info.name}：點一下放置；${snap}；Esc 取消`);
-      else if (this.draft) this.host.hint(`${info.name}：點第二個點；${shift}；${snap}；Esc 取消`);
-      else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點；${shift}；${snap}；Esc 取消`);
+      if (info.points === 1) this.host.hint(`${info.name}：點一下放置，${snap}，Esc 取消`);
+      else if (this.draft) this.host.hint(`${info.name}：點第二個點，${shift}，${snap}，Esc 取消`);
+      else this.host.hint(`${info.name}：點第一個點，或按住拖到第二個點。${shift}，${snap}，Esc 取消`);
     } else if (this.selected && this.closedOnOkx(this.selected)) {
-      this.host.hint("在 OKX 上已經平倉：框停在平倉時間，出場點是實際平倉價；雙擊或右鍵看設定；Delete 刪除");
+      this.host.hint("在 OKX 上已經平倉：框停在平倉時間，出場點是實際平倉價。雙擊或右鍵看設定，Delete 刪除");
     } else if (this.selected && this.isLive(this.selected)) {
-      this.host.hint("OKX 上的倉位：進場照 OKX；拖止損、止盈放開後會問要不要一起改 OKX；雙擊或右鍵看設定");
+      this.host.hint("OKX 上的倉位：進場照 OKX，拖止損、止盈放開後會問要不要一起改 OKX，雙擊或右鍵看設定");
     } else if (this.selected && this.find(this.selected)?.kind === "position") {
-      this.host.hint("拖曳進場、止損、止盈或右邊的把手調整，拖曳框移動；雙擊或右鍵直接輸入價格、資金和風險；Delete 刪除");
+      this.host.hint("拖曳進場、止損、止盈或右邊的把手調整，拖曳框移動。雙擊或右鍵直接輸入價格、資金和風險，Delete 刪除");
     } else if (this.selected && this.find(this.selected)?.kind === "regression") {
-      this.host.hint("拖曳兩端改計算的 K 線範圍，拖曳通道左右移動；雙擊或右鍵改標準差、等比線和外觀；Delete 刪除");
+      this.host.hint("拖曳兩端改計算的 K 線範圍，拖曳通道左右移動。雙擊或右鍵改標準差、等比線和外觀，Delete 刪除");
     } else if (this.selected && isChannel(this.find(this.selected)?.kind ?? "")) {
-      this.host.hint("拖曳第一條線的端點調整，拖曳第二條線的端點改寬度，拖曳通道移動；雙擊或右鍵加等比線、改外觀；Delete 刪除");
+      this.host.hint("拖曳第一條線的端點調整，拖曳第二條線的端點改寬度，拖曳通道移動。雙擊或右鍵加等比線、改外觀，Delete 刪除");
     } else if (this.selected) {
-      this.host.hint("拖曳端點調整、拖曳線條移動，按住 Shift 只水平或垂直；Delete 刪除；雙擊或右鍵開設定");
+      this.host.hint("拖曳端點調整、拖曳線條移動，按住 Shift 只水平或垂直。Delete 刪除，雙擊或右鍵開設定");
     } else {
       this.host.hint(null);
     }

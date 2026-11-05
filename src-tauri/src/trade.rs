@@ -370,7 +370,7 @@ impl Trader {
         let cfg = self.call(&k, "GET", "/api/v5/account/config", "", None).await?;
         let c = cfg.first().ok_or("OKX 沒有回帳戶設定")?;
         if c["acctLv"].as_str() == Some("1") {
-            return Err("這個 OKX 帳戶是現貨模式，不能開永續合約；請先在 OKX 把帳戶模式改成合約模式（單幣種保證金）".into());
+            return Err("這個 OKX 帳戶是現貨模式，不能開永續合約。請先在 OKX 把帳戶模式改成合約模式（單幣種保證金）".into());
         }
         let hedge = c["posMode"].as_str() == Some("long_short_mode");
         let pos_side = hedge.then(|| if r.side == "buy" { "long" } else { "short" });

@@ -365,7 +365,7 @@ export function openPineInputs(ui: PineUi, id: string) {
       const v = ui.host().view(id);
       const defs = v?.result?.inputs ?? [];
       if (!s.on) body.append(el("div", "pop-note", "這個腳本關著：改了設定，開啟後才看得到"));
-      if (!defs.length) body.append(el("div", "pop-note", v?.result ? "這個腳本沒有可以調整的參數（input）" : "腳本還沒在目前的圖表上計算過；開啟腳本、等 K 線載入後再來"));
+      if (!defs.length) body.append(el("div", "pop-note", v?.result ? "這個腳本沒有可以調整的參數（input）" : "腳本還沒在目前的圖表上計算過，開啟腳本、等 K 線載入後再來"));
       let group = "\u0000";
       let inlineRow: HTMLElement | null = null;
       let inlineKey = "";
@@ -694,7 +694,7 @@ function reportBody(body: HTMLElement, rep: StrategyReport): IChartApi {
   body.append(scroller);
   if (rep.open.length) {
     const o = rep.open;
-    body.append(el("div", "pop-note", `持倉中：${o.map((x) => `${x.dir === 1 ? "多" : "空"} ${Number(x.qty.toFixed(6))} @ ${px(x.price)}（${x.entryId}）`).join("；")}`));
+    body.append(el("div", "pop-note", `持倉中：${o.map((x) => `${x.dir === 1 ? "多" : "空"} ${Number(x.qty.toFixed(6))} @ ${px(x.price)}（${x.entryId}）`).join("，")}`));
   }
   return chart;
 }

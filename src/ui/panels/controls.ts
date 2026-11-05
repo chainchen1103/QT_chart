@@ -15,8 +15,8 @@ export function tfSelect(value: string, chartBar: string, onChange: (v: string) 
     const low = !!s.value && tfSec(s.value) < tfSec(chartBar);
     s.classList.toggle("warn", low);
     s.title = low
-      ? `比現在的圖表週期（${tfLabel(chartBar)}）小，先不顯示；切到 ${tfLabel(s.value)} 或更小的圖表週期才會出現`
-      : "用哪個週期的 K 線計算；「圖表週期」會跟著圖表切換";
+      ? `比現在的圖表週期（${tfLabel(chartBar)}）小，先不顯示。切到 ${tfLabel(s.value)} 或更小的圖表週期才會出現`
+      : "用哪個週期的 K 線計算，「圖表週期」會跟著圖表切換";
   };
   paint();
   s.onchange = () => {

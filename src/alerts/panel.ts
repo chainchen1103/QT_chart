@@ -34,9 +34,9 @@ function select<T extends string>(options: T[], text: Record<T, string>, value: 
   return s;
 }
 const condSelect = (conds: AlertCond[], value: AlertCond, onChange: (v: AlertCond) => void) =>
-  select(conds, COND_TEXT, value, onChange, "觸及：從哪一邊碰到都算；突破、跌破：只算往那個方向穿過");
+  select(conds, COND_TEXT, value, onChange, "觸及：從哪一邊碰到都算。突破、跌破：只算往那個方向穿過");
 const repeatSelect = (value: Repeat, onChange: (v: Repeat) => void) =>
-  select<Repeat>(["once", "every"], REPEAT_TEXT, value, onChange, "只提醒一次：響過就關掉；每次：一直開著，最多每分鐘響一次");
+  select<Repeat>(["once", "every"], REPEAT_TEXT, value, onChange, "只提醒一次：響過就關掉。每次：一直開著，最多每分鐘響一次");
 
 function noteInput(value: string, onCommit: (v: string) => void): HTMLInputElement {
   const i = el("input");
@@ -248,11 +248,11 @@ export function alertDialogAt(x: number, y: number, ui: AlertUi, price: number |
 }
 
 // ----------------------------------------------------------------------------- inside a drawing's settings
-const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間；觸及、突破、跌破：碰到通道的任何一條線。畫完之後照同樣斜率往右延伸";
+const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間。觸及、突破、跌破：碰到通道的任何一條線。畫完之後照同樣斜率往右延伸";
 const WHAT: Partial<Record<Drawing["kind"], string>> = {
-  trend: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
-  info: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
-  angle: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
+  trend: "價格碰到這條線時提醒。線段畫完之後，照同樣斜率往右延伸",
+  info: "價格碰到這條線時提醒。線段畫完之後，照同樣斜率往右延伸",
+  angle: "價格碰到這條線時提醒。線段畫完之後，照同樣斜率往右延伸",
   ray: "價格碰到這條射線時提醒",
   extended: "價格碰到這條線時提醒",
   hline: "價格碰到這條水平線時提醒",
@@ -349,7 +349,7 @@ export function renderAlertOptions(service: AlertService): Render {
           rerender(); // 程式內訊息 is always on without Windows notifications
         }),
         "Windows 通知",
-        "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心；點通知會切回 QT Chart 打開那個幣種",
+        "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心。點通知會切回 QT Chart 打開那個幣種",
       ),
       popup,
       el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知。視窗在背景時工作列按鈕會閃。程式開著才會提醒"),

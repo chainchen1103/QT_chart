@@ -227,7 +227,7 @@ export class AlertService {
     a.count += 1;
     if (oneShot(a.cond) ? a.cond === "time" || a.stage === "done" : a.repeat === "once") a.on = false;
     const fmt = (p: number) => this.deps.fmtPrice(a.instId, p);
-    const text = events.map((e) => describe(e, fmt, this.deps.fmtTime)).join("；");
+    const text = events.map((e) => describe(e, fmt, this.deps.fmtTime)).join("，");
     this.entries.unshift({ t: now, instId: a.instId, text, note: a.note, alertId: a.id });
     if (this.entries.length > MAX_LOG) this.entries.length = MAX_LOG;
     this.deps.notify({ alert: a, title: `${shortName(a.instId)} ${text}`, body: `現價 ${fmt(price)}${a.note ? `\n${a.note}` : ""}` });

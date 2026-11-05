@@ -229,7 +229,7 @@ export class AccountSync {
       }
       const ok = errors.length === 0 && !m.notes.some((n) => n.startsWith("找不到"));
       const what = m.amends.length ? `前面 ${m.amends.length} 張單的止損、止盈已移過去` : "前面沒有要移的止損";
-      const note = [ok ? what : "", ...m.notes, ...errors].filter(Boolean).join("；");
+      const note = [ok ? what : "", ...m.notes, ...errors].filter(Boolean).join("，");
       this.d.editDrawings(instId, (list) => {
         const d = list.find((x) => x.id === m.drawingId);
         if (d?.kind !== "position" || !d.order) return false;
@@ -276,7 +276,7 @@ export class AccountSync {
     if (!e) {
       // nothing on OKX for what was moved (e.g. no take-profit there): back to OKX's
       revert();
-      this.d.note("OKX 上沒有這個止損或止盈單，圖上改回 OKX 的；要新增請到 OKX 設定");
+      this.d.note("OKX 上沒有這個止損或止盈單，圖上改回 OKX 的。要新增請到 OKX 設定");
       return true;
     }
     let done = false;
@@ -296,7 +296,7 @@ export class AccountSync {
           }
         }
         if (errors.length) {
-          msg.textContent = `沒改成：${errors.join("；")}`;
+          msg.textContent = `沒改成：${errors.join("，")}`;
           go.textContent = "改 OKX";
           go.disabled = false;
           return;

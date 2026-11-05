@@ -176,7 +176,7 @@ class Parser {
       this.pos++;
       return { k: "assign", ...this.base(op), target: e, op: op.s, value: this.expr() };
     }
-    if (op.k === "op" && op.s === "=") this.err("這個名稱已經用過；要改它的值請用 :=", op);
+    if (op.k === "op" && op.s === "=") this.err("這個名稱已經用過，要改它的值請用 :=", op);
     return { k: "expr", ...this.base(t), e };
   }
 
