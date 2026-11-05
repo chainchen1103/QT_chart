@@ -1,12 +1,15 @@
 //! Following the OKX account with the user's API key: the open USDT perpetual positions, their stop-loss and
 //! take-profit orders, and changes to orders, so the charts can show them as they are on the exchange (the
-//! page matches them to its drawings). OKX's private WebSocket pushes changes as they happen; on every
-//! (re)connection the whole picture is read once over REST, and again every minute as a check; while the
-//! WebSocket can't be used, REST is asked every 5 seconds. Everything goes to the page as "okx_sync" events
+//! page matches them to its drawings). OKX's WebSockets push changes as they happen: positions and orders on
+//! the private one, the TP/SL orders on the business one (where OKX moved them in June 2023), both logged in.
+//! On every (re)connection the whole picture is read once over REST, and again every minute as a check; while
+//! the WebSockets can't be used, REST is asked every 5 seconds (and the page is told why). Everything goes to
+//! the page as "okx_sync" events
 //! (the whole picture each time, plus the orders that changed) and "okx_sync_status". Read only: nothing here
 //! places or changes orders.
 
 use crate::{okx, trade::Trader, AppState};
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -14,7 +17,9 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{connect_async, tungstenite, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+
+type Ws = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -297,15 +302,17 @@ async fn run(app: AppHandle) {
             }
             Err(e) => status(&app, "error", &e),
         }
+        let mut why = String::new();
         match session(&app, &st.trader, &mut book, demo).await {
             Ok(()) => failures = 0,
             Err(e) => {
                 failures += 1;
                 status(&app, "error", &e);
+                why = e;
             }
         }
         if failures >= 3 {
-            status(&app, "polling", "WebSocket 連不上，改成每 5 秒用 REST 查一次");
+            status(&app, "polling", &why); // why the WebSocket couldn't be used, shown with "every 5 seconds"
             for _ in 0..60 {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 match book.reload(&st.trader).await {
@@ -322,64 +329,110 @@ async fn run(app: AppHandle) {
     }
 }
 
-/// One WebSocket session: log in, subscribe to positions, orders and TP/SL orders, pass the pushes on, ping
-/// every 20 s, check against REST every minute; until it closes (Ok) or fails (Err).
-async fn session(app: &AppHandle, trader: &Trader, book: &mut Book, demo: bool) -> Result<(), String> {
-    let (login, _) = trader.ws_login().await?;
-    let url = okx::private_ws_url(demo);
-    let (ws, _) = tokio::time::timeout(Duration::from_secs(10), connect_async(url.as_str()))
-        .await
-        .map_err(|_| "連線逾時".to_string())?
-        .map_err(|e| e.to_string())?;
-    let (mut tx, mut rx) = ws.split();
-    tx.send(Message::Text(login.to_string().into())).await.map_err(|e| e.to_string())?;
-    loop {
-        let msg = tokio::time::timeout(Duration::from_secs(10), rx.next())
+/// One of the account's WebSockets, logged in and subscribed.
+struct Feed {
+    /// 私人頻道 or 業務頻道, for the messages.
+    name: &'static str,
+    tx: SplitSink<Ws, Message>,
+    rx: SplitStream<Ws>,
+}
+
+impl Feed {
+    /// Connect to `url`, log in, and subscribe to `channels` (USDT perpetuals).
+    async fn open(trader: &Trader, name: &'static str, url: &str, channels: &[&str]) -> Result<Feed, String> {
+        let (login, _) = trader.ws_login().await?;
+        let (ws, _) = tokio::time::timeout(Duration::from_secs(10), connect_async(url))
             .await
-            .map_err(|_| "登入逾時".to_string())?
-            .ok_or("連線被關閉")?
-            .map_err(|e| e.to_string())?;
-        let Message::Text(t) = msg else { continue };
-        let v: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
-        match v["event"].as_str() {
-            Some("login") if v["code"] == "0" => break,
-            Some("login") | Some("error") => {
-                return Err(format!("OKX 拒絕登入（{}：{}）", v["code"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or("")));
+            .map_err(|_| format!("{name}連線逾時"))?
+            .map_err(|e| format!("{name}：{e}"))?;
+        let (mut tx, mut rx) = ws.split();
+        tx.send(Message::Text(login.to_string().into())).await.map_err(|e| format!("{name}：{e}"))?;
+        loop {
+            let msg = tokio::time::timeout(Duration::from_secs(10), rx.next())
+                .await
+                .map_err(|_| format!("{name}登入逾時"))?
+                .ok_or_else(|| format!("{name}連線被關閉"))?
+                .map_err(|e| format!("{name}：{e}"))?;
+            let Message::Text(t) = msg else { continue };
+            let v: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
+            match v["event"].as_str() {
+                Some("login") if v["code"] == "0" => break,
+                Some("login") | Some("error") => {
+                    return Err(format!("OKX 拒絕{name}登入（{}：{}）", v["code"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or("")));
+                }
+                _ => {}
             }
+        }
+        let args: Vec<Value> = channels.iter().map(|c| json!({"channel": c, "instType": "SWAP"})).collect();
+        tx.send(Message::Text(json!({"op": "subscribe", "args": args}).to_string().into())).await.map_err(|e| format!("{name}：{e}"))?;
+        Ok(Feed { name, tx, rx })
+    }
+
+    /// One frame: a push goes into the book (and to the page when it changed something). Ok(false): the socket
+    /// closed; Err: it failed, or OKX answered with an error (a channel it refused).
+    async fn take(
+        &mut self,
+        app: &AppHandle,
+        book: &mut Book,
+        demo: bool,
+        next: Result<Option<Result<Message, tungstenite::Error>>, tokio::time::error::Elapsed>,
+    ) -> Result<bool, String> {
+        let name = self.name;
+        let Some(msg) = next.map_err(|_| format!("{name} 45 秒沒有收到資料"))? else { return Ok(false) };
+        match msg.map_err(|e| format!("{name}：{e}"))? {
+            Message::Text(t) if t.as_str() == "pong" => {}
+            Message::Text(t) => {
+                let v: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
+                if v["event"] == "error" {
+                    return Err(format!("OKX {name}：{} {}", v["code"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or("")));
+                }
+                if let (Some(ch), Some(data)) = (v["arg"]["channel"].as_str(), v["data"].as_array()) {
+                    if book.push(ch, data) {
+                        let _ = app.emit("okx_sync", book.event(demo, "ws"));
+                    }
+                }
+            }
+            Message::Ping(p) => self.tx.send(Message::Pong(p)).await.map_err(|e| format!("{name}：{e}"))?,
+            Message::Close(_) => return Ok(false),
             _ => {}
         }
+        Ok(true)
     }
-    let channels = ["positions", "orders", "orders-algo"].map(|c| json!({"channel": c, "instType": "SWAP"}));
-    tx.send(Message::Text(json!({"op": "subscribe", "args": channels}).to_string().into())).await.map_err(|e| e.to_string())?;
+
+    async fn ping(&mut self) -> Result<(), String> {
+        let name = self.name;
+        self.tx.send(Message::Text("ping".into())).await.map_err(|e| format!("{name}：{e}"))
+    }
+}
+
+/// One session over both WebSockets: positions and orders on the private one, TP/SL orders on the business one;
+/// pass the pushes on, ping both every 20 s, check against REST every minute; until one closes (Ok) or fails
+/// (Err, with why).
+async fn session(app: &AppHandle, trader: &Trader, book: &mut Book, demo: bool) -> Result<(), String> {
+    let (private_url, business_url) = okx::account_ws_urls(demo);
+    let mut private = Feed::open(trader, "私人頻道", &private_url, &["positions", "orders"]).await?;
+    let mut business = Feed::open(trader, "業務頻道", &business_url, &["orders-algo"]).await?;
     status(app, "ws", "");
     let mut ping = tokio::time::interval(Duration::from_secs(20));
     ping.tick().await;
     let mut check = tokio::time::interval(Duration::from_secs(60));
     check.tick().await;
+    let wait = Duration::from_secs(45);
     loop {
         tokio::select! {
-            next = tokio::time::timeout(Duration::from_secs(45), rx.next()) => {
-                let Some(msg) = next.map_err(|_| "45 秒沒有收到資料".to_string())? else { return Ok(()) };
-                match msg.map_err(|e| e.to_string())? {
-                    Message::Text(t) if t.as_str() == "pong" => {}
-                    Message::Text(t) => {
-                        let v: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
-                        if v["event"] == "error" {
-                            return Err(format!("OKX：{} {}", v["code"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or("")));
-                        }
-                        if let (Some(ch), Some(data)) = (v["arg"]["channel"].as_str(), v["data"].as_array()) {
-                            if book.push(ch, data) {
-                                let _ = app.emit("okx_sync", book.event(demo, "ws"));
-                            }
-                        }
-                    }
-                    Message::Ping(p) => tx.send(Message::Pong(p)).await.map_err(|e| e.to_string())?,
-                    Message::Close(_) => return Ok(()),
-                    _ => {}
+            next = tokio::time::timeout(wait, private.rx.next()) => {
+                if !private.take(app, book, demo, next).await? {
+                    return Ok(());
+                }
+            }
+            next = tokio::time::timeout(wait, business.rx.next()) => {
+                if !business.take(app, book, demo, next).await? {
+                    return Ok(());
                 }
             }
             _ = ping.tick() => {
-                tx.send(Message::Text("ping".into())).await.map_err(|e| e.to_string())?;
+                private.ping().await?;
+                business.ping().await?;
             }
             _ = check.tick() => {
                 if book.reload(trader).await.is_ok() {

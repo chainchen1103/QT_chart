@@ -17,22 +17,22 @@ pub fn ws_url() -> String {
     }
 }
 
-/// The private WebSocket (the account's own pushes, sync.rs); a demo key goes to OKX's demo-trading host.
-/// Debug builds accept QTCHART_PRIVATE_WS_URL (a local test server).
-pub fn private_ws_url(demo: bool) -> String {
+/// The account's own WebSockets (sync.rs), both logged in: the private one (positions, orders) and the business
+/// one, where OKX has served the TP/SL orders channel (orders-algo) since June 2023. A demo key goes to OKX's
+/// demo-trading host. Debug builds accept QTCHART_PRIVATE_WS_URL (a local test server; the business socket is the
+/// same address with /business in place of /private).
+pub fn account_ws_urls(demo: bool) -> (String, String) {
     if cfg!(debug_assertions) {
         if let Ok(u) = std::env::var("QTCHART_PRIVATE_WS_URL") {
             let u = u.trim().to_string();
             if !u.is_empty() {
-                return u;
+                let business = u.replace("/ws/v5/private", "/ws/v5/business");
+                return (u, business);
             }
         }
     }
-    if demo {
-        "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999".to_string()
-    } else {
-        "wss://ws.okx.com:8443/ws/v5/private".to_string()
-    }
+    let (host, tail) = if demo { ("wspap.okx.com", "?brokerId=9999") } else { ("ws.okx.com", "") };
+    (format!("wss://{host}:8443/ws/v5/private{tail}"), format!("wss://{host}:8443/ws/v5/business{tail}"))
 }
 
 /// Where orders and account requests go (trade.rs). Debug builds accept QTCHART_TRADE_URL (a local test
@@ -399,6 +399,19 @@ mod tests {
     #[test]
     fn websocket_address_override_stays_on_okx() {
         assert!(is_okx_ws("wss://wsaws.okx.com:8443/ws/v5/business"));
+        if std::env::var("QTCHART_PRIVATE_WS_URL").is_err() {
+            assert_eq!(
+                account_ws_urls(false),
+                ("wss://ws.okx.com:8443/ws/v5/private".to_string(), "wss://ws.okx.com:8443/ws/v5/business".to_string())
+            );
+            assert_eq!(
+                account_ws_urls(true),
+                (
+                    "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999".to_string(),
+                    "wss://wspap.okx.com:8443/ws/v5/business?brokerId=9999".to_string()
+                )
+            );
+        }
         assert!(is_okx_ws("wss://ws.okx.com:8443/ws/v5/business"));
         assert!(!is_okx_ws("ws://ws.okx.com:8443/ws/v5/business"));
         assert!(!is_okx_ws("wss://okx.com.evil.example/ws"));

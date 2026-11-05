@@ -221,9 +221,9 @@ async fn run(app: AppHandle, client: Client, subs: watch::Receiver<Vec<Pair>>, r
             r
         }
     };
-    let poll = |how_long| {
+    let poll = |how_long, why: String| {
         let (app, client, router) = (app.clone(), client.clone(), router.clone());
-        async move { poll_for(&app, &client, &router, how_long).await }
+        async move { poll_for(&app, &client, &router, how_long, &format!("WebSocket 連不上：{why}")).await }
     };
     ws::keep_alive(session, poll).await;
 }
@@ -242,8 +242,9 @@ async fn latest_bars(client: &Client, p: &Pair) -> Result<Vec<Candle>, String> {
     Ok(out)
 }
 
-async fn poll_for(app: &AppHandle, client: &Client, router: &Arc<Mutex<Router>>, how_long: Duration) {
-    status(app, "polling", "");
+/// REST every 2 seconds for `how_long`; `why`: why the WebSocket isn't used (shown with the state).
+async fn poll_for(app: &AppHandle, client: &Client, router: &Arc<Mutex<Router>>, how_long: Duration, why: &str) {
+    status(app, "polling", why);
     let mut failing = false;
     let end = Instant::now() + how_long;
     while Instant::now() < end {
@@ -253,7 +254,7 @@ async fn poll_for(app: &AppHandle, client: &Client, router: &Arc<Mutex<Router>>,
                 Ok(cs) => {
                     if failing {
                         failing = false;
-                        status(app, "polling", "");
+                        status(app, "polling", why);
                     }
                     send_candles(app, p, cs);
                 }

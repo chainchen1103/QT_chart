@@ -95,7 +95,7 @@ export function toggleAccountPanel(anchor: HTMLElement, acct: TradeAccount, posi
 const SYNC_TEXT: Record<string, string> = {
   connecting: "連線中…",
   ws: "即時（WebSocket）",
-  polling: "WebSocket 連不上，改成每 5 秒查一次",
+  polling: "改成每 5 秒用 REST 查，WebSocket 連不上",
   error: "出了問題",
   off: "關閉",
 };
@@ -109,10 +109,11 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
   const statusText = () => {
     const st = sync.status;
     const e = sync.state;
+    // the backend says why: an error, or why the WebSocket couldn't be used while REST is asked instead
+    const why = (st.state === "error" || st.state === "polling") && st.detail ? `：${st.detail}` : "";
     return !acct.keys.set
       ? "還沒設定 API"
-      : `${SYNC_TEXT[st.state] ?? st.state}${st.state === "error" && st.detail ? `：${st.detail}` : ""}` +
-          (e ? `，${e.positions.length} 個持倉、${e.algos.length} 張止損止盈單` : "");
+      : `${SYNC_TEXT[st.state] ?? st.state}${why}` + (e ? `；${e.positions.length} 個持倉、${e.algos.length} 張止損止盈單` : "");
   };
   return (body, rerender) => {
     if (!following) {

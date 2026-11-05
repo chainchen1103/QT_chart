@@ -64,23 +64,27 @@ where
 }
 
 /// Keep a feed going forever: WebSocket sessions with growing pauses after failures (1, 2, 4… up to 16 s);
-/// after three failures in a row, `poll` instead for five minutes (some networks block port 8443), then try
-/// the WebSocket again.
+/// after three failures in a row, `poll` instead for five minutes (some networks block port 8443), told why
+/// the last session failed, then try the WebSocket again.
 pub async fn keep_alive<S, SF, P, PF>(mut session: S, mut poll: P)
 where
     S: FnMut() -> SF,
     SF: Future<Output = Result<(), String>>,
-    P: FnMut(Duration) -> PF,
+    P: FnMut(Duration, String) -> PF,
     PF: Future<Output = ()>,
 {
     let mut failures = 0u32;
+    let mut why = String::new();
     loop {
         match session().await {
             Ok(()) => failures = 0,
-            Err(_) => failures += 1,
+            Err(e) => {
+                failures += 1;
+                why = e;
+            }
         }
         if failures >= 3 {
-            poll(Duration::from_secs(300)).await;
+            poll(Duration::from_secs(300), why.clone()).await;
             failures = 0;
         } else {
             tokio::time::sleep(Duration::from_secs(1 << failures.min(4))).await;
