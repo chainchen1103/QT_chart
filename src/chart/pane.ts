@@ -304,6 +304,7 @@ export class ChartPane {
       labels: settings.labels,
       alerts: this.alertUi,
       appearanceAt: shared.appearanceAt,
+      resetView: () => this.resetView(),
     });
 
     chart.subscribeCrosshairMove((p) => {
@@ -440,6 +441,14 @@ export class ChartPane {
   private applyAppearance() {
     this.view.applyAppearance();
     this.scaleLabels.refresh();
+  }
+
+  /** Back to the view the chart opens with: the newest bars at the default zoom, every price scale fitting its
+   *  bars again; the symbol and timeframe stay. */
+  resetView() {
+    this.zoom = null;
+    this.ev.zoomed(this);
+    this.showLatest();
   }
 
   /** The latest bars, at the saved zoom (bar spacing) when there is one, with the prices fitted to them (a

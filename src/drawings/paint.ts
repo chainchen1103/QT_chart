@@ -7,9 +7,10 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { isChannelDrawing, type Dash, type FibSettings, type PositionDrawing, type PositionSettings } from "../settings/model.ts";
 import { extendSeg, type Geo, type Seg } from "./geo.ts";
-import { fmtLevel, fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
+import { fmtLevel, fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex, type Anchor } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
-import { signed } from "../core/format.ts";
+import { fmtVol, signed } from "../core/format.ts";
+import type { Candle } from "../core/api.ts";
 import type { LiveInfo } from "../trade/sync.ts";
 import { MONO_FONT, THEME } from "../ui/theme.ts";
 import { PRIO, textWidth, type Box, type LabelAsk } from "../chart/labelspace.ts";
@@ -637,4 +638,87 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
       paint: bare(text, ps.profit),
     });
   });
+}
+
+// ----------------------------------------------------------------------------- measuring
+/** A measurement on screen (the ruler, or Shift + click): from (ax, ay) to (bx, by), and what it says. */
+export type MeasureGeo = { ax: number; ay: number; bx: number; by: number; up: boolean; lines: string[] };
+const MEASURE_UP = "#2962ff";
+const MEASURE_DOWN = "#f23645";
+
+/** What a measurement from `a` to `b` says: the change in price and in %, how many bars and how long, and the
+ *  volume traded in the bars it spans (those loaded). */
+export function measureLines(
+  a: Anchor,
+  b: Anchor,
+  o: { times: number[]; barSec: number; bars: readonly Candle[]; fmtPrice(p: number): string },
+): string[] {
+  const dp = b.p - a.p;
+  const sign = dp >= 0 ? "+" : "−";
+  const pct = a.p ? (Math.abs(dp) / a.p) * 100 : 0;
+  const ia = Math.round(timeToIndex(o.times, a.t, o.barSec));
+  const ib = Math.round(timeToIndex(o.times, b.t, o.barSec));
+  let vol = 0;
+  for (let i = Math.max(0, Math.min(ia, ib)); i <= Math.min(o.bars.length - 1, Math.max(ia, ib)); i++) vol += o.bars[i].volume;
+  return [
+    `${sign}${o.fmtPrice(Math.abs(dp))} (${sign}${pct.toFixed(2)}%)`,
+    `${Math.abs(ib - ia)} 根，${fmtSpan(b.t - a.t)}`,
+    `成交量 ${fmtVol(vol)}`,
+  ];
+}
+
+/** A measurement: a shaded box blue going up, red going down, arrows through its middle the way price and time
+ *  went, and its numbers past the end it went to. Over everything else, while it shows. */
+export function paintMeasure(target: CanvasRenderingTarget2D, g: MeasureGeo | null, textPx: number) {
+  if (!g) return;
+  const color = g.up ? MEASURE_UP : MEASURE_DOWN;
+  target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+    const x0 = Math.min(g.ax, g.bx);
+    const x1 = Math.max(g.ax, g.bx);
+    const y0 = Math.min(g.ay, g.by);
+    const y1 = Math.max(g.ay, g.by);
+    ctx.save();
+    ctx.fillStyle = hexToRgba(color, 0.18);
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1;
+    const mx = Math.round((g.ax + g.bx) / 2) + 0.5;
+    const my = Math.round((g.ay + g.by) / 2) + 0.5;
+    arrow(ctx, mx, g.ay, mx, g.by);
+    arrow(ctx, g.ax, my, g.bx, my);
+    const T = typeOf(textPx);
+    ctx.font = T.font;
+    const pad = 7;
+    const w = Math.max(...g.lines.map(T.tw)) + pad * 2;
+    const h = g.lines.length * T.lh + pad * 2 - 3;
+    const bx = Math.max(2, Math.min((g.ax + g.bx) / 2 - w / 2, mediaSize.width - w - 2));
+    const by = Math.max(2, Math.min(g.up ? y0 - 8 - h : y1 + 8, mediaSize.height - h - 2));
+    ctx.fillStyle = hexToRgba(color, 0.92);
+    ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    g.lines.forEach((s, k) => ctx.fillText(s, bx + w / 2, by + pad + (T.lh - 3) / 2 + k * T.lh));
+    ctx.restore();
+  });
+}
+
+/** A line from (x0, y0) to (x1, y1) with a head at its end; nothing when it is too short to see. */
+function arrow(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  if (len < 10) return;
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  const s = 6;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * s - uy * s * 0.55, y1 - uy * s + ux * s * 0.55);
+  ctx.lineTo(x1 - ux * s + uy * s * 0.55, y1 - uy * s - ux * s * 0.55);
+  ctx.closePath();
+  ctx.fill();
 }

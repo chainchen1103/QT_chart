@@ -31,7 +31,10 @@ import {
   type Anchor, type Fit,
 } from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
-import { ACCENT, labelPlans, paintOver, paintUnder, type HotSpot, type LabelPlan, type OrderTag, type PaintOptions } from "./paint.ts";
+import {
+  ACCENT, labelPlans, measureLines, paintMeasure, paintOver, paintUnder, type HotSpot, type LabelPlan, type MeasureGeo, type OrderTag,
+  type PaintOptions,
+} from "./paint.ts";
 import type { LabelSpace } from "../chart/labelspace.ts";
 import { isTyping } from "../ui/dom.ts";
 import {
@@ -54,7 +57,8 @@ import {
   type RectStyle,
 } from "../settings/model.ts";
 
-export type Tool = "cursor" | DrawKind;
+/** "measure": the ruler (a measurement, not a drawing: nothing is kept). */
+export type Tool = "cursor" | "measure" | DrawKind;
 
 export type DrawingHost = {
   chart: IChartApi;
@@ -116,6 +120,9 @@ export type DrawingHost = {
 type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor; c: Anchor; target: number }; moved: boolean };
 type Mouse = { x: number; y: number; inside: boolean };
 type AxisLabel = { pos: number; text: string; color: string };
+/** A measurement from `a` to `b`: `done` once its end is set (it then shows until the next click or Esc);
+ *  `pressed`: where the mouse went down for its start, while it is held. */
+type Measure = { a: Anchor; b: Anchor; done: boolean; pressed: { x0: number; y0: number } | null };
 
 const SNAP_PX = 30; // px: the magnet only pulls a point this close to an open/high/low/close
 
@@ -154,6 +161,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private spots: HotSpot[] = [];
   /** What the drawings write on the chart, planned with their geometry. */
   private plans: LabelPlan[] = [];
+  private measure: Measure | null = null;
+  private measureGeo: MeasureGeo | null = null;
   private readonly offs: (() => void)[] = [];
 
   private readonly views: IPrimitivePaneView[] = [
@@ -166,6 +175,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         },
       }),
     },
+    { zOrder: () => "top", renderer: () => ({ draw: (t: CanvasRenderingTarget2D) => paintMeasure(t, this.measureGeo, this.host.textSize()) }) },
   ];
   private readonly host: DrawingHost;
 
@@ -200,6 +210,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (this.active === on) return;
     this.active = on;
     if (on) return;
+    if (this.measure) {
+      this.measure = null;
+      this.redraw();
+    }
     if (this.tool !== "cursor") this.setTool("cursor");
     if (this.selected) {
       this.selected = null;
@@ -230,6 +244,19 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const { chart } = this.host;
     this.plans = labelPlans(this.geo, this.paintOptions(), chart.timeScale().width(), chart.panes()[0]?.getHeight() ?? 0);
     this.host.space.set("drawings", this.plans.map((p) => p.ask));
+    this.measureGeo = this.computeMeasure();
+  }
+
+  private computeMeasure(): MeasureGeo | null {
+    const ms = this.measure;
+    if (!ms) return null;
+    const ax = this.xOfTime(ms.a.t);
+    const bx = this.xOfTime(ms.b.t);
+    const ay = this.host.series.priceToCoordinate(ms.a.p);
+    const by = this.host.series.priceToCoordinate(ms.b.p);
+    if (ax == null || bx == null || ay == null || by == null) return null;
+    const lines = measureLines(ms.a, ms.b, { times: this.host.times(), barSec: this.host.barSec(), bars: this.host.bars(), fmtPrice: this.host.fmtPrice });
+    return { ax, ay, bx, by, up: ms.b.p >= ms.a.p, lines };
   }
 
   /** Size and outcome of one position, as last drawn (for the settings window). */
@@ -263,6 +290,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.tool = t;
     this.draft = null;
     this.placing = null;
+    this.measure = null;
     if (t !== "cursor") this.selected = null;
     this.host.el.classList.toggle("drawing", t !== "cursor");
     this.host.el.classList.remove("over-drawing");
@@ -277,6 +305,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.list = list;
     this.draft = null;
     this.placing = null;
+    if (!keep) this.measure = null;
     this.fits.clear();
     if (!(this.drag && has(this.drag.id))) this.drag = null;
     if (!has(this.selected)) this.selected = null;
@@ -671,6 +700,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const m = this.local(e);
     this.mouse = m;
     if (!m.inside) return;
+    if (this.measureDown(e, m) || this.tool === "measure") return;
     if (this.tool !== "cursor") {
       e.preventDefault();
       e.stopPropagation();
@@ -754,9 +784,58 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.redraw();
   }
 
+  /**
+   * The ruler, or Shift + click on the chart where there is no drawing: the first click sets where a measurement
+   * starts, the second (or letting go after dragging) where it ends; the next click takes it away and then does
+   * what it would have. True when the click was the measurement's.
+   */
+  private measureDown(e: MouseEvent, m: Mouse): boolean {
+    const ms = this.measure;
+    if (ms && !ms.done) {
+      e.preventDefault();
+      e.stopPropagation();
+      const pt = this.pointAt(m.x, m.y, this.snapping(e));
+      if (pt) ms.b = pt;
+      this.endMeasure();
+      return true;
+    }
+    if (ms) {
+      this.measure = null;
+      this.refreshHint();
+      this.redraw();
+    }
+    const start = this.tool === "measure" || (this.tool === "cursor" && e.shiftKey && !this.spotAt(m.x, m.y) && !this.hit(m.x, m.y));
+    if (!start) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    const pt = this.pointAt(m.x, m.y, this.snapping(e));
+    if (!pt) return true;
+    if (this.tool !== "measure") this.setTool("measure");
+    this.measure = { a: pt, b: { ...pt }, done: false, pressed: { x0: m.x, y0: m.y } };
+    this.refreshHint();
+    this.redraw();
+    return true;
+  }
+
+  /** The end of the measurement is set: it stays on screen, and the tool goes back to the cursor. */
+  private endMeasure() {
+    const ms = this.measure;
+    if (!ms) return;
+    this.setTool("cursor"); // (which takes the measurement away)
+    this.measure = { ...ms, done: true, pressed: null };
+    this.refreshHint();
+    this.redraw();
+  }
+
   private onMove(e: MouseEvent) {
     const m = this.local(e);
     this.mouse = m;
+    if (this.measure && !this.measure.done) {
+      const pt = this.pointAt(m.x, m.y, this.snapping(e));
+      if (pt) this.measure.b = pt;
+      this.redraw();
+      return;
+    }
     if (this.drag) {
       this.dragTo(m, this.snapping(e), e.shiftKey);
       return;
@@ -776,6 +855,19 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private onUp(e: MouseEvent) {
     if (e.button !== 0) return;
+    const ms = this.measure;
+    if (ms && !ms.done && ms.pressed) {
+      const m = this.local(e);
+      const moved = Math.hypot(m.x - ms.pressed.x0, m.y - ms.pressed.y0) > 6;
+      ms.pressed = null;
+      if (moved) {
+        // pressed, dragged, released: that's both ends
+        const pt = this.pointAt(m.x, m.y, this.snapping(e));
+        if (pt) ms.b = pt;
+        this.endMeasure();
+      }
+      return; // a click: the end follows the mouse until the next click
+    }
     if (this.drag) {
       const dr = this.drag;
       this.drag = null;
@@ -1020,6 +1112,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const snap = this.snapping();
     if (this.drag && this.drag.part !== "body") this.dragTo(m, snap, this.shiftDown);
     else if (this.tool !== "cursor" && this.draft) this.moveDraft(m, snap, this.shiftDown);
+    else if (this.measure && !this.measure.done) {
+      const pt = this.pointAt(m.x, m.y, snap);
+      if (pt) this.measure.b = pt;
+      this.redraw();
+    }
   }
 
   /** Shift pressed or released: apply it to the point under the mouse right away. */
@@ -1032,9 +1129,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     else if (this.tool !== "cursor" && this.draft) this.moveDraft(m, this.snapping(), down);
   }
 
-  /** Esc: drop the drawing being placed, leave the tool, or clear the selection. */
+  /** Esc: take a measurement away, drop the drawing being placed, leave the tool, or clear the selection. */
   cancel() {
-    if (this.tool !== "cursor") {
+    if (this.measure) {
+      this.measure = null;
+      if (this.tool !== "cursor") this.setTool("cursor");
+      else {
+        this.refreshHint();
+        this.redraw();
+      }
+    } else if (this.tool !== "cursor") {
       this.setTool("cursor");
     } else if (this.selected) {
       this.selected = null;
@@ -1046,7 +1150,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private refreshHint() {
     const m = this.host.magnet();
     const snap = m.on ? "吸附：常開" : `按住 ${magnetKeyLabel(m.holdKey)} 吸附到 K 線開高低收`;
-    if (this.tool === "position") {
+    if (this.measure?.done) {
+      this.host.hint("點一下圖表或按 Esc 清除測量");
+    } else if (this.measure) {
+      this.host.hint(`測量：點終點；${snap}；Esc 取消`);
+    } else if (this.tool === "measure") {
+      this.host.hint(`測量：點起點，或按住拖到終點；也可以直接按住 Shift 點圖表；${snap}；Esc 取消`);
+    } else if (this.tool === "position") {
       if (!this.draft) this.host.hint(`倉位：點進場價；${snap}；Esc 取消`);
       else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單；按住 Shift 只改價格；${snap}；Esc 取消`);
       else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線；按住 Shift 只改價格；${snap}；Esc 取消`);

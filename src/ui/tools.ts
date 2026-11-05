@@ -1,6 +1,6 @@
-// The left bar: cursor, lines and channels (with a menu of kinds), Fib, rectangle, position (with its settings), magnet
-// (with its settings), Fib levels, and "delete all drawings" (press twice), for the chart in use. Also the
-// settings window a drawing opens on double-click or right-click.
+// The left bar: cursor, lines and channels (with a menu of kinds), Fib, rectangle, position (with its settings), the
+// ruler, magnet (with its settings), Fib levels, and "delete all drawings" (press twice), for the chart in use.
+// Also the settings window a drawing opens on double-click or right-click.
 
 import type { DrawingLayer, Tool } from "../drawings/layer.ts";
 import { readRaw, writeRaw } from "../core/storage.ts";
@@ -50,6 +50,7 @@ export class Tools {
     $("tool-fib").classList.toggle("active", tool === "fib");
     $("tool-rect").classList.toggle("active", tool === "rect");
     $("tool-position").classList.toggle("active", tool === "position");
+    $("tool-measure").classList.toggle("active", tool === "measure");
     const isLine = LINE_TOOLS.includes(tool);
     if (isLine && tool !== this.lastLine) {
       this.lastLine = tool as LineTool;
@@ -119,6 +120,7 @@ export class Tools {
     $("tool-rect").onclick = toggle("rect");
     $("tool-position").innerHTML = ICONS.position;
     $("tool-position").onclick = toggle("position");
+    $("tool-measure").onclick = toggle("measure");
     const positionMenu = () => togglePositionPanel($("tool-position-menu"), this.positionIo());
     $("tool-position-menu").onclick = positionMenu;
     onRight($("tool-position"), positionMenu);

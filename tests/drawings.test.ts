@@ -78,3 +78,16 @@ test("old localStorage data carried over to the files", async () => {
   assert.equal(m.get("instId"), '"ETH-USDT-SWAP"');
   assert.equal(m.get("drawings.BTC-USDT-SWAP"), '[{"id":"a"}]');
 });
+
+test("a measurement: change in price and %, bars and time, volume of the bars it spans", async () => {
+  const { measureLines } = await import("../src/drawings/paint.ts");
+  const times = [0, 3600, 7200, 10800, 14400];
+  const bars = times.map((time, i) => ({ time, open: 100, high: 101, low: 99, close: 100, volume: 1000 * (i + 1), confirmed: true }));
+  const o = { times, barSec: 3600, bars, fmtPrice: (p: number) => p.toFixed(2) };
+  // up 5 from 100, bar 1 to bar 3: 2 bars, 2 hours, volume of bars 1..3 = 2000 + 3000 + 4000
+  assert.deepEqual(measureLines({ t: 3600, p: 100 }, { t: 10800, p: 105 }, o), ["+5.00 (+5.00%)", "2 根，2時", "成交量 9.00K"]);
+  // backwards and down: the same span, the sign of the move
+  assert.deepEqual(measureLines({ t: 10800, p: 105 }, { t: 3600, p: 100 }, o), ["−5.00 (−4.76%)", "2 根，2時", "成交量 9.00K"]);
+  // past the newest bar: only the bars that are there count
+  assert.deepEqual(measureLines({ t: 14400, p: 100 }, { t: 21600, p: 100 }, o), ["+0.00 (+0.00%)", "2 根，2時", "成交量 5.00K"]);
+});
