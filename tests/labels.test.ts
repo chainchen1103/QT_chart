@@ -119,6 +119,31 @@ test("the info shows all the time, or only while the position is pointed at", ()
   assert.equal(DEFAULT_POSITION.infoHover, false);
 });
 
+test("a position closed on OKX: its result shows as the info box does", () => {
+  const closed: PositionDrawing = {
+    ...pos,
+    order: {
+      ordId: "1", clOrdId: "c", demo: true, side: "buy", ordType: "limit", px: 180, sz: 1, at: 6000, state: "filled", avgPx: 180, fillSz: 1,
+      posKey: "1:1", closed: { t: 20000, px: 183, pnl: 3 },
+    },
+  };
+  const keys = (infoHover: boolean, active: boolean) => {
+    const o = { ...paint("已成交 1 張 @ 180.0"), position: { ...DEFAULT_POSITION, infoHover } };
+    const geo = computeGeo([closed], pr, { fib, rLevels: [1, 2], fmtPrice: o.fmtPrice, trades, active: () => active });
+    return labelPlans(geo, o, 800, 400).map((x) => x.ask.key);
+  };
+  assert.ok(keys(false, false).includes("p:result")); // 一直顯示資訊框: there all the time
+  assert.ok(!keys(true, false).includes("p:result")); // only while pointed at or selected
+  assert.ok(keys(true, true).includes("p:result"));
+  // the black info box of a record: only when asked for, as before
+  assert.ok(!keys(false, false).includes("p:info"));
+  assert.ok(keys(true, true).includes("p:info"));
+  // a position still open keeps its result (and its order button) whatever the setting
+  const open = { ...paint("下單"), position: { ...DEFAULT_POSITION, infoHover: true } };
+  const geo = computeGeo([pos], pr, { fib, rLevels: [1, 2], fmtPrice: open.fmtPrice, trades, active: () => false });
+  assert.ok(labelPlans(geo, open, 800, 400).some((x) => x.ask.key === "p:result"));
+});
+
 test("a position past the right edge: the result row comes back on screen, clear of the info and the 高 tag", () => {
   const wide = { ...pos, b: { t: 90000, p: 178 } }; // to x 1500, past the 800 px pane
   const tag = ask("hi", 782, 200 - 8, 18, 16, PRIO.fixed); // the visible high at the entry's height

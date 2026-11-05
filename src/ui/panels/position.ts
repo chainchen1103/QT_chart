@@ -367,7 +367,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       labelled(
         checkbox(!cur.infoHover, "", (v) => set({ infoHover: !v })),
         "一直顯示資訊框",
-        "數量、保證金、資金、風險和盈虧比的黑色框，放在止損那一側框外的右邊。不勾時，滑鼠移到倉位上或選取它才顯示",
+        "數量、保證金、資金、風險和盈虧比的黑色框，放在止損那一側框外的右邊，OKX 已平倉倉位的結果也一樣。不勾時，滑鼠移到倉位上或選取它才顯示",
       ),
     );
     body.append(colors, shows);

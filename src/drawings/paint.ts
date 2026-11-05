@@ -533,8 +533,11 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
   };
   /** What it came to, and the order button after it, on the row at `y`, off the candles when it can be: right of
    *  the box (past its handle); else at the right end of the row, or just inside the take-profit or the stop
-   *  line, moving left along them as far as the box goes; under or over the row, or before the entry. */
+   *  line, moving left along them as far as the box goes; under or over the row, or before the entry. A position
+   *  closed on OKX is a record: its result shows as the info box does (一直顯示資訊框), all the time or while
+   *  it is pointed at or selected. */
   const resultRow = (text: string, bg: string, y: number, order: OrderTag | null) => {
+    if ((d.okx?.closed || d.order?.closed) && ps.infoHover && !g.active) return;
     const r = size([text]);
     const ow = order ? size([order.text]).w : 0;
     const w = r.w + (order ? 4 + ow : 0);
