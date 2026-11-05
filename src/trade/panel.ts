@@ -103,10 +103,23 @@ const SYNC_TEXT: Record<string, string> = {
 /** Following the OKX account on the charts: on / off, and how it is going. */
 export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, acct: TradeAccount): Render {
   let following = false;
+  /** The status line as last drawn. What the account sends only changes its text, in place: the window it shares
+   *  with the account section is never redrawn for it (that would wipe a password being typed there). */
+  let statusLine: HTMLElement | null = null;
+  const statusText = () => {
+    const st = sync.status;
+    const e = sync.state;
+    return !acct.keys.set
+      ? "還沒設定 API"
+      : `${SYNC_TEXT[st.state] ?? st.state}${st.state === "error" && st.detail ? `：${st.detail}` : ""}` +
+          (e ? `，${e.positions.length} 個持倉、${e.algos.length} 張止損止盈單` : "");
+  };
   return (body, rerender) => {
     if (!following) {
       following = true;
-      const stop = sync.subscribe(() => rerender());
+      const stop = sync.subscribe(() => {
+        if (statusLine?.isConnected) statusLine.textContent = statusText();
+      });
       body.addEventListener(POPOVER_CLOSED, () => {
         stop();
         following = false; // the next time the window opens, follow again
@@ -124,14 +137,11 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
         "OKX 的私人頻道（WebSocket）即時推送；連不上時每 5 秒用 REST 查一次",
       ),
     );
+    statusLine = null;
     if (on) {
-      const st = sync.status;
-      const e = sync.state;
-      const what = !acct.keys.set
-        ? "還沒設定 API"
-        : `${SYNC_TEXT[st.state] ?? st.state}${st.state === "error" && st.detail ? `：${st.detail}` : ""}` +
-          (e ? `，${e.positions.length} 個持倉、${e.algos.length} 張止損止盈單` : "");
-      body.append(row(lbl("狀態"), what));
+      const line = row(lbl("狀態"), statusText());
+      statusLine = line.lastElementChild as HTMLElement;
+      body.append(line);
     }
     body.append(
       el(
@@ -155,8 +165,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
       // follow the account's refreshes while the window is open, but never while something is being typed
       following = true;
       const stop = acct.subscribe(() => {
-        const typing = [...body.querySelectorAll<HTMLInputElement>("input.trade-key")].some((i) => i.value);
-        if (acct.keys.set && !typing) rerender();
+        if (acct.keys.set && !typingIn(body)) rerender();
       });
       body.addEventListener(POPOVER_CLOSED, () => {
         stop();
@@ -229,7 +238,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
   };
 }
 
-/** A box for a key, a secret or a password. */
+/** A box for a key, a secret or a password (found again by its placeholder when the window is redrawn). */
 function keyInput(placeholder: string, secret: boolean, autocomplete: AutoFill = "off"): HTMLInputElement {
   const i = el("input");
   i.type = secret ? "password" : "text";
@@ -237,7 +246,13 @@ function keyInput(placeholder: string, secret: boolean, autocomplete: AutoFill =
   i.autocomplete = autocomplete;
   i.spellcheck = false;
   i.className = "trade-key";
+  i.dataset.key = placeholder;
   return i;
+}
+
+/** A key or password box in this window has text or the focus: a redraw now would wipe it. */
+function typingIn(body: HTMLElement): boolean {
+  return [...body.querySelectorAll<HTMLInputElement>("input.trade-key")].some((i) => i.value !== "" || i === document.activeElement);
 }
 
 const MIN_PASSWORD = 8;

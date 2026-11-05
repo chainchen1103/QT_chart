@@ -65,8 +65,13 @@ export function openSettings(io: SettingsIo, at: SettingsSection = "appearance")
         sectionBody = box;
         const render = sectionRender(io, id);
         const rerender = () => {
+          // the box in use stays in use across a redraw (found again by its data-key), as in popovers
+          const act = document.activeElement;
+          const key = act instanceof HTMLElement && box.contains(act) ? act.dataset.key : undefined;
           box.replaceChildren();
           render(box, rerender);
+          const again = key ? box.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`) : null;
+          again?.focus();
         };
         rerender();
         main.scrollTop = 0;
