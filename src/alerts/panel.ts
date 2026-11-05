@@ -3,7 +3,7 @@
 
 import { isChannel, type Drawing } from "../settings/model.ts";
 import { shortName } from "../core/format.ts";
-import { checkbox, el, flagBad, labelled, lbl, textButton } from "../ui/dom.ts";
+import { checkbox, el, flagBad, isTextEntry, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type Repeat, type TradeStage } from "./model.ts";
 import { STAGE_TEXT, type AlertService } from "./service.ts";
@@ -90,9 +90,10 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
   togglePopover(anchor, "below", "提醒", (body, rerender) => {
     if (!listening) {
       listening = true;
+      // follow changes (an alert went off, one was added elsewhere), but not while a price or note is being typed
       const stop = ui.service.subscribe(() => {
-        const typing = document.activeElement && body.contains(document.activeElement) && document.activeElement !== document.body;
-        if (!typing) rerender();
+        const act = document.activeElement;
+        if (!(act && body.contains(act) && isTextEntry(act))) rerender();
       });
       body.addEventListener(POPOVER_CLOSED, stop, { once: true });
     }
@@ -138,11 +139,18 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
         rerender();
       };
       row.append(
-        checkbox(a.on, a.on ? "開著：按一下暫停" : "關著：按一下重新開啟", (v) => s.update(a.id, { on: v })),
+        checkbox(a.on, a.on ? "開著：按一下暫停" : "關著：按一下重新開啟", (v) => {
+          s.update(a.id, { on: v });
+          rerender();
+        }),
         sym,
         label,
         el("span", "alert-status", status(a, ui.fmtClock)),
-        textButton("×", "pop-del", () => s.remove(a.id), "刪除這個提醒"),
+        textButton("×", "pop-del", () => {
+          s.remove(a.id);
+          if (editing === a.id) editing = null;
+          rerender();
+        }, "刪除這個提醒"),
       );
       rows.append(row);
       if (editing === a.id) rows.append(editor(a, ui, () => {

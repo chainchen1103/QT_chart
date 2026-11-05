@@ -90,6 +90,13 @@ export function menuItem(text: string, onClick: () => void, hint = ""): HTMLButt
   return b;
 }
 
+/** A box text is typed into (a redraw would wipe what is being typed); not a button, check box or select. */
+export function isTextEntry(t: Element | null): boolean {
+  if (!t) return false;
+  if (t.tagName === "TEXTAREA" || (t as HTMLElement).isContentEditable) return true;
+  return t.tagName === "INPUT" && ["text", "number", "password", "search", "email", "tel", "url"].includes((t as HTMLInputElement).type);
+}
+
 /** True while typing in a text box (keyboard shortcuts stay out of the way). */
 export function isTyping(t: Element | null): boolean {
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || (t as HTMLElement).isContentEditable);
