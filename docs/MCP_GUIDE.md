@@ -1,6 +1,6 @@
 # QT Chart MCP Server
 
-QT Chart 內建的 [Model Context Protocol](https://modelcontextprotocol.io)（MCP）伺服器。讓 Claude、Cursor、VS Code 等 AI 應用程式讀取和操作 QT Chart：看 K 線和指標、畫線、設提醒、跑 Pine 腳本，經使用者允許後也能在 OKX 下單。
+QT Chart 內建的 [Model Context Protocol](https://modelcontextprotocol.io) 伺服器，簡稱 MCP。讓 Claude、Cursor、VS Code 等 AI 應用程式讀取和操作 QT Chart：看 K 線和指標、畫線、設提醒、跑 Pine 腳本，經使用者允許後也能在 OKX 下單。
 
 > **給 AI agent**：這份文件也由 `get_guide` 工具提供。連上後讀一次，接著叫 `get_app_state`，再開始工作。
 
@@ -34,9 +34,9 @@ QT Chart 內建的 [Model Context Protocol](https://modelcontextprotocol.io)（M
 
 ## 需求
 
-- QT Chart 正在執行（Windows 10 或 11）。
+- QT Chart 正在執行，系統是 Windows 10 或 11。
 - 支援 MCP 的 AI 應用程式，用 Streamable HTTP 或 stdio 連線。
-- 交易工具另需在 QT Chart 設好 OKX API（設定 → 交易帳戶）並解鎖。
+- 交易工具另需在 QT Chart 的「設定 → 交易帳戶」設好 OKX API 並解鎖。
 
 ## 快速開始
 
@@ -178,11 +178,11 @@ args = ["--mcp-stdio"]
 
 | 項目 | 內容 |
 |---|---|
-| 傳輸 | Streamable HTTP（`POST /mcp`，回 JSON），或 stdio 橋接（`--mcp-stdio`） |
+| 傳輸 | Streamable HTTP，`POST /mcp` 回 JSON，或 stdio 橋接 `--mcp-stdio` |
 | 驗證 | `Authorization: Bearer <權杖>`，錯了回 401 |
 | 工作階段 | `initialize` 的回應帶 `Mcp-Session-Id` 標頭，之後的請求帶上它 |
 | 協定版本 | `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05` |
-| 能力 | 只有 tools（28 個），清單不會變動 |
+| 能力 | 只有 28 個 tools，清單不會變動 |
 | 單次呼叫上限 | 120 秒。等使用者確認的工具最多等 45 秒就先回應 |
 | 設定檔 | `%APPDATA%\com.chainchen.qtchart\mcp.json`：連接埠和權杖，給 stdio 橋接讀 |
 
@@ -202,32 +202,32 @@ args = ["--mcp-stdio"]
 
 | 設定 | 模擬盤 | 實盤 |
 |---|---|---|
-| 每張都確認（`every order`） | 確認 | 確認 |
-| 只有實盤確認（`real-money orders only`） | 直接送 | 確認 |
-| 不確認（`none`） | 直接送 | 直接送 |
+| 每張都確認 `every order` | 確認 | 確認 |
+| 只有實盤確認 `real-money orders only` | 直接送 | 確認 |
+| 不確認 `none` | 直接送 | 直接送 |
 
 不管怎麼設，下面這些**一律要確認**：
 
 - 止損時的虧損超過倉位預設的風險，或槓桿高於預設。
-- 把持倉的止損移離進場價（虧損變大）。
+- 把持倉的止損移離進場價，也就是虧損會變大的修改。
 
-**鎖定畫線**：使用者按左側工具列的鎖頭後，畫線不能新增、修改、刪除。這時 `add_drawing`、`update_drawing`、`delete_drawings`、`undo_drawings`、`amend_order`、`move_stops`，以及會畫新倉位的 `place_order` 都會被拒絕。從現有倉位下單（`place_order` 給 `drawing_id`）和 `cancel_order` 照常可用。只有使用者能解鎖，`get_app_state` 的 `drawingsLocked` 顯示目前狀態。
+**鎖定畫線**：使用者按左側工具列的鎖頭後，畫線不能新增、修改、刪除。這時 `add_drawing`、`update_drawing`、`delete_drawings`、`undo_drawings`、`amend_order`、`move_stops`，以及會畫新倉位的 `place_order` 都會被拒絕。從現有倉位下單，也就是 `place_order` 給 `drawing_id`，和 `cancel_order` 照常可用。只有使用者能解鎖，`get_app_state` 的 `drawingsLocked` 顯示目前狀態。
 
 ## 慣例
 
 | 項目 | 規則 |
 |---|---|
 | 幣種 | OKX USDT 永續合約，例如 `BTC-USDT-SWAP`。`BTC`、`BTCUSDT`、`BTC-USDT`、`btc/usdt`、`BTCUSDT.P` 都會自動轉換。不給就用使用中圖表的幣種 |
-| 週期 | `1m`、`5m`、`15m`、`1H`、`4H`、`1D`、`1W`。也接受 `15min`、`1h`、`4 hours`、`D`、`week`、秒級的 `15s`，和自訂長度如 `10m`、`3H`、`2D`。月線不支援（`1M` 會被拒絕，免得和 1 分鐘混淆）。回傳的 `1Dutc`、`6Hutc` 是同一個週期，可以原樣傳回 |
+| 週期 | `1m`、`5m`、`15m`、`1H`、`4H`、`1D`、`1W`。也接受 `15min`、`1h`、`4 hours`、`D`、`week`、秒級的 `15s`，和自訂長度如 `10m`、`3H`、`2D`。月線不支援，`1M` 會被拒絕，免得和 1 分鐘混淆。回傳的 `1Dutc`、`6Hutc` 是同一個週期，可以原樣傳回 |
 | 時間 | UTC 秒，給毫秒也會換算。K 線的時間是那根的開始時間 |
 | 價格 | 一般數字。下單時對齊到幣種的最小跳動價位 |
 | 圖表編號 | `chart` 是目前分頁裡第幾個圖表，從 0 開始，最多 3。不給就是使用中的圖表 |
 | 畫線歸屬 | 畫線、倉位、提醒都屬於幣種，同一幣種的每個圖表、每個週期都看得到。工具用 `symbol` 指定，不是用圖表 |
-| 單位 | 金額是 USDT（介面寫 U），數量是幣，下單時才換成合約張數 |
+| 單位 | 金額是 USDT，介面寫 U。數量是幣，下單時才換成合約張數 |
 
 ## 工具
 
-格式：`參數`（型別，必填或選填）：說明。標 **唯讀** 的工具不會改任何東西。
+格式：`參數` · 型別 · 必填或選填：說明。標 **唯讀** 的工具不會改任何東西。
 
 ### 讀取
 
@@ -236,53 +236,70 @@ args = ["--mcp-stdio"]
 
 - **get_app_state**：QT Chart 的狀態。每次對話先叫它
   - 唯讀，沒有參數
-  - 回傳：`charts`（每個圖表的 `chart`、`symbol`、`timeframe`、`inUse`、`bars`、`lastPrice`、`replay`）、`tabs`、`layout`、`account`（`apiKey` 為 `none`、`demo` 或 `real`，`locked`、`equity`、`available`、`okxSync`）、`positionDefaults`、`connection`（`changeCharts`、`placeOrders`、`orderConfirmation`）、`drawingsLocked`、`showClosedPositions`、`alertsOn`、`pineScripts`
+  - 回傳：
+    - `charts`：每個圖表的 `chart`、`symbol`、`timeframe`、`inUse`、`bars`、`lastPrice`、`replay`
+    - `account`：`apiKey` 為 `none`、`demo` 或 `real`，以及 `locked`、`equity`、`available`、`okxSync`
+    - `connection`：`changeCharts`、`placeOrders`、`orderConfirmation`
+    - 其他：`tabs`、`layout`、`positionDefaults`、`drawingsLocked`、`showClosedPositions`、`alertsOn`、`pineScripts`
 
 - **list_symbols**：可看的幣種，24 小時成交額高的在前
   - 唯讀
-  - `query`（string，選填）：幣種名稱的一部分，例如 `ETH`
-  - `limit`（integer，選填）：幾個，1 到 500，預設 30
+  - `query` · string · 選填：幣種名稱的一部分，例如 `ETH`
+  - `limit` · integer · 選填：幾個，1 到 500，預設 30
   - 回傳每個幣種的最新價、24 小時漲跌與成交量、最小跳動價位、合約大小、最小張數、最高槓桿
 
 - **get_candles**：K 線，由舊到新
   - 唯讀
-  - `symbol`（string，選填）：幣種
-  - `timeframe`（string，選填）：週期，預設是使用中圖表的
-  - `count`（integer，選填）：幾根，1 到 1000，預設 200
-  - `before`（number，選填）：只取這個時間之前開始的，用來往回翻
-  - `chart`（integer，選填）：改讀這個圖表已載入的 K 線。重播中只有已播出的部分
+  - `symbol` · string · 選填：幣種
+  - `timeframe` · string · 選填：週期，預設是使用中圖表的
+  - `count` · integer · 選填：幾根，1 到 1000，預設 200
+  - `before` · number · 選填：只取這個時間之前開始的，用來往回翻
+  - `chart` · integer · 選填：改讀這個圖表已載入的 K 線。重播中只有已播出的部分
   - 回傳 `columns` 和 `rows`：`[時間, 開, 高, 低, 收, 量, 已收盤]`
 
-- **get_chart_image**：圖表截圖（PNG），K 線、指標、Pine、畫線和座標軸都在上面
+- **get_chart_image**：圖表的 PNG 截圖，K 線、指標、Pine、畫線和座標軸都在上面
   - 唯讀
-  - `chart`（integer，選填）：哪個圖表
+  - `chart` · integer · 選填：哪個圖表
   - 圖片很佔空間，需要看圖形時才用
 
 - **list_drawings**：幣種的全部畫線
   - 唯讀
-  - `symbol`（string，選填）：幣種
-  - `kind`（string，選填）：只列這一種，例如 `position`、`fib`
-  - 回傳每個畫線的 `id`、`kind`、`points`、`style`。Fib 附每條線的價格。倉位附 `sizing`（資金、數量、風險、名目、保證金、盈虧比）、`outcome`（用 K 線模擬的結果）、`order`（下到 OKX 的單）、`onOkx`（OKX 上的實際持倉），OKX 已平倉而且被「顯示歷史倉位」隱藏的會有 `hidden: true`
+  - `symbol` · string · 選填：幣種
+  - `kind` · string · 選填：只列這一種，例如 `position`、`fib`
+  - 回傳每個畫線的 `id`、`kind`、`points`、`style`。Fib 附每條線的價格。倉位另附：
+    - `sizing`：資金、數量、風險、名目、保證金、盈虧比
+    - `outcome`：用 K 線模擬的結果
+    - `order`：下到 OKX 的單
+    - `onOkx`：OKX 上的實際持倉
+    - `hidden: true`：OKX 已平倉，而且被「顯示歷史倉位」隱藏
 
 - **get_indicators**：圖表上的指標現值
   - 唯讀
-  - `chart`（integer，選填）：哪個圖表
-  - `trades`（integer，選填）：每個策略列幾筆交易，0 到 200，預設 10
-  - 回傳 `movingAverages`、`zones`（`fvg`、`order_block`、`support_resistance`，`endedAt` 為 null 表示還有效）、`pine`（每個腳本的 `plots`、`horizontalLines`、`tables`、`labels`、`error`，策略另有 `strategy` 績效）
+  - `chart` · integer · 選填：哪個圖表
+  - `trades` · integer · 選填：每個策略列幾筆交易，0 到 200，預設 10
+  - 回傳：
+    - `movingAverages`：每條均線的最新值
+    - `zones`：`fvg`、`order_block`、`support_resistance`，`endedAt` 為 null 表示還有效
+    - `pine`：每個腳本的 `plots`、`horizontalLines`、`tables`、`labels`、`error`，策略另有 `strategy` 績效
 
 - **list_alerts**：提醒
   - 唯讀
-  - `symbol`（string，選填）：只列這個幣種
-  - `log`（boolean，選填）：附上最近響過的紀錄
+  - `symbol` · string · 選填：只列這個幣種
+  - `log` · boolean · 選填：附上最近響過的紀錄
 
 - **get_account**：OKX 帳戶
   - 唯讀，沒有參數
-  - 回傳 `apiKey`、`locked`、`account`（權益、可用保證金）、`positions` 與 `stopOrders`（要開「與 OKX 同步」才有）、`chartOrders`（從圖上倉位下的單）、`aiOrderRequests`（AI 要求過的單和結果）
+  - 回傳：
+    - `apiKey`、`locked`
+    - `account`：權益、可用保證金
+    - `positions`、`stopOrders`：OKX 上的持倉和止損止盈單，要開「與 OKX 同步」才有
+    - `chartOrders`：從圖上倉位下的單
+    - `aiOrderRequests`：AI 要求過的單和結果
 
 - **list_pine_scripts**：使用者的 Pine 腳本
   - 唯讀
-  - `id`（string，選填）：只列這一個
-  - `source`（boolean，選填）：附上原始碼
+  - `id` · string · 選填：只列這一個
+  - `source` · boolean · 選填：附上原始碼
 
 - **get_settings**：全部設定
   - 唯讀，沒有參數
@@ -290,35 +307,41 @@ args = ["--mcp-stdio"]
 ### 修改圖表
 
 - **set_chart**：換圖表的幣種、週期，或重設視圖。等 K 線載入完才回
-  - `chart`（integer，選填）：哪個圖表
-  - `symbol`（string，選填）：幣種
-  - `timeframe`（string，選填）：週期
-  - `select`（boolean，選填）：設成使用中的圖表
-  - `reset_view`（boolean，選填）：回到最新的 K 線和預設縮放
+  - `chart` · integer · 選填：哪個圖表
+  - `symbol` · string · 選填：幣種
+  - `timeframe` · string · 選填：週期
+  - `select` · boolean · 選填：設成使用中的圖表
+  - `reset_view` · boolean · 選填：回到最新的 K 線和預設縮放
 
 - **set_layout**：分割目前分頁
-  - `layout`（string，必填）：`1`、`2h`、`2v`、`3h`、`3v`、`1+2`、`2+1`、`1+2v`、`2+1v`、`4`、`4h`、`4v`、`1+3`、`1+3v`
+  - `layout` · string · 必填：`1`、`2h`、`2v`、`3h`、`3v`、`1+2`、`2+1`、`1+2v`、`2+1v`、`4`、`4h`、`4v`、`1+3`、`1+3v`
 
 - **manage_tabs**：分頁
-  - `action`（string，必填）：`add`、`select`、`close`
-  - `tab`（integer，選填）：要切換或關閉的分頁
-  - `symbol`、`timeframe`（string，選填）：新分頁顯示什麼
+  - `action` · string · 必填：`add`、`select`、`close`
+  - `tab` · integer · 選填：要切換或關閉的分頁
+  - `symbol`、`timeframe` · string · 選填：新分頁顯示什麼
   - 最多 20 個分頁，最後一個不能關
 
 - **replay**：K 線重播
-  - `action`（string，必填）：`start`、`step`、`play`、`pause`、`stop`
-  - `time`（number，選填）：`start` 從哪根開始
-  - `bars`（integer，選填）：`step` 往後幾根，1 到 500，預設 1
-  - `speed`（integer，選填）：`play` 每秒幾根：1、2、3、5、10
-  - `chart`（integer，選填）：哪個圖表
+  - `action` · string · 必填：`start`、`step`、`play`、`pause`、`stop`
+  - `time` · number · 選填：`start` 從哪根開始
+  - `bars` · integer · 選填：`step` 往後幾根，1 到 500，預設 1
+  - `speed` · integer · 選填：`play` 每秒幾根：1、2、3、5、10
+  - `chart` · integer · 選填：哪個圖表
 
 - **add_drawing**：畫線、通道、Fib、矩形、倉位
-  - `kind`（string，必填）：見下表
-  - `symbol`（string，選填）：幣種
-  - `points`（array，選填）：`[{"time": UTC 秒, "price": 價格}]`，點數依種類
-  - `second_line_price`（number，選填）：通道第二條線在第一個點那個時間的價格
-  - `style`（object，選填）：樣式，見下方
-  - 倉位專用：`entry`、`stop_loss`、`take_profit`（number），`time`（進場那根，預設最新一根）、`end_time`（框的右邊，預設 20 根後）、`risk`、`risk_mode`（`pct` 或 `amount`）、`leverage`（1 到 125）、`capital`
+  - `kind` · string · 必填：見下表
+  - `symbol` · string · 選填：幣種
+  - `points` · array · 選填：`[{"time": UTC 秒, "price": 價格}]`，點數依種類
+  - `second_line_price` · number · 選填：通道第二條線在第一個點那個時間的價格
+  - `style` · object · 選填：樣式，見下方
+  - 倉位專用：
+    - `entry`、`stop_loss`、`take_profit` · number：進場、止損、止盈
+    - `time` · number：進場那根 K 線，預設最新一根
+    - `end_time` · number：框的右邊，預設 20 根後
+    - `risk` · number、`risk_mode` · `pct` 或 `amount`：風險，資金的百分比或固定金額
+    - `leverage` · integer：1 到 125
+    - `capital` · number：這個倉位自己的資金
 
   | 種類 | 點 | 說明 |
   |---|---|---|
@@ -340,35 +363,35 @@ args = ["--mcp-stdio"]
   | `position` | 不用 | 倉位，用 `entry`、`stop_loss`、`take_profit` |
 
   樣式都可以不給，不給就用使用者上次的樣式：
-  - 線：`color`（`#rrggbb`）、`width`（1 到 4）、`dash`（`solid`、`dash`、`dot`）
-  - 矩形：`color`（邊框）、`fill`、`transparency`（0 不透明到 100 全透明）、`extend`
-  - 通道：線的樣式加 `fill`、`transparency`、`middle`、`extend_left`、`extend_right`。迴歸趨勢另有 `std_dev`（0.1 到 10）、`pearson`
+  - 線：`color` 為 `#rrggbb`，`width` 為 1 到 4，`dash` 為 `solid`、`dash` 或 `dot`
+  - 矩形：`color` 是邊框，另有 `fill`、`transparency` 從 0 不透明到 100 全透明、`extend`
+  - 通道：線的樣式加 `fill`、`transparency`、`middle`、`extend_left`、`extend_right`。迴歸趨勢另有 `std_dev` 0.1 到 10，和 `pearson`
 
 - **update_drawing**：移動或改樣式。只改有給的欄位，一步可還原
-  - `id`（string，必填）：畫線編號
+  - `id` · string · 必填：畫線編號
   - 其他參數同 `add_drawing`
   - 已下單的倉位進場價不能改：未成交的掛單用 `amend_order`，持倉的止損止盈用 `move_stops`
 
 - **delete_drawings**：刪畫線，連同上面的提醒。一步可還原
-  - `ids`（array，選填）：要刪的編號
-  - `all`（boolean，選填）：刪這個幣種的全部畫線
-  - `symbol`（string，選填）：幣種
+  - `ids` · array · 選填：要刪的編號
+  - `all` · boolean · 選填：刪這個幣種的全部畫線
+  - `symbol` · string · 選填：幣種
   - OKX 上已送出的單不會被撤，要撤用 `cancel_order`
 
-- **undo_drawings**：還原或重做幣種畫線的上一步（使用者或 AI 做的都算）。OKX 上的單不會跟著還原
-  - `redo`（boolean，選填）：重做
-  - `symbol`（string，選填）：幣種
+- **undo_drawings**：還原或重做幣種畫線的上一步，使用者或 AI 做的都算。OKX 上的單不會跟著還原
+  - `redo` · boolean · 選填：重做
+  - `symbol` · string · 選填：幣種
 
 - **save_alert**：新增或修改提醒
-  - `price`（number，選填）：價格提醒的價位
-  - `drawing_id`（string，選填）：畫線提醒。一個畫線只有一個提醒，新的取代舊的
-  - `id`（string，選填）：修改這個提醒
-  - `condition`（string，選填）：`touch`、`up`、`down`、`enter`、`exit`、`time`、`trade`，見下表
-  - `repeat`（string，選填）：`once` 響一次就關，`every` 一直開著，最多每分鐘一次
-  - `note`（string，選填）：附註，最多 120 字
-  - `on`（boolean，選填）：開或關
-  - `timeframe`（string，選填）：斜線用哪個週期的 K 線時間取價
-  - `symbol`（string，選填）：幣種
+  - `price` · number · 選填：價格提醒的價位
+  - `drawing_id` · string · 選填：畫線提醒。一個畫線只有一個提醒，新的取代舊的
+  - `id` · string · 選填：修改這個提醒
+  - `condition` · string · 選填：`touch`、`up`、`down`、`enter`、`exit`、`time`、`trade`，見下表
+  - `repeat` · string · 選填：`once` 響一次就關，`every` 一直開著，最多每分鐘一次
+  - `note` · string · 選填：附註，最多 120 字
+  - `on` · boolean · 選填：開或關
+  - `timeframe` · string · 選填：斜線用哪個週期的 K 線時間取價
+  - `symbol` · string · 選填：幣種
 
   | 對象 | 條件 |
   |---|---|
@@ -379,24 +402,24 @@ args = ["--mcp-stdio"]
   | 倉位 | `trade`：進場時響，之後止盈或止損再響 |
 
 - **delete_alert**：刪提醒
-  - `id`（string，必填）
+  - `id` · string · 必填
 
-- **save_pine_script**：新增或修改 Pine 腳本（v4、v5、v6 的指標和策略）
-  - `source`（string，選填）：原始碼，最多 20 萬字元。編譯失敗會回第幾行、什麼錯，什麼都不存
-  - `id`（string，選填）：修改這個腳本
-  - `name`（string，選填）：清單裡的名稱
-  - `on`（boolean，選填）：在圖表上執行
-  - `inputs`（object，選填）：用 input 的標題或 id 指定，例如 `{"Length": 20}`，給 `null` 恢復預設
+- **save_pine_script**：新增或修改 Pine 腳本，支援 v4、v5、v6 的指標和策略
+  - `source` · string · 選填：原始碼，最多 20 萬字元。編譯失敗會回第幾行、什麼錯，什麼都不存
+  - `id` · string · 選填：修改這個腳本
+  - `name` · string · 選填：清單裡的名稱
+  - `on` · boolean · 選填：在圖表上執行
+  - `inputs` · object · 選填：用 input 的標題或 id 指定，例如 `{"Length": 20}`，給 `null` 恢復預設
   - 存好約一秒後，`get_indicators` 就讀得到輸出。`request.security` 只支援同一個商品、比圖表大的週期
 
 - **delete_pine_script**：刪 Pine 腳本
-  - `id`（string，必填）
+  - `id` · string · 必填
 
 - **update_settings**：改設定。只送要改的區塊和欄位，格式同 `get_settings`
   - 區塊：`appearance`、`labels`、`timeframes`、`bars`、`fib`、`magnet`、`position`、`indicatorSwitches`、`movingAverages`、`maOptions`、`fvg`、`orderBlocks`、`supportResistance`、`alertOptions`、`okxSync`
-  - 物件只改有給的欄位。清單（`movingAverages`、`fvg`、`orderBlocks`、`supportResistance`、`fib.levels`、`position.levels`、`timeframes.bar`）整份取代
+  - 物件只改有給的欄位。清單整份取代：`movingAverages`、`fvg`、`orderBlocks`、`supportResistance`、`fib.levels`、`position.levels`、`timeframes.bar`
   - 不合法的值會被改回去，列在回傳的 `notTaken`
-  - `position` 只能改外觀：`levels`、`profit`、`loss`、`transparency`、`showPrices`、`infoHover`、`showClosed`（顯示歷史倉位）。資金、風險、槓桿預設值決定哪些單要確認，只能由使用者改
+  - `position` 只能改外觀：`levels`、`profit`、`loss`、`transparency`、`showPrices`、`infoHover`、`showClosed`，最後一項就是顯示歷史倉位。資金、風險、槓桿預設值決定哪些單要確認，只能由使用者改
   - 鎖定畫線不在設定裡，AI 不能開關
 
 ### 交易
@@ -404,33 +427,33 @@ args = ["--mcp-stdio"]
 交易工具一次只處理一件。確認視窗開著時，其他交易要求會被拒絕，同一個要求再叫一次則會等同一個視窗。
 
 - **place_order**：從倉位下單到 OKX
-  - `drawing_id`（string，選填）：從現有倉位下單
-  - `entry`、`stop_loss`、`take_profit`（number，選填）：不給 `drawing_id` 時先畫一個新倉位再下單。市價單可以不給 `entry`
-  - `order_type`（string，選填）：`limit` 掛單、`post_only` 只做 Maker、`market` 市價
-  - `margin_mode`（string，選填）：`isolated` 逐倉、`cross` 全倉
-  - `attach_take_profit`（boolean，選填）：要不要一起送止盈
+  - `drawing_id` · string · 選填：從現有倉位下單
+  - `entry`、`stop_loss`、`take_profit` · number · 選填：不給 `drawing_id` 時先畫一個新倉位再下單。市價單可以不給 `entry`
+  - `order_type` · string · 選填：`limit` 掛單、`post_only` 只做 Maker、`market` 市價
+  - `margin_mode` · string · 選填：`isolated` 逐倉、`cross` 全倉
+  - `attach_take_profit` · boolean · 選填：要不要一起送止盈
   - 新倉位專用：`risk`、`risk_mode`、`leverage`、`end_time`
   - 沒給的選項照使用者上次在下單視窗的選擇。止損一定跟單送出，張數照 OKX 的最小單位往下取整
 
-- **cancel_order**：撤掉倉位還沒成交的單（`live`、`partially_filled`），不用確認
-  - `drawing_id`（string，必填）
-  - `symbol`（string，選填）
+- **cancel_order**：撤掉倉位還沒成交的單，狀態是 `live` 或 `partially_filled`，不用確認
+  - `drawing_id` · string · 必填
+  - `symbol` · string · 選填
   - 已成交的部分會留成持倉
 
-- **amend_order**：改還沒成交（一張都沒成交）的掛單
-  - `drawing_id`（string，必填）
-  - `entry`（number，選填）：新的掛單價
-  - `stop_loss`（number，選填）：新的止損
-  - `take_profit`（number，選填）：新的止盈，只有原本帶止盈的單能改
-  - `symbol`（string，選填）
+- **amend_order**：改一張都還沒成交的掛單
+  - `drawing_id` · string · 必填
+  - `entry` · number · 選填：新的掛單價
+  - `stop_loss` · number · 選填：新的止損
+  - `take_profit` · number · 選填：新的止盈，只有原本帶止盈的單能改
+  - `symbol` · string · 選填
   - 張數照倉位的風險重算，圖上的倉位跟著移動。方向、單別、槓桿不能改，要改就 `cancel_order` 再 `place_order`
   - 使用者也可以直接在圖上拖動掛單中的倉位，QT Chart 會先問要不要改 OKX
 
 - **move_stops**：改止損、止盈
-  - `drawing_id`（string，必填）
-  - `stop_loss`、`take_profit`（number，選填）：給一個或兩個
-  - `symbol`（string，選填）
-  - 持倉中：改 OKX 上的止損止盈單，需要開「與 OKX 同步」（`update_settings` 的 `okxSync`）。圖上的倉位在 OKX 回報後跟著動。止損可以移過進場價鎖住獲利
+  - `drawing_id` · string · 必填
+  - `stop_loss`、`take_profit` · number · 選填：給一個或兩個
+  - `symbol` · string · 選填
+  - 持倉中：改 OKX 上的止損止盈單，需要開「與 OKX 同步」，也就是 `update_settings` 的 `okxSync`。圖上的倉位在 OKX 回報後跟著動。止損可以移過進場價鎖住獲利
   - 掛單還沒成交：等同 `amend_order`，張數重算
   - 倉位不在 OKX 上：只移動圖上的價格
 
@@ -449,20 +472,20 @@ AI 下單時一定要遵守：
 
 | 結果 | 意思 | 接著做 |
 |---|---|---|
-| `placed: true`、`amended: true` 或 `moved: true` | 已送到 OKX，附編號、張數、止損時虧損（`lossAtStop`），可能有 `warnings` | 告訴使用者結果和警告 |
+| `placed: true`、`amended: true` 或 `moved: true` | 已送到 OKX，附編號、張數、止損時虧損 `lossAtStop`，可能有 `warnings` | 告訴使用者結果和警告 |
 | `placed: false` 或含「沒有確認」的錯誤 | 使用者沒有確認，什麼都沒送 | 不要再送，除非使用者又要求 |
 | `waiting: true` | 確認視窗還開著，使用者還沒決定 | **不要再送一次。** 請使用者到 QT Chart 處理，之後看 `get_account` 的 `aiOrderRequests` |
 | 錯誤 | 沒送出，附原因 | 照原因修正，或轉告使用者 |
 
 確認視窗五分鐘沒人回應會自動關掉，什麼都不送。為了下單而畫的倉位，沒送出時會自動拿掉。沒改成的掛單，圖上的倉位會回到原位。
 
-`get_account` 的 `aiOrderRequests` 列出 AI 要求過的交易，`what` 是 `order`、`amend` 或 `stops`，`status` 是 `waiting for the user`、`sending`、`done`、`declined`、`failed`。`chartOrders` 的 `state` 是 `live`、`partially_filled`、`filled`、`canceled`、`missing`（OKX 查不到）或 `unknown`。
+`get_account` 的 `aiOrderRequests` 列出 AI 要求過的交易，`what` 是 `order`、`amend` 或 `stops`，`status` 是 `waiting for the user`、`sending`、`done`、`declined`、`failed`。`chartOrders` 的 `state` 是 `live`、`partially_filled`、`filled`、`canceled`、`missing` 或 `unknown`，`missing` 表示 OKX 查不到。
 
 ## 回應與錯誤
 
 - 成功時，結果是 `content[0].text` 裡的 JSON。`get_chart_image` 另外回一張 `image/png`。
 - 失敗時 `isError: true`，文字說明原因和怎麼改。參數錯誤會點出是哪個參數。改好再叫，不要原封不動重試。
-- 協定層的錯誤（工具名稱不存在等）用 JSON-RPC 的 `error` 回。
+- 協定層的錯誤，例如工具名稱不存在，用 JSON-RPC 的 `error` 回。
 
 常見錯誤：
 
@@ -522,7 +545,7 @@ AI 下單時一定要遵守：
 {"name": "replay", "arguments": {"action": "stop"}}
 ```
 
-重播中用 `get_candles` 加 `chart` 讀已播出的 K 線（不加 `chart` 會向 OKX 取到最新的，等於偷看未來）。播到最新一根會自動結束。用完記得 `stop`，把圖表還給使用者。
+重播中用 `get_candles` 加 `chart` 讀已播出的 K 線。不加 `chart` 會向 OKX 取到最新的，等於偷看未來。播到最新一根會自動結束。用完記得 `stop`，把圖表還給使用者。
 
 ## 疑難排解
 
