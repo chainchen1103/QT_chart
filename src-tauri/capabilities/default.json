@@ -30,6 +30,12 @@
     "allow-trade-amend-stops",
     "allow-gpu-pref",
     "allow-set-gpu-pref",
-    "allow-open-tradingview"
+    "allow-open-tradingview",
+    "allow-mcp-status",
+    "allow-mcp-start",
+    "allow-mcp-stop",
+    "allow-mcp-new-token",
+    "allow-mcp-reply",
+    "allow-window-attention"
   ]
 }

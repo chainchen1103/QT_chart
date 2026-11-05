@@ -67,6 +67,10 @@ export class MarketFeed {
   get tf(): Tf {
     return tfOf(this.bar);
   }
+  /** The bars on hand are instId's and bar's (false while a switch is loading them, or after it failed). */
+  get current(): boolean {
+    return this.ready;
+  }
 
   fmtPrice = (v: number): string => fmtFixed(v, this.decimals);
   roundToTick(p: number): number {

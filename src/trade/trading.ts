@@ -82,7 +82,7 @@ export class Trading {
   click(t: OrderTarget, d: PositionDrawing, x: number, y: number) {
     const o = d.order;
     if (o && o.state !== "canceled" && o.state !== "mmp_canceled") {
-      openOrderDetails(x, y, this.spot(t, d));
+      openOrderDetails(x, y, this.spotFor(t, d));
       return;
     }
     if (!this.d.acct.usable()) {
@@ -90,7 +90,7 @@ export class Trading {
       this.openAccount();
       return;
     }
-    openOrderWindow(x, y, this.spot(t, d));
+    openOrderWindow(x, y, this.spotFor(t, d));
   }
 
   openAccount() {
@@ -126,7 +126,8 @@ export class Trading {
     }
   }
 
-  private spot(t: OrderTarget, d: PositionDrawing): OrderSpot {
+  /** What the order windows (and AI apps' orders) need of a position on a chart. */
+  spotFor(t: OrderTarget, d: PositionDrawing): OrderSpot {
     const inst = this.d.catalog.get(t.instId());
     const spec: ContractSpec | null = inst && inst.ctVal > 0 ? { ctVal: inst.ctVal, lotSz: inst.lotSz, minSz: inst.minSz, maxLever: inst.maxLever, tickSz: inst.tickSz } : null;
     return {

@@ -316,6 +316,65 @@ export class AccountSync {
     return true;
   }
 
+  /**
+   * An AI app (MCP) moves a position's stop-loss / take-profit on OKX to `change`. `ask`: shown to the user
+   * first, who says yes or no; null: sent at once. The drawing follows OKX at the next report.
+   */
+  async amendForAi(instId: string, d: PositionDrawing, change: { sl?: number; tp?: number }, fmt: (p: number) => string, ask: { from: string; note?: string } | null): Promise<{ ok: boolean; text: string }> {
+    const s = this.symbolState(instId);
+    if (!s || !isLive(d, s)) return { ok: false, text: "這個倉位不在 OKX 上，或沒有開「與 OKX 同步」" };
+    const e = stopEdits(d, s, change, fmt);
+    if (!e) return { ok: false, text: "OKX 上沒有要改的止損或止盈單，沒有的要先到 OKX 設定" };
+    const send = async (): Promise<string[]> => {
+      const errors: string[] = [];
+      for (const a of e.amends as AmendReq[]) {
+        try {
+          await tradeAmendStops(a);
+        } catch (err) {
+          errors.push(String(err));
+        }
+      }
+      return errors;
+    };
+    if (!ask) {
+      const errors = await send();
+      return errors.length ? { ok: false, text: `沒改成：${errors.join("，")}` } : { ok: true, text: e.lines.join("\n") };
+    }
+    return new Promise((resolve) => {
+      let done = false;
+      const x = window.innerWidth / 2 - 180;
+      const y = window.innerHeight / 3;
+      popoverAt(x, y, "改 OKX 上的止損止盈", (body) => {
+        body.append(el("div", "trade-ai", `${ask.from} 要求改這筆持倉的止損止盈：確認後才會送出`));
+        if (ask.note) body.append(el("div", "trade-warn", ask.note));
+        body.append(el("div", `trade-env ${s.demo ? "demo" : "live"}`, s.demo ? "模擬盤" : "實盤：會改真的委託"));
+        for (const line of e.lines) body.append(el("div", "pop-note", line));
+        const msg = el("div", "pop-msg");
+        const go = textButton("改 OKX", "text-btn " + (s.demo ? "primary" : "danger-solid"), async () => {
+          go.disabled = true;
+          go.textContent = "送出中…";
+          const errors = await send();
+          if (errors.length) {
+            msg.textContent = `沒改成：${errors.join("，")}`;
+            go.textContent = "改 OKX";
+            go.disabled = false;
+            return;
+          }
+          done = true;
+          resolve({ ok: true, text: e.lines.join("\n") });
+          closePopover();
+          this.d.note("OKX 上的止損、止盈改好了");
+        });
+        const foot = el("div", "pop-foot");
+        foot.append(textButton("不改", "text-btn", () => closePopover()), el("span", "spacer"), go);
+        body.append(msg, foot);
+        body.addEventListener(POPOVER_CLOSED, () => {
+          if (!done) resolve({ ok: false, text: "使用者沒有確認，OKX 沒有改" });
+        }, { once: true });
+      });
+    });
+  }
+
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

@@ -18,6 +18,7 @@ import {
   planOrder,
   TD_MODE_TEXT,
   type ContractSpec,
+  type OrderPlan,
   type OrderPrefs,
   type OrdType,
   type TdMode,
@@ -445,35 +446,107 @@ function passwordForm(body: HTMLElement, acct: TradeAccount, rerender: () => voi
 }
 
 // ----------------------------------------------------------------------------- the order window
-export function openOrderWindow(x: number, y: number, s: OrderSpot) {
+/** An order an AI app asked for (MCP): who asks, the order type it chose (the user's saved choices stay as
+ *  they are), why it is asked when the settings wouldn't ask, and how it ended. */
+export type OrderAsk = { from: string; prefs: OrderPrefs; note?: string; done(r: OrderDone): void };
+export type OrderDone =
+  | { placed: true; ordId: string; side: "buy" | "sell"; ordType: OrdType; px: string | null; sz: string; coins: number; risk: number; demo: boolean }
+  | { placed: false; reason: string };
+
+/** The order a position makes with these choices, with what blocks it (problems) and what to know (warnings). */
+export function orderPlanFor(s: OrderSpot, prefs: OrderPrefs): OrderPlan | string {
+  const { acct, drawing: d, trade: t } = s;
+  if (!s.spec) return "讀不到這個幣種的合約資料，請稍後再試";
+  if (!t) return "這個倉位還算不出數量（K 線還沒載入）";
+  const plan = planOrder({
+    instId: s.instId,
+    entry: d.a.p,
+    stop: d.b.p,
+    target: d.target,
+    qty: t.plan.qty,
+    leverage: d.leverage,
+    last: s.last,
+    avail: acct.account?.avail ?? null,
+    spec: s.spec,
+    prefs,
+  });
+  if (acct.account?.acctLv === "1") plan.problems.push("這個 OKX 帳戶是現貨模式，不能開永續合約");
+  return plan;
+}
+
+/** Send a planned order and keep it on its position; throws OKX's answer. `move`: an add moves the earlier
+ *  stops once it fills. */
+export async function submitOrder(s: OrderSpot, plan: OrderPlan, prefs: OrderPrefs, move: boolean): Promise<OrderDone & { placed: true }> {
+  const { acct, drawing: d } = s;
+  const demo = acct.keys.demo;
+  const clOrdId = newClOrdId();
+  const algoClOrdId = `qts${clOrdId.slice(3)}`; // its stop-loss / take-profit, to find them again
+  const r = await acct.place({
+    instId: s.instId,
+    side: plan.side,
+    ordType: prefs.ordType,
+    px: plan.px,
+    sz: plan.sz,
+    tdMode: prefs.tdMode,
+    lever: d.leverage,
+    tp: plan.tp,
+    sl: plan.sl,
+    clOrdId,
+    algoClOrdId,
+  });
+  const isAdd = !!s.trade?.scale && s.trade.scale.step > 1;
+  s.record({
+    ordId: r.ordId,
+    clOrdId,
+    demo,
+    side: plan.side,
+    ordType: prefs.ordType,
+    px: plan.px == null ? null : Number(plan.px),
+    sz: plan.contracts,
+    at: Date.now() / 1000,
+    state: "live",
+    avgPx: null,
+    fillSz: 0,
+    sl: Number(plan.sl),
+    tp: plan.tp == null ? null : Number(plan.tp),
+    algoClOrdId,
+    ...(isAdd && move ? { moveOnFill: true } : {}),
+  });
+  s.note(`已送出：${s.base} ${plan.side === "buy" ? "多單" : "空單"} ${ORD_TYPE_TEXT[prefs.ordType]} ${plan.sz} 張（訂單 ${r.ordId}）`);
+  return { placed: true, ordId: r.ordId, side: plan.side, ordType: prefs.ordType, px: plan.px, sz: plan.sz, coins: plan.coins, risk: plan.risk, demo };
+}
+
+/** The order window of a position; `ask`: an AI app asked for this order, nothing is sent before the user's OK. */
+export function openOrderWindow(x: number, y: number, s: OrderSpot, ask?: OrderAsk) {
   let move = true; // an add: move the earlier stops once it fills (kept across redraws)
+  let asked = ask?.prefs; // an AI app's choices, changed here without touching the saved ones
+  let finished = false;
+  const finish = (r: OrderDone) => {
+    if (finished) return;
+    finished = true;
+    ask?.done(r);
+  };
   popoverAt(x, y, `下單：${shortName(s.instId)}`, (body, rerender) => {
     const { acct, drawing: d, trade: t } = s;
-    const prefs = s.prefs.get();
+    const prefs = asked ?? s.prefs.get();
     const demo = acct.keys.demo;
     body.classList.add("order-pop");
+    if (ask) {
+      body.addEventListener(POPOVER_CLOSED, () => finish({ placed: false, reason: "使用者沒有確認，沒有下單" }), { once: true });
+      body.append(el("div", "trade-ai", `${ask.from} 要求下這張單：確認後才會送出，關掉視窗就不下單`));
+      if (ask.note) body.append(el("div", "trade-warn", ask.note));
+    }
     body.append(el("div", `trade-env ${demo ? "demo" : "live"}`, demo ? "模擬盤（OKX 模擬交易）" : "實盤：會用真的錢下單"));
-    if (!t || !s.spec) {
-      body.append(el("div", "pop-msg", !s.spec ? "讀不到這個幣種的合約資料，請稍後再試" : "這個倉位還算不出數量（K 線還沒載入）"));
+    const plan = orderPlanFor(s, prefs);
+    if (typeof plan === "string" || !t) {
+      body.append(el("div", "pop-msg", typeof plan === "string" ? plan : "這個倉位還算不出數量（K 線還沒載入）"));
       return;
     }
-    const plan = planOrder({
-      instId: s.instId,
-      entry: d.a.p,
-      stop: d.b.p,
-      target: d.target,
-      qty: t.plan.qty,
-      leverage: d.leverage,
-      last: s.last,
-      avail: acct.account?.avail ?? null,
-      spec: s.spec,
-      prefs,
-    });
-    if (acct.account?.acctLv === "1") plan.problems.push("這個 OKX 帳戶是現貨模式，不能開永續合約");
     const long = plan.side === "buy";
     const fp = s.fmtPrice;
     const setPrefs = (p: Partial<OrderPrefs>) => {
-      s.prefs.set({ ...s.prefs.get(), ...p });
+      if (asked) asked = { ...asked, ...p };
+      else s.prefs.set({ ...s.prefs.get(), ...p });
       rerender();
     };
 
@@ -518,41 +591,10 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
       go.disabled = true;
       go.textContent = "送出中…";
       msg.textContent = "";
-      const clOrdId = newClOrdId();
-      const algoClOrdId = `qts${clOrdId.slice(3)}`; // its stop-loss / take-profit, to find them again
       try {
-        const r = await acct.place({
-          instId: s.instId,
-          side: plan.side,
-          ordType: prefs.ordType,
-          px: plan.px,
-          sz: plan.sz,
-          tdMode: prefs.tdMode,
-          lever: d.leverage,
-          tp: plan.tp,
-          sl: plan.sl,
-          clOrdId,
-          algoClOrdId,
-        });
-        s.record({
-          ordId: r.ordId,
-          clOrdId,
-          demo,
-          side: plan.side,
-          ordType: prefs.ordType,
-          px: plan.px == null ? null : Number(plan.px),
-          sz: plan.contracts,
-          at: Date.now() / 1000,
-          state: "live",
-          avgPx: null,
-          fillSz: 0,
-          sl: Number(plan.sl),
-          tp: plan.tp == null ? null : Number(plan.tp),
-          algoClOrdId,
-          ...(isAdd && move ? { moveOnFill: true } : {}),
-        });
+        const r = await submitOrder(s, plan, prefs, move);
+        finish(r);
         closePopover();
-        s.note(`已送出：${s.base} ${long ? "多單" : "空單"} ${ORD_TYPE_TEXT[prefs.ordType]} ${plan.sz} 張（訂單 ${r.ordId}）`);
       } catch (e) {
         msg.textContent = String(e);
         go.disabled = false;
@@ -561,7 +603,7 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot) {
     });
     go.disabled = plan.problems.length > 0;
     const foot = el("div", "pop-foot");
-    foot.append(textButton("取消", "text-btn", () => closePopover()), el("span", "spacer"), go);
+    foot.append(textButton(ask ? "不要下單" : "取消", "text-btn", () => closePopover()), el("span", "spacer"), go);
     body.append(msg, foot);
   });
 }

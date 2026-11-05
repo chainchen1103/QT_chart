@@ -13,7 +13,7 @@ import { MAX_BARS } from "../../chart/feed.ts";
 import chartsLicense from "../../assets/licenses/lightweight-charts-LICENSE.txt?raw";
 import fontLicense from "../../assets/licenses/Geist-OFL.txt?raw";
 
-export type SettingsSection = "appearance" | "labels" | "bars" | "alerts" | "position" | "account" | "performance" | "about";
+export type SettingsSection = "appearance" | "labels" | "bars" | "alerts" | "position" | "account" | "ai" | "performance" | "about";
 
 export type SettingsIo = {
   appearance: Render;
@@ -23,6 +23,7 @@ export type SettingsIo = {
   alerts: Render;
   position: Render;
   account: Render;
+  ai: Render;
   performance: Render;
   /** Open tradingview.com (the chart library's credit). */
   openTradingView(): void;
@@ -35,6 +36,7 @@ const SECTIONS: { id: SettingsSection; name: string; note: string }[] = [
   { id: "alerts", name: "提醒", note: "所有價格提醒共用的聲音和通知" },
   { id: "position", name: "倉位", note: "新倉位的預設資金和風險，和所有倉位共用的 R 線、顏色" },
   { id: "account", name: "交易帳戶", note: "下單用的 OKX API" },
+  { id: "ai", name: "AI 連線", note: "讓這台電腦上的 AI 應用程式透過 MCP 讀取和操作 QT Chart" },
   { id: "performance", name: "效能", note: "繪圖方式" },
   { id: "about", name: "關於", note: "QT Chart 用到的套件和它們的授權" },
 ];
@@ -114,6 +116,8 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
       return io.position;
     case "account":
       return io.account;
+    case "ai":
+      return io.ai;
     case "performance":
       return io.performance;
     case "about":

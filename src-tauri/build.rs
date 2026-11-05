@@ -23,6 +23,12 @@ const COMMANDS: &[&str] = &[
     "gpu_pref",
     "set_gpu_pref",
     "open_tradingview",
+    "mcp_status",
+    "mcp_start",
+    "mcp_stop",
+    "mcp_new_token",
+    "mcp_reply",
+    "window_attention",
 ];
 
 fn main() {

@@ -338,8 +338,9 @@ export class ChartPane {
     void this.feed.switchTo(this.feed.instId, this.feed.bar);
   }
 
-  switchTo(instId: string, bar: string) {
-    void this.feed.switchTo(instId, bar);
+  /** Show another symbol or timeframe; done once its bars are in (or another switch came first). */
+  switchTo(instId: string, bar: string): Promise<void> {
+    return this.feed.switchTo(instId, bar);
   }
 
   /** What to save for this chart. */
@@ -442,6 +443,17 @@ export class ChartPane {
   private applyAppearance() {
     this.view.applyAppearance();
     this.scaleLabels.refresh();
+  }
+
+  /** What the indicators show now (AI apps). */
+  indicators() {
+    return this.overlays.snapshot();
+  }
+  /** The chart as a PNG (base64, no data: prefix): prices, volume and every pane, with the axes and everything
+   *  drawn on them; bars that came while the window was hidden are drawn first. */
+  screenshot(): string {
+    if (this.stale) this.redrawAll();
+    return this.view.chart.takeScreenshot(true).toDataURL("image/png").replace(/^data:image\/png;base64,/, "");
   }
 
   /** Back to the view the chart opens with: the newest bars at the default zoom, every price scale fitting its

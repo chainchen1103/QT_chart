@@ -22,7 +22,7 @@ export type ReplayHost = {
 };
 
 /** Bars per second while playing. */
-const SPEEDS = [1, 2, 3, 5, 10];
+export const SPEEDS = [1, 2, 3, 5, 10];
 
 const svg = (body: string) =>
   `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -136,12 +136,28 @@ export class Replay {
   }
 
   private async start(time: number) {
+    if (!(await this.startAt(time))) this.h.note("那一根之後沒有 K 線可以重播，選早一點的 K 線");
+  }
+
+  /** Replay from the bar at `time` (UTC seconds), as a click there would (AI apps); false when there is
+   *  nothing after it. */
+  async startAt(time: number): Promise<boolean> {
+    this.pause();
+    this.cancelPick();
     const ok = await this.h.feed.startReplay(time);
-    if (!ok) {
-      this.h.note("那一根之後沒有 K 線可以重播，選早一點的 K 線");
-      return;
+    if (ok) this.show();
+    return ok;
+  }
+
+  /** Up to `n` bars further (stopped first when playing); how many were shown. At the present the replay ends. */
+  stepBy(n: number): number {
+    this.pause();
+    let k = 0;
+    while (k < n && this.h.feed.replaying) {
+      this.next();
+      k++;
     }
-    this.show();
+    return k;
   }
 
   /** The replay began (here, or carried over to another timeframe): the control bar. */
@@ -179,13 +195,18 @@ export class Replay {
     this.paintTime();
   }
 
-  private play() {
-    if (this.timer) return;
+  /** Play at `speed` bars a second (one of SPEEDS; else the one picked last). */
+  play(speed?: number) {
+    if (speed && SPEEDS.includes(speed) && speed !== this.speed) {
+      this.speed = speed;
+      this.pause();
+    }
+    if (this.timer || !this.h.feed.replaying) return;
     this.timer = window.setInterval(() => this.next(), 1000 / this.speed);
     this.paint();
     this.h.changed();
   }
-  private pause() {
+  pause() {
     if (!this.timer) return;
     clearInterval(this.timer);
     this.timer = 0;

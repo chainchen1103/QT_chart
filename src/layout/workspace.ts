@@ -173,6 +173,14 @@ export class Workspace {
     this.d.inUseChanged(this.inUse());
   }
 
+  /** Put the chart at `i` (on the shown tab) in use, as a press on it would; false when there is none. */
+  useChart(i: number): boolean {
+    const p = this.panes[i];
+    if (!p) return false;
+    this.use(p);
+    return true;
+  }
+
   /** Show a symbol on the chart in use (an alert's "前往"). */
   openSymbol(instId: string) {
     const p = this.inUse();

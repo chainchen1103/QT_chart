@@ -123,6 +123,21 @@ export const onSync = (cb: (e: SyncEvent) => void): Promise<UnlistenFn> => liste
 export const onSyncStatus = (cb: (s: SyncStatus) => void): Promise<UnlistenFn> =>
   listen<SyncStatus>("okx_sync_status", (e) => cb(e.payload));
 
+// ----------------------------------------------------------------------------- the AI connection (src-tauri/src/mcp.rs)
+/** The MCP server: running or not, where, its token, why it couldn't start, where `--mcp-stdio` reads the port
+ *  and token, and this program (for apps that start it with --mcp-stdio). */
+export type McpStatus = { running: boolean; port: number; token: string; error: string; config: string; exe: string };
+/** A call from an AI app: answered with mcpReply(id, ...). `client`: the app's name as it introduced itself. */
+export type McpCall = { id: number; method: string; params: unknown; client: string };
+export const mcpStatus = () => invoke<McpStatus>("mcp_status");
+export const mcpStart = (port: number) => invoke<McpStatus>("mcp_start", { port });
+export const mcpStop = () => invoke<McpStatus>("mcp_stop");
+export const mcpNewToken = () => invoke<McpStatus>("mcp_new_token");
+export const mcpReply = (id: number, result: unknown, error: string | null) => invoke<void>("mcp_reply", { id, result: result ?? null, error });
+export const onMcpCall = (cb: (c: McpCall) => void): Promise<UnlistenFn> => listen<McpCall>("mcp_call", (e) => cb(e.payload));
+/** Bring the window to the front (an order from an AI app waiting for the user's OK). */
+export const windowAttention = () => invoke<void>("window_attention");
+
 /** Whether the web view may use the graphics card; a change takes effect at the next start. */
 export const gpuPref = () => invoke<boolean>("gpu_pref");
 export const setGpuPref = (on: boolean) => invoke<void>("set_gpu_pref", { on });

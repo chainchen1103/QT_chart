@@ -11,11 +11,12 @@
 //   pine/      Pine Script: parser, interpreter, built-ins and the strategy backtester (indicators/pine/ puts
 //              the results on the charts)
 //   trade/     orders on OKX with the user's own API key: the account, the order windows, order sizing
+//   mcp/       the AI connection: the tools AI apps use through MCP (the server is src-tauri/src/mcp.rs)
 //   settings/  what is saved and its checks (model), and the saved values themselves (store)
 //   ui/        the toolbars, menus, status bar and settings windows
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
 
-import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, type CandleEvent } from "./core/api.ts";
+import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, windowAttention, type CandleEvent } from "./core/api.ts";
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
 import { keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
@@ -48,6 +49,9 @@ import { renderTimeframes } from "./ui/panels/timeframes.ts";
 import { StatusBar } from "./ui/statusbar.ts";
 import { Toolbar } from "./ui/toolbar.ts";
 import { Tools } from "./ui/tools.ts";
+import { McpHost } from "./mcp/host.ts";
+import type { McpApp } from "./mcp/tools.ts";
+import { renderMcp } from "./ui/panels/mcp.ts";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -135,6 +139,36 @@ const sync: AccountSync = new AccountSync({
   },
 });
 
+// ----------------------------------------------------------------------------- AI apps (MCP)
+/** An AI app changed a symbol's drawings: saved, one step to undo (還原 takes it back), shown at once. */
+function aiEditDrawings(instId: string, edit: (list: Drawing[]) => boolean) {
+  const list = loadDrawings(instId);
+  drawingHistory.start(instId, list);
+  if (!edit(list)) return;
+  saveDrawings(instId, list);
+  drawingHistory.record(instId, list);
+  alerts.drawingsChanged(instId, list);
+  for (const p of workspace.charts()) if (p.feed.instId === instId) p.reloadDrawings();
+}
+const mcpApp: McpApp = {
+  settings,
+  catalog,
+  get workspace() {
+    return workspace;
+  },
+  alerts,
+  account,
+  trading,
+  sync,
+  history: drawingHistory,
+  mcp: () => settings.mcp.get(),
+  editDrawings: aiEditDrawings,
+  quietDrawings: editDrawings,
+  note: (text) => status.note(text),
+  attention: () => void windowAttention().catch(() => undefined),
+};
+const mcpHost = new McpHost(mcpApp, settings.mcp);
+
 // ----------------------------------------------------------------------------- toolbars and windows
 const tools: Tools = new Tools({
   drawings: () => workspace.inUse().drawings,
@@ -185,6 +219,7 @@ const settingsIo: SettingsIo = {
   alerts: renderAlertOptions(alerts),
   position: renderPosition({ get: () => settings.position.get(), set: (v) => settings.position.set(v), apiEquity: () => account.equity() }),
   account: accountSection,
+  ai: renderMcp({ setting: settings.mcp, host: mcpHost }),
   performance: performanceSection({ gpu: gpuPref, setGpu: setGpuPref }, false),
   openTradingView: () => void openTradingView().catch((err) => status.error(String(err))),
 };
@@ -306,6 +341,7 @@ async function start() {
   await onStatus((s) => status.setStream(s));
   await onCandle(route);
   alerts.start();
+  void mcpHost.start().catch((e) => status.error(`AI 連線：${e}`));
   void account.start().then(() => {
     // the API is saved with an unlock password: ask for it right away (Esc: later, from the account button)
     if (account.keys.locked) trading.openAccount();

@@ -16,7 +16,7 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = "0.12"
-tokio = { version = "1", features = ["macros", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "time", "sync", "net"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tauri-plugin-notification = "2"
@@ -28,6 +28,10 @@ base64 = "0.22"
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
 chacha20poly1305 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
+# the local MCP server for AI apps (mcp.rs): HTTP on 127.0.0.1 (hyper is already in for reqwest)
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 
 # Windows only: ask WebView2 to use less memory while the window is minimized (window.rs)
 [target.'cfg(windows)'.dependencies]

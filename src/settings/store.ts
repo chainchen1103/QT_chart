@@ -3,6 +3,7 @@
 
 import { setting } from "../core/setting.ts";
 import { cleanOrderPrefs } from "../trade/model.ts";
+import { cleanMcp } from "../mcp/model.ts";
 import { readJson, readRaw, writeJson, writeRaw } from "../core/storage.ts";
 import {
   clone,
@@ -58,6 +59,8 @@ export function loadSettings() {
     bars: setting("bars", cleanBars),
     /** Following the OKX account (positions and their stops) on the charts. */
     okxSync: setting("okxsync", cleanSync),
+    /** The AI connection (MCP): on or off, its port, what AI apps may do, when orders wait for the user. */
+    mcp: setting("mcp", cleanMcp),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;

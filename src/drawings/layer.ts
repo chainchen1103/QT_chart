@@ -263,6 +263,12 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   tradeOf(id: string): PositionResult | undefined {
     return this.trades.get(id);
   }
+  /** The same from the bars and settings as they are now, drawn or not (an AI app's order: the window may be
+   *  hidden, when nothing is drawn). */
+  tradeNow(id: string): PositionResult | undefined {
+    this.trades = this.computeTrades();
+    return this.trades.get(id);
+  }
 
   private computeTrades(): Map<string, PositionResult> {
     const ps = this.host.position();

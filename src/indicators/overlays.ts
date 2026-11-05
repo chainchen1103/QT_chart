@@ -19,6 +19,9 @@ export type OverlaySettings = {
 };
 
 export type MaLegend = { label: string; color: string; state: IndState; value: number | null };
+/** A zone or level as computed (for AI apps): kind, way, its own timeframe ("" = the chart's), bars, prices. */
+export type ZoneData = { kind: "fvg" | "ob" | "sr"; dir: 1 | -1; tf: string; from: number; to: number | null; top: number; bottom: number };
+
 /** One FVG / OB / support-resistance set: how many are running each way ("多 3 空 2", "撐 3 阻 2"). */
 export type ZoneLegend = {
   label: string; state: IndState; up: number; down: number; upColor: string; downColor: string; upText: string; downText: string;
@@ -52,6 +55,7 @@ export class Overlays {
   private times: number[] = [];
   private lines: MaLine[] = [];
   private zoneLegend: ZoneLegend[] = [];
+  private zoneData: ZoneData[] = [];
   private readonly zoneLayer: ZoneLayer;
   private redrawTimer = 0;
   private queued = false;
@@ -109,6 +113,13 @@ export class Overlays {
   }
   zonesLegend(): ZoneLegend[] {
     return this.zoneLegend;
+  }
+  /** What the indicators show now: zones and levels, and each moving average's newest value. */
+  snapshot(): { zones: ZoneData[]; mas: { name: string; value: number | null; state: IndState }[] } {
+    return {
+      zones: this.zoneData,
+      mas: this.lines.map((l) => ({ name: maName(l.conf), value: l.state === "ok" ? l.values[l.values.length - 1] ?? null : null, state: l.state })),
+    };
   }
 
   // ------------------------------------------------------------------- refresh
@@ -230,6 +241,7 @@ export class Overlays {
     const chartSec = tfSec(this.bar);
     const draw: DrawZone[] = [];
     const legend: ZoneLegend[] = [];
+    const found: ZoneData[] = [];
     const run = (kind: "FVG" | "OB" | "支撐阻力", c: FvgConf | ObConf | SrConf, find: (bars: Candle[]) => Zone[]) => {
       const src = c.tf || this.bar;
       const srcSec = tfSec(src);
@@ -251,6 +263,7 @@ export class Overlays {
         return;
       }
       for (const z of pickZones(find(bars), c.maxCount, c.showEnded)) {
+        found.push({ kind: kind === "FVG" ? "fvg" : kind === "OB" ? "ob" : "sr", dir: z.dir, tf: c.tf, from: z.from, to: z.to, top: z.top, bottom: z.bottom });
         const color = z.dir === 1 ? c.up : c.down;
         if (levels) {
           const name = (z.dir === 1 ? "支撐" : "阻力") + tfPart;
@@ -268,6 +281,7 @@ export class Overlays {
     if (s.groups.ob) for (const c of s.obs) if (c.on) run("OB", c, (b) => findOrderBlocks(b, { swing: c.swing, lookback: c.lookback }));
     if (s.groups.sr) for (const c of s.srs) if (c.on) run("支撐阻力", c, (b) => findLevels(b, { swing: c.swing }));
     this.zoneLegend = legend;
+    this.zoneData = found;
     this.zoneLayer.set(draw);
   }
 }

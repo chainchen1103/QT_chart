@@ -3,6 +3,7 @@
 //! (build.rs declares them; anything else is refused).
 
 mod bars;
+mod mcp;
 mod okx;
 mod prefs;
 mod store;
@@ -246,6 +247,11 @@ fn open_tradingview() -> Result<(), String> {
     cmd.spawn().map(|_| ()).map_err(|e| format!("開不了瀏覽器：{e}"))
 }
 
+/// `--mcp-stdio`: the MCP server over stdin / stdout, for AI apps that start a program (mcp.rs).
+pub fn mcp_stdio() {
+    mcp::stdio()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -258,6 +264,7 @@ pub fn run() {
             let trader = Trader::new(data_dir.join("okx-api.bin"));
             let prefs = prefs::load(&config_dir);
             app.manage(AppState { client: Client::new(), live: Live::default(), config_dir, store, trader, sync: sync::Syncer::default() });
+            app.manage(mcp::Mcp::default());
             window::create(app.handle(), prefs)?;
             toast::init(app.handle());
             Ok(())
@@ -285,7 +292,13 @@ pub fn run() {
             trade_amend_stops,
             gpu_pref,
             set_gpu_pref,
-            open_tradingview
+            open_tradingview,
+            mcp::mcp_status,
+            mcp::mcp_start,
+            mcp::mcp_stop,
+            mcp::mcp_new_token,
+            mcp::mcp_reply,
+            mcp::window_attention
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
