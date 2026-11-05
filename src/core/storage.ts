@@ -25,7 +25,7 @@ export async function initStorage(): Promise<void> {
     cache = new Map(Object.entries(await storeLoad()));
   } catch (e) {
     files = false;
-    console.error("存檔資料夾不能用，改用 WebView 的 local storage：", e);
+    console.error("存檔資料夾不能用，改存在 WebView：", e);
     return;
   }
   if (!cache.has(MIGRATED)) {

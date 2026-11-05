@@ -45,7 +45,7 @@ export function togglePineManager(anchor: HTMLElement, ui: PineUi) {
     body.classList.add("pine-pop");
     const list = ui.scripts.get();
     const host = ui.host();
-    if (!list.length) body.append(el("div", "pop-note", "還沒有腳本。按「新增腳本」貼上 TradingView 的 Pine 原始碼，或從檔案匯入（.pine / .txt）。"));
+    if (!list.length) body.append(el("div", "pop-note", "還沒有腳本，按「新增腳本」貼上原始碼"));
     const rows = el("div", "pine-list");
     for (const s of list) rows.append(scriptRow(s, ui, host, rerender));
     body.append(rows);
@@ -60,7 +60,7 @@ export function togglePineManager(anchor: HTMLElement, ui: PineUi) {
     }
     foot.append(add, imp, file);
     body.append(foot);
-    body.append(el("div", "pop-note", "支援指標、畫線（line / label / box / table）和策略回測。request.security 只能用圖表上的商品、比圖表大的週期。腳本只能畫圖和回測，不會下單。"));
+    body.append(el("div", "pop-note", "支援指標、畫線和策略回測，不會下單"));
     // statuses follow the chart in use's runs while this is open
     const off = host.subscribe(() => {
       for (const s of ui.scripts.get()) {
@@ -532,7 +532,7 @@ export function openPineReport(ui: PineUi, id: string) {
       const v = host.view(id);
       const r = v?.result;
       const rep = r?.strategy;
-      body.append(el("div", "pine-sub", `${ui.chartName()} · 用圖表上已載入的 K 線回測（往左捲動載入更早的 K 線，回測的範圍就更長）`));
+      body.append(el("div", "pine-sub", `${ui.chartName()} · 用圖上已載入的 K 線回測`));
       if (!rep) {
         body.append(el("div", "pop-note", v?.error ? `腳本有錯誤：${v.error}` : "還沒有結果：腳本要開著，並且在目前的圖表上計算完"));
       } else {

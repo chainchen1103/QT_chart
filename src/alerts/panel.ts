@@ -124,7 +124,7 @@ export function toggleAlertManager(anchor: HTMLElement, ui: AlertUi) {
     // the list: this symbol first
     const list = [...s.all()].sort((a, b) => Number(b.instId === inst) - Number(a.instId === inst) || a.instId.localeCompare(b.instId));
     body.append(el("div", "pop-section", `全部提醒（${list.length}）`));
-    if (!list.length) body.append(el("div", "pop-note", "還沒有提醒。也可以在價格標尺或圖上按右鍵、按 Alt+A，或在畫線的設定裡加。"));
+    if (!list.length) body.append(el("div", "pop-note", "還沒有提醒，可按 Alt+A 或右鍵新增"));
     const rows = el("div", "alert-list");
     for (const a of list) {
       const row = el("div", "alert-row" + (a.on ? "" : " off"));
@@ -248,7 +248,7 @@ export function alertDialogAt(x: number, y: number, ui: AlertUi, price: number |
 }
 
 // ----------------------------------------------------------------------------- inside a drawing's settings
-const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間。觸及、突破、跌破：碰到通道的任何一條線。畫完之後照同樣斜率往右延伸";
+const CHANNEL_NOTE = "離開、進入看上下緣之間，觸及、突破看任一條線";
 const WHAT: Partial<Record<Drawing["kind"], string>> = {
   trend: "價格碰到這條線時提醒。線段畫完之後，照同樣斜率往右延伸",
   info: "價格碰到這條線時提醒。線段畫完之後，照同樣斜率往右延伸",
@@ -349,10 +349,10 @@ export function renderAlertOptions(service: AlertService): Render {
           rerender(); // 程式內訊息 is always on without Windows notifications
         }),
         "Windows 通知",
-        "Windows 右下角跳出 QT Chart 的通知，之後留在通知中心。點通知會切回 QT Chart 打開那個幣種",
+        "跳出 Windows 通知，點了會打開那個幣種",
       ),
       popup,
-      el("div", "pop-note", "關掉「程式內訊息」，提醒就只走 Windows 通知。視窗在背景時工作列按鈕會閃。程式開著才會提醒"),
+      el("div", "pop-note", "程式要開著才會提醒"),
     );
   };
 }

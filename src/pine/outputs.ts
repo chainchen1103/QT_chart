@@ -791,7 +791,7 @@ export const OUTPUTS: Lib = {
       const t = table(a.table_id);
       const c = toInt(a.column);
       const r = toInt(a.row);
-      if (!(c >= 0 && c < t.columns && r >= 0 && r < t.rows)) throw new PineError(`表格位置 (${c}, ${r}) 超出範圍（${t.columns} 欄 × ${t.rows} 列）`);
+      if (!(c >= 0 && c < t.columns && r >= 0 && r < t.rows)) throw new PineError(`表格位置 (${c}, ${r}) 超出範圍`);
       t.cells.set(`${c},${r}`, {
         text: str(a.text), width: num(a.width, 0), height: num(a.height, 0), text_color: col(a.text_color, BLACK), text_halign: str(a.text_halign, "center"),
         text_valign: str(a.text_valign, "center"), text_size: str(a.text_size, "normal"), bgcolor: col(a.bgcolor, NaN), tooltip: str(a.tooltip),
@@ -978,7 +978,7 @@ function declare(R: Runtime, kind: "indicator" | "strategy" | "library", pos: un
   d.maxBoxes = cap(a.max_boxes_count, 50);
   d.maxPolylines = cap(a.max_polylines_count, 50);
   d.opts = a;
-  if (a.timeframe !== undefined && a.timeframe !== "") R.warn("indicator(timeframe=…) 不支援：腳本照圖表的週期計算");
+  if (a.timeframe !== undefined && a.timeframe !== "") R.warn("indicator(timeframe=…) 不支援");
   if (kind === "strategy" && !R.secFor) R.strat = new Broker(R, a);
   return NaN;
 }

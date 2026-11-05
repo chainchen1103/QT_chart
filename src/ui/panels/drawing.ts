@@ -187,7 +187,7 @@ function channelRows(body: HTMLElement, rerender: () => void, d: ChannelDrawing,
   body.append(opts);
 
   body.append(el("div", "pop-section", "等比線"));
-  body.append(el("div", "pop-note", "以通道寬度為單位，從下軌往上算：0.5 在正中間，1 和上軌重疊，−1 在下軌下方一個寬度"));
+  body.append(el("div", "pop-note", "以通道寬度為單位：0 下軌，0.5 中線，1 上軌"));
   const setLevels = (levels: ChannelLevel[]) => apply({ levels: byValue(levels) });
   s.levels.forEach((l, i) => {
     const row = el("div", "pop-row");

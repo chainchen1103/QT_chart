@@ -95,7 +95,7 @@ export function renderTimeframes(io: TimeframeIo): Render {
     const add = () => {
       const bar = tfName(Number(n.value), unit.value as TfUnit);
       if (!bar) {
-        msg.textContent = "做不出這個週期：秒 1–59、分 1–1439、時 1–23、日 1–90、週 1–12，而且要能用 OKX 的 K 線湊成（最多 240 根）";
+        msg.textContent = "做不出這個週期，請換一個長度";
         return;
       }
       const t = set.get();
@@ -115,6 +115,6 @@ export function renderTimeframes(io: TimeframeIo): Render {
     };
     row.append(n, unit, textButton("新增", "text-btn", add, "加到清單和工具列，並切換過去"));
     body.append(row, msg);
-    body.append(el("div", "pop-note", "星號標起來的會放在工具列上。OKX 沒有的週期會用比較短的 K 線湊成。"));
+    body.append(el("div", "pop-note", "星號標記的週期放在工具列上"));
   };
 }

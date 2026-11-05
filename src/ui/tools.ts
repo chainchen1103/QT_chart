@@ -69,7 +69,7 @@ export class Tools {
     const b = $("tool-magnet");
     b.classList.toggle("on", m.on);
     b.classList.toggle("held", active && !m.on);
-    b.title = `吸附到 K 線開高低收：${m.on ? "常開（按一下關閉）" : "常關（按一下開啟）"}，按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附，右邊小箭頭或按右鍵改設定`;
+    b.title = `吸附：${m.on ? "常開" : "常關"}，按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附`;
   }
 
   /** Double-click or right-click on a drawing of `drawings`: its settings, with its alert section. */

@@ -47,17 +47,17 @@ const json = (v: unknown) => JSON.stringify(v, null, 2);
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 const CLIENTS: ClientSetup[] = [
   {
-    key: "claude-desktop", name: "Claude Desktop", where: "Claude 的設定 → 開發者 → 編輯設定，把這段併進 claude_desktop_config.json，存檔後重開 Claude",
+    key: "claude-desktop", name: "Claude Desktop", where: "設定 → 開發者 → 編輯設定，貼上後重開 Claude",
     make: ({ exe }) => json({ mcpServers: { qtchart: { command: exe, args: ["--mcp-stdio"] } } }),
   },
-  { key: "claude-code", name: "Claude Code", where: "在終端機執行這行指令", make: ({ url, token }) => `claude mcp add --transport http qtchart ${url} --header "Authorization: Bearer ${token}"` },
-  { key: "cursor", name: "Cursor", where: "把這段併進 ~/.cursor/mcp.json，或在 Cursor 的設定 → MCP 新增", make: ({ url, token }) => json({ mcpServers: { qtchart: { url, headers: bearer(token) } } }) },
-  { key: "vscode", name: "VS Code", where: "把這段併進專案的 .vscode/mcp.json，或用命令「MCP: Add Server」", make: ({ url, token }) => json({ servers: { qtchart: { type: "http", url, headers: bearer(token) } } }) },
-  { key: "windsurf", name: "Windsurf", where: "把這段併進 ~/.codeium/windsurf/mcp_config.json", make: ({ url, token }) => json({ mcpServers: { qtchart: { serverUrl: url, headers: bearer(token) } } }) },
-  { key: "gemini", name: "Gemini CLI", where: "把這段併進 ~/.gemini/settings.json", make: ({ url, token }) => json({ mcpServers: { qtchart: { httpUrl: url, headers: bearer(token) } } }) },
-  { key: "codex", name: "Codex CLI", where: "把這段加到 ~/.codex/config.toml", make: ({ exe }) => `[mcp_servers.qtchart]\ncommand = ${JSON.stringify(exe)}\nargs = ["--mcp-stdio"]` },
-  { key: "stdio", name: "其他：啟動程式", where: "應用程式要的是指令時：啟動這個程式，加上參數 --mcp-stdio", make: ({ exe }) => json({ command: exe, args: ["--mcp-stdio"] }) },
-  { key: "http", name: "其他：網址", where: "應用程式支援 Streamable HTTP 時：連這個網址，帶上這個標頭", make: ({ url, token }) => `${url}\nAuthorization: Bearer ${token}` },
+  { key: "claude-code", name: "Claude Code", where: "在終端機執行", make: ({ url, token }) => `claude mcp add --transport http qtchart ${url} --header "Authorization: Bearer ${token}"` },
+  { key: "cursor", name: "Cursor", where: "貼進 ~/.cursor/mcp.json", make: ({ url, token }) => json({ mcpServers: { qtchart: { url, headers: bearer(token) } } }) },
+  { key: "vscode", name: "VS Code", where: "貼進專案的 .vscode/mcp.json", make: ({ url, token }) => json({ servers: { qtchart: { type: "http", url, headers: bearer(token) } } }) },
+  { key: "windsurf", name: "Windsurf", where: "貼進 Windsurf 的 mcp_config.json", make: ({ url, token }) => json({ mcpServers: { qtchart: { serverUrl: url, headers: bearer(token) } } }) },
+  { key: "gemini", name: "Gemini CLI", where: "貼進 ~/.gemini/settings.json", make: ({ url, token }) => json({ mcpServers: { qtchart: { httpUrl: url, headers: bearer(token) } } }) },
+  { key: "codex", name: "Codex CLI", where: "加到 ~/.codex/config.toml", make: ({ exe }) => `[mcp_servers.qtchart]\ncommand = ${JSON.stringify(exe)}\nargs = ["--mcp-stdio"]` },
+  { key: "stdio", name: "其他：啟動程式", where: "啟動這個程式，加上 --mcp-stdio", make: ({ exe }) => json({ command: exe, args: ["--mcp-stdio"] }) },
+  { key: "http", name: "其他：網址", where: "連這個網址，帶上這個標頭", make: ({ url, token }) => `${url}\nAuthorization: Bearer ${token}` },
 ];
 /** The app picked last (while QT Chart runs). */
 let client = CLIENTS[0].key;
@@ -128,14 +128,14 @@ export function renderMcp(ui: McpUi): Render {
 
     // ------------------------------------------------------------------- the server
     body.append(
-      labelled(checkbox(s.on, "", (v) => set({ on: v })), "開啟 AI 連線", "讓這台電腦上的 AI 應用程式透過 MCP 連到 QT Chart，別台電腦連不進來"),
+      labelled(checkbox(s.on, "", (v) => set({ on: v })), "開啟 AI 連線", "只有這台電腦的 AI 應用程式連得進來"),
     );
     const status = el("div", "pop-row");
     statusLine = el("span", st?.error && s.on ? "pop-msg" : "", statusText());
     status.append(lbl("狀態"), statusLine);
     body.append(status);
     const portRow = el("div", "pop-row");
-    portRow.append(lbl("連接埠"), numInput(s.port, { min: 1024, max: 65535 }, { title: "AI 應用程式連的連接埠，被別的程式占用時換一個", width: 80 }, (v) => set({ port: v })));
+    portRow.append(lbl("連接埠"), numInput(s.port, { min: 1024, max: 65535 }, { title: "被占用時換一個", width: 80 }, (v) => set({ port: v })));
     body.append(portRow);
     const tokenRow = el("div", "pop-row");
     const shown = el("span", "mcp-token", showToken ? token : token ? `${"•".repeat(12)}${token.slice(-4)}` : "—");
@@ -150,18 +150,18 @@ export function renderMcp(ui: McpUi): Render {
       copyBtn,
       textButton("重新產生", "link-btn", () => {
         void ui.host.newToken().then(rerender);
-      }, "換一個新的權杖，已經設定好的 AI 應用程式要改用新的才連得上"),
+      }, "換新權杖，應用程式要跟著改"),
     );
-    body.append(tokenRow, el("div", "pop-note", "AI 應用程式要帶著權杖才連得進來，權杖等同密碼，不要給別人"));
+    body.append(tokenRow, el("div", "pop-note", "權杖等同密碼，不要給別人"));
 
     // ------------------------------------------------------------------- what AI apps may do
     body.append(el("div", "pop-section", "AI 可以做什麼"));
     const always = checkbox(true, "", () => undefined);
     always.disabled = true;
     body.append(
-      labelled(always, "讀取圖表、K 線、畫線、指標、提醒、帳戶和持倉", "一直開著，AI 連線就是為了讓 AI 看得到這些"),
-      labelled(checkbox(s.write, "", (v) => set({ write: v })), "修改圖表：換幣種和週期、畫線、提醒、指標、Pine 腳本、設定", "AI 畫的線可以用還原按鈕或 Ctrl+Z 復原"),
-      labelled(checkbox(s.trade, "", (v) => set({ trade: v })), "交易：下單、撤單、改 OKX 上的止損止盈", "用設定好的 OKX API 下單，API 金鑰和解鎖密碼不會交給 AI"),
+      labelled(always, "讀取圖表、畫線、帳戶", "一直開著"),
+      labelled(checkbox(s.write, "", (v) => set({ write: v })), "修改圖表：畫線、提醒、指標、設定", "AI 畫的線可以還原"),
+      labelled(checkbox(s.trade, "", (v) => set({ trade: v })), "交易：下單、撤單、改止損止盈", "金鑰和密碼不會交給 AI"),
     );
     const confirmRow = el("div", "pop-row");
     const pick = el("select");
@@ -171,14 +171,14 @@ export function renderMcp(ui: McpUi): Render {
     confirmRow.append(lbl("下單前確認"), pick);
     body.append(confirmRow);
     if (s.trade && s.confirm !== "always")
-      body.append(el("div", "trade-warn", s.confirm === "never" ? "AI 送出的單會直接送到 OKX，不會先問你" : "AI 在模擬盤的單會直接送出，實盤的單才會先問你"));
+      body.append(el("div", "trade-warn", s.confirm === "never" ? "AI 送出的單會直接送到 OKX，不會先問你" : "模擬盤直接送出，實盤才先問你"));
     body.append(
-      el("div", "pop-note", "要確認時，QT Chart 會跳到最前面，顯示和自己下單一樣的確認視窗，按「確認下單」才會送出，五分鐘沒回應就不下單。風險或槓桿超過倉位預設值的單、把止損移遠的修改，一律要確認。撤單不用確認。"),
+      el("div", "pop-note", "按「確認下單」才送出，五分鐘沒回應就不下單。超過預設風險或槓桿的單、移遠止損一律要確認"),
     );
 
     // ------------------------------------------------------------------- setting up an app
     body.append(el("div", "pop-section", "連到 AI 應用程式"));
-    body.append(el("div", "pop-note", "支援 MCP 的應用程式都能連。選你用的應用程式，照說明貼上這段設定。QT Chart 要開著，AI 才連得到。"));
+    body.append(el("div", "pop-note", "選你的應用程式，照說明貼上設定"));
     const pickRow = el("div", "pop-row");
     const app = el("select");
     for (const c of CLIENTS) app.append(new Option(c.name, c.key, false, c.key === client));

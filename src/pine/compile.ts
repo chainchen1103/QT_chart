@@ -864,7 +864,7 @@ class Compiler {
       if (path === "request.security" || (path === "security" && this.version <= 4)) return this.security(e);
       if (path === "request.security_lower_tf") {
         const R = this.R;
-        return () => (R.warn("request.security_lower_tf 不支援：回傳空陣列"), []);
+        return () => (R.warn("request.security_lower_tf 不支援"), []);
       }
       if (path.startsWith("request.")) {
         const R = this.R;
@@ -1139,7 +1139,7 @@ class Compiler {
         return naLike();
       }
       if (!sameSymbol(R, s)) {
-        R.warn(`request.security 只能用圖表上的商品（${s}）：回傳 na`);
+        R.warn(`request.security 只支援本商品，回傳 na`);
         return naLike();
       }
       const tfs = tfE(f);
@@ -1160,7 +1160,7 @@ class Compiler {
       }
       if (tf.sec === R.tf.sec && !ha) return expr(f);
       if (tf.sec < R.tf.sec) {
-        R.warn(`request.security 不支援比圖表小的週期（${tf.period}）：回傳 na`);
+        R.warn(`request.security 不支援較小週期`);
         return naLike();
       }
       const run = R.sec.get(key);

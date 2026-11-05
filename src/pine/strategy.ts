@@ -158,8 +158,8 @@ export class Broker {
     this.currency = typeof o.currency === "string" && o.currency !== "NONE" ? o.currency : "USD";
     this.limitTicks = num(o.backtest_fill_limits_assumption, 0);
     this.equity = new Float64Array(R.n).fill(NaN);
-    if (o.calc_on_order_fills) R.warn("calc_on_order_fills 不支援：只在每根 K 線收盤時計算");
-    if (o.use_bar_magnifier) R.warn("use_bar_magnifier 不支援：用 K 線本身的開高低收模擬成交");
+    if (o.calc_on_order_fills) R.warn("calc_on_order_fills 不支援");
+    if (o.use_bar_magnifier) R.warn("use_bar_magnifier 不支援");
   }
 
   // ------------------------------------------------------------------- the position
@@ -262,7 +262,7 @@ export class Broker {
     };
     const any = [e.profit, e.limit, e.loss, e.stop, e.trailPrice, e.trailPoints].some((x) => x === x);
     if (!any) {
-      this.R.warn(`strategy.exit("${id}") 沒有給止盈或止損價，不會出場`);
+      this.R.warn(`strategy.exit("${id}") 沒有出場價`);
       return;
     }
     this.exits.set(id, e);

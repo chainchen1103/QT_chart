@@ -47,7 +47,7 @@ export const STATE_TEXT: Record<string, string> = {
   canceled: "已撤單",
   mmp_canceled: "已撤單（做市保護）",
   unknown: "狀態不明",
-  missing: "交易所查不到（太久以前撤掉的單 OKX 不保留，或在另一個帳戶）",
+  missing: "交易所查不到這張單",
 };
 
 /** OKX no longer has the order (its answer to a lookup). */
@@ -85,7 +85,7 @@ export function paintAccountButton(btn: HTMLElement, acct: TradeAccount) {
     return;
   }
   btn.textContent = `${envText(keys.demo)} ${account ? fmtMoney(account.equity) + " U" : error ? "連線失敗" : "…"}`;
-  btn.title = error ? `OKX API：${error}` : `OKX API（${envText(keys.demo)}）：帳戶權益 ${account ? fmtMoney(account.equity) : "…"} USDT，按一下看設定`;
+  btn.title = error ? `OKX API：${error}` : `OKX API（${envText(keys.demo)}）：權益 ${account ? fmtMoney(account.equity) : "…"} USDT`;
 }
 
 // ----------------------------------------------------------------------------- API settings
@@ -136,7 +136,7 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
           rerender();
         }),
         "與 OKX 同步持倉和止盈止損",
-        "OKX 的私人頻道（WebSocket）即時推送，連不上時每 5 秒用 REST 查一次",
+        "即時推送，斷線時每 5 秒查一次",
       ),
     );
     statusLine = null;
@@ -192,7 +192,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
     body.append(row(lbl("API Key"), keys.hint));
     if (!keys.protected) {
       // a key from before unlock passwords
-      body.append(el("div", "trade-warn", "這組 API 還沒有解鎖密碼，只有 Windows 帳號保護。設一個解鎖密碼，之後每次開 QT Chart 輸入一次。"));
+      body.append(el("div", "trade-warn", "這組 API 還沒有解鎖密碼，只有 Windows 帳號保護。建議設一個，每次開啟輸入一次"));
       passwordForm(body, acct, rerender, false, () => {});
       body.append(safetyLink(showSafety, safety));
       if (showSafety) body.append(safetyNotes());
@@ -202,7 +202,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
         row(lbl("帳戶權益"), `${fmtMoney(account.equity)} U`, lbl("可用"), `${fmtMoney(account.avail)} U`),
         row(lbl("持倉模式"), account.posMode === "long_short_mode" ? "開平倉模式（多空分開）" : "買賣模式（單向）"),
       );
-      if (account.acctLv === "1") body.append(el("div", "pop-msg", "這個帳戶是現貨模式，不能開永續合約。請在 OKX 把帳戶模式改成合約模式（單幣種保證金）"));
+      if (account.acctLv === "1") body.append(el("div", "pop-msg", "帳戶是現貨模式，不能開永續合約，請在 OKX 改成合約模式"));
     }
     if (error) body.append(el("div", "pop-msg", error));
     const p = position.get();
@@ -294,12 +294,12 @@ function safetyNotes(): HTMLElement {
     box.append(ul);
   };
   part("金鑰怎麼存", [
-    "只存在這台電腦，先用你設的解鎖密碼加密，再用 Windows 帳號加密",
+    "只存在這台電腦，用解鎖密碼和 Windows 帳號加密",
     "每次開 QT Chart 要輸入解鎖密碼，才能下單和同步持倉",
-    "金鑰檔被複製走，沒有解鎖密碼也打不開。Secret Key 不會再顯示在畫面上",
+    "金鑰檔被拷走，沒有解鎖密碼也打不開，Secret Key 也不會再顯示",
     "只會連到 OKX，金鑰不會傳到其他地方",
   ]);
-  part("擋不住的情況", ["電腦已經中毒，在你解鎖之後被讀取記憶體或側錄鍵盤。所以 OKX 那邊也要設好限制"]);
+  part("擋不住的情況", ["電腦已經中毒，解鎖後被讀取記憶體或側錄鍵盤。所以 OKX 那邊也要設好限制"]);
   part("在 OKX 建立 API 時", [
     "權限只勾「讀取」和「交易」，不要勾「提現」",
     "綁定這台電腦的 IP，金鑰就算被偷也不能從別的地方用",
@@ -331,7 +331,7 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, sh
     body.append(foot);
     return;
   }
-  body.append(el("div", "pop-note", "填你 OKX 帳戶的 API，就能從倉位直接下單，倉位的初始資金也會帶入帳戶權益"), safetyLink(showSafety, toggleSafety));
+  body.append(el("div", "pop-note", "設定 OKX API 後，可以從倉位直接下單"), safetyLink(showSafety, toggleSafety));
   if (showSafety) body.append(safetyNotes());
   const key = keyInput("API Key", false);
   const secret = keyInput("Secret Key", true);
@@ -365,7 +365,7 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, sh
     }
   });
   body.append(row(key), row(secret), row(pass), row(lbl("環境"), env), row(pw), row(pw2), msg);
-  body.append(el("div", "pop-note", "先用 OKX 讀一次帳戶確認可以用才存。之後每次開 QT Chart 要輸入解鎖密碼，忘記了只能移除 API 再重新輸入。"));
+  body.append(el("div", "pop-note", "存之前會先用 OKX 讀一次帳戶確認。每次開啟要輸入解鎖密碼，忘記只能移除 API 重新輸入"));
   const foot = el("div", "pop-foot");
   foot.append(el("span", "spacer"), save);
   body.append(foot);
@@ -512,7 +512,7 @@ export async function submitOrder(s: OrderSpot, plan: OrderPlan, prefs: OrderPre
     algoClOrdId,
     ...(isAdd && move ? { moveOnFill: true } : {}),
   });
-  s.note(`已送出：${s.base} ${plan.side === "buy" ? "多單" : "空單"} ${ORD_TYPE_TEXT[prefs.ordType]} ${plan.sz} 張（訂單 ${r.ordId}）`);
+  s.note(`已送出：${s.base} ${plan.side === "buy" ? "多單" : "空單"} ${plan.sz} 張，訂單 ${r.ordId}`);
   return { placed: true, ordId: r.ordId, side: plan.side, ordType: prefs.ordType, px: plan.px, sz: plan.sz, coins: plan.coins, risk: plan.risk, demo };
 }
 
@@ -580,12 +580,12 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot, ask?: OrderA
             move = v;
           }),
           `成交後把前面那筆在 OKX 上的止損${plan.tp != null ? "、止盈" : ""}移到 ${where}`,
-          "加倉單成交時才移。那時 QT Chart 要開著，設定裡的「與 OKX 同步」要開",
+          "成交時才移，QT Chart 和 OKX 同步要開著",
         ),
-        el("div", "pop-note", "這張單只開加倉的部分。成交時 QT Chart 要開著、「與 OKX 同步」要開才會自動移，沒勾的話請自己到 OKX 改。"),
+        el("div", "pop-note", "這張單只開加倉的部分。成交時 QT Chart 和「與 OKX 同步」要開著，才會自動移止損"),
       );
     }
-    body.append(el("div", "pop-note", "送出後在圖上拖止損、止盈，會問要不要一起改 OKX（要開「與 OKX 同步」）。進場價不能改，要改請撤單重下。不含手續費。"));
+    body.append(el("div", "pop-note", "送出後拖止損、止盈會問要不要一起改 OKX，進場價不能改，要改請撤單重下。不含手續費"));
     const msg = el("div", "pop-msg");
     const go = textButton(`確認下單（${envText(demo)}）`, "text-btn " + (demo ? "primary" : "danger-solid"), async () => {
       go.disabled = true;

@@ -56,7 +56,7 @@ export function toggleLayoutPicker(anchor: HTMLElement, current: () => LayoutId,
       body.append(row);
     }
     body.append(
-      el("div", "pop-note", "點一下圖表就換成用那個圖表（藍框）：上面的幣種、週期和左邊的畫線工具都作用在它上面"),
+      el("div", "pop-note", "點圖表就換用那個圖表，藍框是使用中"),
       el("div", "pop-note", "拖曳圖表之間的分隔線調整大小，雙擊分隔線恢復平分"),
     );
   });

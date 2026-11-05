@@ -98,7 +98,7 @@ export function planOrder(i: OrderInput): OrderPlan {
 
   if (!(spec.ctVal > 0)) problems.push("讀不到這個幣種的合約大小，請稍後再試");
   else if (contracts < Number(spec.minSz)) {
-    problems.push(`數量太小：最少 ${spec.minSz} 張（${fmtCoins(Number(spec.minSz) * spec.ctVal)}），這個倉位只有 ${fmtCoins(i.qty)}`);
+    problems.push(`數量太小：最少 ${spec.minSz} 張，這個倉位只有 ${fmtCoins(i.qty)}`);
   }
   if (spec.maxLever > 0 && i.leverage > spec.maxLever) problems.push(`這個幣種最高 ${spec.maxLever} 倍，倉位設了 ${i.leverage} 倍`);
   if (!Number.isInteger(i.leverage)) problems.push("OKX 的槓桿要是整數倍");
@@ -110,14 +110,14 @@ export function planOrder(i: OrderInput): OrderPlan {
 
   if (!market && i.last != null && i.last > 0) {
     const crosses = long ? Number(px) > i.last : Number(px) < i.last;
-    if (crosses && prefs.ordType === "post_only") problems.push("只做 Maker 的掛單價不能比現價更好（會被交易所取消），改用掛單或市價");
+    if (crosses && prefs.ordType === "post_only") problems.push("只做 Maker 不能吃單，請改掛單或市價");
     else if (crosses) warnings.push(`掛單價${long ? "高於" : "低於"}現價，送出後會馬上成交（吃單）`);
     const away = Math.abs(Number(px) / i.last - 1);
     if (away > 0.05) warnings.push(`掛單價離現價 ${(away * 100).toFixed(1)}%`);
   }
   if (i.avail != null && margin > i.avail) warnings.push(`保證金約 ${margin.toFixed(2)} U，超過可用的 ${i.avail.toFixed(2)} U，交易所可能拒單`);
   if (contracts > 0 && Math.abs(coins - i.qty) / i.qty > 0.02) {
-    warnings.push(`數量照最小單位 ${spec.lotSz} 張取整，實際 ${fmtCoins(coins)}，風險約 ${risk.toFixed(2)} U`);
+    warnings.push(`數量取整為 ${fmtCoins(coins)}，風險約 ${risk.toFixed(2)} U`);
   }
   return { side, px, sz, contracts, coins, notional, margin, risk, sl, tp, problems, warnings };
 }

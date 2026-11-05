@@ -36,7 +36,7 @@ const SECTIONS: { id: SettingsSection; name: string; note: string }[] = [
   { id: "alerts", name: "提醒", note: "所有價格提醒共用的聲音和通知" },
   { id: "position", name: "倉位", note: "新倉位的預設資金和風險，和所有倉位共用的 R 線、顏色" },
   { id: "account", name: "交易帳戶", note: "下單用的 OKX API" },
-  { id: "ai", name: "AI 連線", note: "讓這台電腦上的 AI 應用程式透過 MCP 讀取和操作 QT Chart" },
+  { id: "ai", name: "AI 連線", note: "讓 AI 應用程式透過 MCP 操作 QT Chart" },
   { id: "performance", name: "效能", note: "繪圖方式" },
   { id: "about", name: "關於", note: "QT Chart 用到的套件和它們的授權" },
 ];
@@ -107,7 +107,7 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
             "開啟無上限的 K 線量",
             "往左捲動時一直載入更早的 K 線，直到 OKX 沒有資料為止",
           ),
-          el("div", "pop-note", `關閉時每個圖表最多 ${MAX_BARS.toLocaleString()} 根。開啟後往左捲動會一直載入更早的 K 線，直到 OKX 沒有資料為止。載入越多越吃記憶體，指標和 Pine 腳本也會算得比較久。`),
+          el("div", "pop-note", `關閉時每個圖表最多 ${MAX_BARS.toLocaleString()} 根，開啟較吃記憶體`),
         );
       };
     case "alerts":
@@ -129,7 +129,7 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
           el("div", "pop-section", "字型"),
           aboutRow(el("span", "", "Geist、Geist Mono"), "SIL Open Font License 1.1。Copyright (c) 2023 Vercel, in collaboration with basement.studio"),
           el("div", "pop-section", "行情和下單"),
-          aboutRow(el("span", "", "OKX API"), "公開行情直接向 OKX 取得。下單用你自己的 API Key，金鑰只存在這台電腦"),
+          aboutRow(el("span", "", "OKX API"), "行情取自 OKX，金鑰只存在這台電腦"),
         );
         // the licences ask for their full text to go along with the program
         const full = el("pre", "set-license");

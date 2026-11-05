@@ -58,7 +58,7 @@ export function performanceSection(io: PerformanceIo, header = true): Render {
       .then((on) => (box.checked = on))
       .catch(() => (box.checked = true))
       .finally(() => (box.disabled = false));
-    row.append(labelled(box, "使用顯示卡加速", "顯示卡和驅動程式允許時，用顯示卡畫圖。畫面有問題時可以關掉，改用軟體繪圖"));
+    row.append(labelled(box, "使用顯示卡加速", "畫面有問題時關掉，改用軟體繪圖"));
     body.append(now, row, msg);
   };
 }

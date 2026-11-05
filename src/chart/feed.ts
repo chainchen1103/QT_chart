@@ -125,7 +125,7 @@ export class MarketFeed {
     if (this.loadingOlder || this.noMoreHistory || !this.bars.length) return;
     if (this.bars.length + (this.hidden?.length ?? 0) >= this.limit()) {
       this.noMoreHistory = true;
-      this.on.note(`最多載入 ${this.limit().toLocaleString()} 根 K 線，不再往前載入（設定裡可以開啟無上限）`);
+      this.on.note(`已載入上限 ${this.limit().toLocaleString()} 根，設定裡可開無上限`);
       return;
     }
     this.loadingOlder = true;

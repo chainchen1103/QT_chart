@@ -88,7 +88,7 @@ export function toggleFvgPanel(anchor: HTMLElement, sets: { get: () => FvgConf[]
   zoneSetsPanel(
     anchor,
     "FVG",
-    "三根 K 線中，第一根和第三根沒有重疊的空白。第三根收完才畫。之後價格穿過整個缺口就算回補，框停在那根。",
+    "三根 K 線中第一、三根之間的缺口",
     sets,
     DEFAULT_FVG,
     chartBar,
@@ -113,7 +113,7 @@ export function toggleObPanel(anchor: HTMLElement, sets: { get: () => ObConf[]; 
   zoneSetsPanel(
     anchor,
     "Order Block",
-    "收盤突破最近一個還沒被突破的波段高低點時，往前找最後一根反向 K，框住它的高低點。之後收盤穿過這個框就算失效。",
+    "突破波段前最後一根反向 K 線",
     sets,
     DEFAULT_OB,
     chartBar,
@@ -132,13 +132,13 @@ export function toggleSrPanel(anchor: HTMLElement, sets: { get: () => SrConf[]; 
   zoneSetsPanel(
     anchor,
     "支撐阻力",
-    "波段高點畫成阻力線，波段低點畫成支撐線。收盤站上阻力或跌破支撐，就算失效。",
+    "波段高點是阻力，低點是支撐",
     sets,
     DEFAULT_SR,
     chartBar,
     (c, p) => [
       lbl("波段左右各"),
-      numInput(c.swing, ZONE_LIMITS.srSwing, { title: "波段高點：比左右各這麼多根都高，低點相反。數字越大，線越少、越重要", width: 52 }, (v) => p({ swing: v })),
+      numInput(c.swing, ZONE_LIMITS.srSwing, { title: "比左右各幾根都高才算波段高點", width: 52 }, (v) => p({ swing: v })),
       lbl("根"),
     ],
     "也顯示已突破的",

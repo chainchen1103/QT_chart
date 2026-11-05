@@ -133,7 +133,7 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
   rows.push(msg);
   const o = d.order;
   if (o && o.state !== "canceled" && o.state !== "mmp_canceled" && o.state !== "missing") {
-    rows.push(el("div", "pop-note", "這個倉位已經下單：這裡改的是圖上的價格，OKX 上的委託和止盈止損不會跟著改"));
+    rows.push(el("div", "pop-note", "已下單：這裡只改圖上的價格，不改 OKX"));
   }
   return rows;
 }
@@ -189,7 +189,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
           el("div", "pop-note", `OKX 持倉${k.demo ? "（模擬盤）" : ""}：${k.side === "long" ? "多單" : "空單"}，開倉 ${new Date(k.cTime).toLocaleString("zh-TW", { hour12: false })}`),
           el("div", "pop-note", k.closed
             ? `已平倉${k.closed.px ? `：均價 ${one.priceText(k.closed.px)}，已實現 ${k.closed.pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(k.closed.pnl))} U` : "（OKX 查不到平倉紀錄）"}`
-            : "不是從這裡開的倉位，數量、均價和盈虧照 OKX。持倉還開著時刪掉，下次同步會再畫回來。"),
+            : "OKX 上開的倉位，數字照 OKX"),
         );
       }
       const capRow = el("div", "pop-row");
@@ -226,7 +226,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         if (!sc) {
           lines = [size, `最大虧損 ${fmtMoney(pl.riskAmount)} U　止盈獲利 ${fmtMoney(pl.reward)} U`, result(t.pnl)];
         } else if (sc.step < sc.count) {
-          lines = [size, `已加倉：這是第 ${sc.step} 筆，整筆改用第 ${sc.count} 筆的止損、止盈，結果看那一筆`];
+          lines = [size, `已加倉，整筆用第 ${sc.count} 筆的止損、止盈`];
         } else {
           const after = t.outcome.status === "pending" ? "成交後整筆" : "整筆";
           lines = [
@@ -240,9 +240,9 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         }
         for (const s of lines) body.append(el("div", "pop-note", s));
         if (sc?.full && sc.step === sc.count) {
-          body.append(el("div", "pop-msg", "前面的部位在這個止損就已經虧到這筆設定的風險（或更多），所以這筆不加，數量是 0"));
+          body.append(el("div", "pop-msg", "整筆風險已滿，這筆不加"));
         }
-        if (pl.capped) body.append(el("div", "pop-msg", "保證金超過資金，數量已減到這個槓桿能開的最大值，實際風險會比設定小"));
+        if (pl.capped) body.append(el("div", "pop-msg", "保證金超過資金，已減量，風險會變小"));
       }
     } else {
       body.append(el("div", "pop-section", "新倉位的預設"));
@@ -272,7 +272,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         capRow,
         riskRow,
         levRow,
-        labelled(checkbox(cur.chain, "", (v) => set({ chain: v })), "接續前一個倉位結算後的資金", "照進場時間排，每個沒有自己設資金的倉位，用前一個倉位結算後的資金"),
+        labelled(checkbox(cur.chain, "", (v) => set({ chain: v })), "接續前一個倉位結算後的資金", "沒設資金的倉位，用前一個結算後的資金"),
       );
     }
 
@@ -367,7 +367,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       labelled(
         checkbox(!cur.infoHover, "", (v) => set({ infoHover: !v })),
         "一直顯示資訊框",
-        "數量、保證金、資金、風險和盈虧比的黑色框，放在止損那一側框外的右邊，OKX 已平倉倉位的結果也一樣。不勾時，滑鼠移到倉位上或選取它才顯示",
+        "不勾時，滑鼠移上去或選取才顯示",
       ),
     );
     body.append(colors, shows);
@@ -386,12 +386,12 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         const d = DEFAULT_POSITION;
         set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoHover: d.infoHover });
         rerender();
-      }, "R 線、顏色、透明度、標出價格和資訊框恢復預設，這個倉位的價格、資金、風險、槓桿不變"));
+      }, "外觀恢復預設，價格和資金不變"));
     } else {
       foot.append(el("span", "spacer"), textButton("恢復預設", "link-btn", () => {
         io.set(clone(DEFAULT_POSITION));
         rerender();
-      }, "R 線、顏色和新倉位的預設，不會改已經畫好的倉位自己的資金、風險、槓桿"));
+      }, "恢復預設，已畫的倉位不變"));
     }
     body.append(foot);
   };

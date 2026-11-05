@@ -49,7 +49,7 @@ export function parseLevel(text: string, min = -10, max = 10): { value: number }
   if (!s.replace("%", "") || !Number.isFinite(num)) return { error: "不是數字" };
   const v = Math.round((pct ? num / 100 : num) * 1e4) / 1e4;
   if (v < min || v > max) {
-    return { error: pct ? `要在 ${min * 100}% 到 ${max * 100}% 之間` : `要在 ${min} 到 ${max} 之間。百分比請加 %，例如 61.8%` };
+    return { error: pct ? `要在 ${min * 100}% 到 ${max * 100}% 之間` : `要在 ${min} 到 ${max} 之間，百分比加 %` };
   }
   return { value: v };
 }

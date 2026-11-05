@@ -132,7 +132,7 @@ export function renderAppearance(io: AppearanceIo, extra?: Render): Render {
       lbl("座標軸"),
       sizeSelect(a.axisSize, AXIS_SIZES, DEFAULT_APPEARANCE.axisSize, "價格和時間座標軸", (v) => set({ axisSize: v })),
     );
-    body.append(sizes, el("div", "pop-note", "圖上標籤包括畫圖工具、指標和高低價的標籤，Pine 腳本的文字也跟著等比縮放。標籤會自動避開彼此。"));
+    body.append(sizes, el("div", "pop-note", "畫線、指標和 Pine 的文字都照這個大小"));
     extra?.(body, rerender);
 
     const foot = el("div", "pop-foot");

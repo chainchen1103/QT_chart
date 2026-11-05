@@ -370,7 +370,7 @@ impl Trader {
         let cfg = self.call(&k, "GET", "/api/v5/account/config", "", None).await?;
         let c = cfg.first().ok_or("OKX 沒有回帳戶設定")?;
         if c["acctLv"].as_str() == Some("1") {
-            return Err("這個 OKX 帳戶是現貨模式，不能開永續合約。請先在 OKX 把帳戶模式改成合約模式（單幣種保證金）".into());
+            return Err("帳戶是現貨模式，不能開永續合約，請在 OKX 改成合約模式".into());
         }
         let hedge = c["posMode"].as_str() == Some("long_short_mode");
         let pos_side = hedge.then(|| if r.side == "buy" { "long" } else { "short" });
@@ -739,7 +739,7 @@ fn iso_ms(ms: i64) -> String {
 /// OKX's answer, with what to do about the usual problems.
 fn explain(code: &str, msg: &str) -> String {
     let what = match code {
-        "50101" => "這組 API 和環境不符（實盤的 API 不能用在模擬盤，反過來也一樣）",
+        "50101" => "API 和環境不符：實盤、模擬盤要分開",
         "50102" => "電腦時間和 OKX 差太多，請校正電腦時間",
         "50103" | "50104" | "50105" | "50111" | "50113" | "50119" => "API Key、Secret Key 或 Passphrase 不對",
         "50110" => "這台電腦的 IP 不在這組 API 的白名單裡",
@@ -1013,7 +1013,7 @@ mod tests {
         let b = m.body(None);
         assert!(b.get("px").is_none() && b.get("posSide").is_none());
         assert!(b["attachAlgoOrds"][0].get("tpTriggerPx").is_none());
-        assert_eq!(explain("50110", "Invalid IP"), "這台電腦的 IP 不在這組 API 的白名單裡（OKX 50110：Invalid IP）");
+        assert_eq!(explain("50110", "Invalid IP"), "這台電腦的 IP 不在 API 白名單裡");
     }
 
     #[test]

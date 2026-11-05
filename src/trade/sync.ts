@@ -258,7 +258,7 @@ export class AccountSync {
       }
       return changed;
     });
-    if (told) this.d.note("加倉成交了，但「與 OKX 同步」關著，前面那筆在 OKX 上的止損、止盈沒有移，請到 OKX 改");
+    if (told) this.d.note("加倉成交了，但「與 OKX 同步」關著，前面那筆的止損、止盈沒有移，請到 OKX 改");
   }
 
   /**
@@ -276,7 +276,7 @@ export class AccountSync {
     if (!e) {
       // nothing on OKX for what was moved (e.g. no take-profit there): back to OKX's
       revert();
-      this.d.note("OKX 上沒有這個止損或止盈單，圖上改回 OKX 的。要新增請到 OKX 設定");
+      this.d.note("OKX 上沒有這張止損止盈單，請到 OKX 新增");
       return true;
     }
     let done = false;
