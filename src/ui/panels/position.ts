@@ -276,6 +276,8 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       );
     }
 
+    body.append(el("div", "pop-section", "R 線"));
+    if (one) body.append(el("div", "pop-note", "R 線和下面的顯示設定，所有倉位共用"));
     cur.levels.forEach((l, i) => {
       const row = el("div", "pop-row");
       const val = el("input");
@@ -369,10 +371,19 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         one.remove();
       }, "也可以選取後按 Delete"));
     }
-    foot.append(el("span", "spacer"), textButton("恢復預設", "link-btn", () => {
-      io.set(clone(DEFAULT_POSITION));
-      rerender();
-    }, "R 線、顏色和新倉位的預設；不會改已經畫好的倉位自己的資金、風險、槓桿"));
+    if (one) {
+      // one position's window: only what it shows of the shared settings
+      foot.append(el("span", "spacer"), textButton("恢復 R 線和顏色", "link-btn", () => {
+        const d = DEFAULT_POSITION;
+        set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices });
+        rerender();
+      }, "R 線、顏色、透明度和標出價格恢復預設；這個倉位的價格、資金、風險、槓桿不變"));
+    } else {
+      foot.append(el("span", "spacer"), textButton("恢復預設", "link-btn", () => {
+        io.set(clone(DEFAULT_POSITION));
+        rerender();
+      }, "R 線、顏色和新倉位的預設；不會改已經畫好的倉位自己的資金、風險、槓桿"));
+    }
     body.append(foot);
   };
 }

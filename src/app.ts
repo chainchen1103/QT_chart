@@ -165,8 +165,11 @@ function applyAppearance() {
 }
 
 // ----------------------------------------------------------------------------- the settings window
-const accountSection = renderAccount(account, settings.position);
 const syncSection = renderSync(sync, settings.okxSync, account);
+// in the settings window the sync section comes before the account's buttons
+const accountSection = renderAccount(account, settings.position, (body, rerender) => {
+  if (account.keys.set) syncSection(body, rerender);
+});
 const settingsIo: SettingsIo = {
   appearance: renderAppearance(appearanceIo),
   labels: renderScaleLabels(settings.labels),
@@ -181,10 +184,7 @@ const settingsIo: SettingsIo = {
   bars: settings.bars,
   alerts: renderAlertOptions(alerts),
   position: renderPosition({ get: () => settings.position.get(), set: (v) => settings.position.set(v), apiEquity: () => account.equity() }),
-  account: (body, rerender) => {
-    accountSection(body, rerender);
-    if (account.keys.set) syncSection(body, rerender);
-  },
+  account: accountSection,
   performance: performanceSection({ gpu: gpuPref, setGpu: setGpuPref }, false),
   openTradingView: () => void openTradingView().catch((err) => status.error(String(err))),
 };

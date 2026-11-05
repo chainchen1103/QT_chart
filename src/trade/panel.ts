@@ -155,8 +155,9 @@ export function renderSync(sync: AccountSync, setting: Setting<SyncSettings>, ac
   };
 }
 
-/** The account window's contents (also a section of the settings window). */
-export function renderAccount(acct: TradeAccount, position: Setting<PositionSettings>): Render {
+/** The account window's contents (also a section of the settings window, where `extra`, the sync section, comes
+ *  before the buttons at the bottom). */
+export function renderAccount(acct: TradeAccount, position: Setting<PositionSettings>, extra?: Render): Render {
   let following = false;
   /** The change-password boxes are open; the security notes are shown (kept across redraws). */
   let changing = false;
@@ -182,7 +183,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
       return;
     }
     if (acct.keys.locked) {
-      unlockForm(body, acct, rerender);
+      unlockForm(body, acct, rerender, extra);
       return;
     }
     const { keys, account, error } = acct;
@@ -220,6 +221,7 @@ export function renderAccount(acct: TradeAccount, position: Setting<PositionSett
         rerender();
       });
     }
+    extra?.(body, rerender);
     const foot = el("div", "pop-foot");
     foot.append(textButton("重新整理", "text-btn", () => void acct.refresh()), el("span", "spacer"));
     if (keys.protected) {
@@ -371,7 +373,7 @@ function keyForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, sh
 }
 
 /** A key saved with a password, not unlocked yet: the password box (asked at every start). */
-function unlockForm(body: HTMLElement, acct: TradeAccount, rerender: () => void) {
+function unlockForm(body: HTMLElement, acct: TradeAccount, rerender: () => void, extra?: Render) {
   const { keys } = acct;
   body.classList.add("trade-form");
   body.append(el("div", `trade-env ${keys.demo ? "demo" : "live"}`, keys.demo ? "模擬盤（OKX 模擬交易）" : "實盤：下單會用真的錢"));
@@ -402,6 +404,7 @@ function unlockForm(body: HTMLElement, acct: TradeAccount, rerender: () => void)
     if (e.key === "Enter" && !go.disabled) go.click();
   };
   body.append(row(pw), msg);
+  extra?.(body, rerender);
   const foot = el("div", "pop-foot");
   foot.append(removeButton(acct, rerender, "忘記密碼：移除 API"), el("span", "spacer"), go);
   body.append(foot);

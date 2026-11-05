@@ -206,8 +206,9 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .text-btn.primary:hover { background: #ffffff; border-color: #ffffff; }
 .text-btn.danger-solid { background: var(--down-fill); border-color: var(--down-fill); color: #ffffff; font-weight: 500; box-shadow: none; }
 .text-btn.danger-solid:hover { filter: brightness(1.12); }
-.link-btn { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
-.link-btn:hover { color: var(--text); text-decoration: underline; }
+.link-btn { border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; padding: 0;
+  text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.link-btn:hover { color: var(--text); text-decoration-color: currentColor; }
 /* rows of a menu: the drawing tools of a group, a right-click menu */
 .tool-row, .menu-item { --icon-hole: var(--panel); display: flex; align-items: center; gap: 8px; width: 100%; min-width: 220px; height: 32px;
   padding: 0 8px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }

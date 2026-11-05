@@ -378,10 +378,11 @@ function positionLabels(ctx: CanvasRenderingContext2D, g: Geo, o: PaintOptions, 
   const rr = rewardRisk(d.a.p, d.b.p, d.target);
   const t = o.trades.get(d.id);
   const size = (lines: string[]) => ({ w: Math.max(...lines.map((s) => ctx.measureText(s).width)) + 10, h: lines.length * 15 + 3 });
-  /** A box of text lines; `align` says which side of x the box goes. Returns the box. */
+  /** A box of text lines; `align` says which side of x the box goes. Returns the box. A centered one stays
+   *  inside the pane: a box running past the right edge would hide behind the price scale. */
   const box = (lines: string[], x: number, y: number, bg: string, align: "center" | "left" = "center", fg = "#ffffff") => {
     const { w, h } = size(lines);
-    const left = align === "center" ? x - w / 2 : x;
+    const left = align === "center" ? Math.max(2, Math.min(x - w / 2, width - w - 2)) : x;
     ctx.fillStyle = bg;
     ctx.fillRect(left, y - h / 2, w, h);
     ctx.fillStyle = fg;
