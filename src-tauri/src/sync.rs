@@ -70,6 +70,8 @@ pub struct SyncOrder {
     /// live, partially_filled, filled, canceled, mmp_canceled.
     pub state: String,
     pub side: String,
+    /// Its limit price (None: a market order), and size in contracts.
+    pub px: Option<f64>,
     pub sz: f64,
     pub acc_fill_sz: f64,
     pub avg_px: Option<f64>,
@@ -173,6 +175,7 @@ pub fn parse_order(v: &Value) -> Option<SyncOrder> {
         cl_ord_id: text(v, "clOrdId"),
         state: text(v, "state"),
         side: text(v, "side"),
+        px: num(v, "px").filter(above0),
         sz: num(v, "sz").unwrap_or(0.0),
         acc_fill_sz: num(v, "accFillSz").unwrap_or(0.0),
         avg_px: num(v, "avgPx").filter(above0),

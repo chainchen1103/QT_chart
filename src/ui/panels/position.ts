@@ -15,6 +15,7 @@ import {
 } from "../../settings/model.ts";
 import { checkPrices, fmtMoney, fmtQty, type PositionPrices, type PositionResult, type RiskMode } from "../../drawings/trade.ts";
 import { checkbox, colorInput, el, flagBad, labelled, lbl, numInput, textButton } from "../dom.ts";
+import { lockedPart } from "./drawing.ts";
 import { closePopover, popoverAt, togglePopover, type Render } from "../popover.ts";
 
 export type PositionIo = {
@@ -31,10 +32,14 @@ export type OnePosition = {
   setPrices: (p: PositionPrices) => void;
   /** On OKX now: the entry is OKX's; moved stops are sent to OKX after a confirmation. */
   isLive?: () => boolean;
+  /** Its order is still waiting, nothing filled: new prices or risk change the order after a confirmation. */
+  waiting?: () => boolean;
   /** A price on the symbol's price step, and as plain digits for a box. */
   roundPrice: (p: number) => number;
   priceText: (p: number) => string;
   remove: () => void;
+  /** The drawings are locked: its own part shows, greyed out, and it can't be deleted. */
+  locked?: boolean;
 };
 
 type PriceKey = keyof PositionPrices;
@@ -91,7 +96,8 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
       : `${pct(now.target)}　${rewardRisk(now.entry, now.stop, now.target).toFixed(2)} R`,
   };
   const rows: HTMLElement[] = [];
-  const live = one.isLive?.() ?? false;
+  const waiting = one.waiting?.() ?? false;
+  const live = !waiting && (one.isLive?.() ?? false);
   const k = d.okx;
   const fixed: Partial<Record<PriceKey, string>> = {
     ...(live || k ? { entry: "進場照 OKX（成交均價），不能改" } : {}),
@@ -133,7 +139,8 @@ function priceRows(one: OnePosition, typed: Typed, applied: () => void): HTMLEle
   rows.push(msg);
   const o = d.order;
   if (o && o.state !== "canceled" && o.state !== "mmp_canceled" && o.state !== "missing") {
-    rows.push(el("div", "pop-note", "已下單：這裡只改圖上的價格，不改 OKX"));
+    const note = waiting ? "掛單中：改價格或風險會重算張數，確認後改 OKX" : live ? "改止損、止盈會先問要不要改 OKX" : "已下單：這裡只改圖上的價格，不改 OKX";
+    rows.push(el("div", "pop-note", note));
   }
   return rows;
 }
@@ -169,12 +176,15 @@ function riskInputs(value: number, mode: RiskMode, onChange: (v: number, m: Risk
 
 export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render): Render {
   const typed: Typed = {}; // kept across redraws of this window
-  return (body, rerender) => {
+  return (outer, rerender) => {
     const cur = io.get();
     const set = (p: Partial<PositionSettings>) => io.set({ ...io.get(), ...p });
     const later = () => requestAnimationFrame(() => requestAnimationFrame(rerender)); // after the chart recomputes
+    // locked: the position's own part greyed out (R lines and colors below are settings, not this drawing)
+    let body = outer;
 
     if (one) {
+      if (one.locked) body = lockedPart(outer);
       const d = one.drawing;
       const t = one.trade();
       const upd = (p: Parameters<OnePosition["update"]>[0]) => {
@@ -213,6 +223,10 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       const levRow = el("div", "pop-row");
       const lev = numInput(d.leverage, POSITION_LIMITS.leverage, { title: "1～125 倍", width: 64, step: "1", int: false }, (v) => upd({ leverage: v }));
       lev.dataset.key = "leverage";
+      if (one.waiting?.()) {
+        lev.disabled = true;
+        lev.title = "掛單後不能改槓桿，要改請撤單重下";
+      }
       levRow.append(lbl("槓桿"), lev, lbl("倍"));
       if (!d.okx) body.append(capRow, riskRow, levRow);
       if (t && !d.okx) {
@@ -275,6 +289,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         labelled(checkbox(cur.chain, "", (v) => set({ chain: v })), "接續前一個倉位結算後的資金", "沒設資金的倉位，用前一個結算後的資金"),
       );
     }
+    body = outer;
 
     body.append(el("div", "pop-section", "R 線"));
     if (one) body.append(el("div", "pop-note", "R 線和下面的顯示設定，所有倉位共用"));
@@ -369,12 +384,13 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
         "一直顯示資訊框",
         "不勾時，滑鼠移上去或選取才顯示",
       ),
+      labelled(checkbox(cur.showClosed, "", (v) => set({ showClosed: v })), "顯示歷史倉位", "OKX 已平倉的倉位，隱藏後仍保留"),
     );
     body.append(colors, shows);
     extra?.(body, rerender);
 
     const foot = el("div", "pop-foot");
-    if (one) {
+    if (one && !one.locked) {
       foot.append(textButton("刪除這個倉位", "text-btn danger", () => {
         closePopover();
         one.remove();
@@ -384,7 +400,7 @@ export function renderPosition(io: PositionIo, one?: OnePosition, extra?: Render
       // one position's window: only what it shows of the shared settings
       foot.append(el("span", "spacer"), textButton("恢復 R 線和顏色", "link-btn", () => {
         const d = DEFAULT_POSITION;
-        set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoHover: d.infoHover });
+        set({ levels: clone(d.levels), profit: d.profit, loss: d.loss, transparency: d.transparency, showPrices: d.showPrices, infoHover: d.infoHover, showClosed: d.showClosed });
         rerender();
       }, "外觀恢復預設，價格和資金不變"));
     } else {

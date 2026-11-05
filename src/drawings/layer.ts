@@ -60,6 +60,12 @@ import {
 /** "measure": the ruler (a measurement, not a drawing: nothing is kept). */
 export type Tool = "cursor" | "measure" | DrawKind;
 
+/** What a position had before a change that may be sent to OKX (put back when it isn't). */
+export type PositionBefore = Pick<PositionDrawing, "a" | "b" | "target" | "capital" | "risk" | "riskMode">;
+const before = (d: PositionDrawing): PositionBefore => ({ a: { ...d.a }, b: { ...d.b }, target: d.target, capital: d.capital, risk: d.risk, riskMode: d.riskMode });
+const samePlace = (d: PositionDrawing, b: PositionBefore) =>
+  d.a.p === b.a.p && d.b.p === b.b.p && d.target === b.target && d.capital === b.capital && d.risk === b.risk && d.riskMode === b.riskMode;
+
 export type DrawingHost = {
   chart: IChartApi;
   series: ISeriesApi<"Candlestick">;
@@ -105,6 +111,10 @@ export type DrawingHost = {
   /** The stop-loss / take-profit of a position on OKX was moved on the chart (`before`: what they were), at
    *  screen point (x, y): ask whether to change OKX. */
   stopsEdited(d: PositionDrawing, before: { stop: number; target: number }, x: number, y: number): void;
+  /** An order of ours still waiting on OKX, nothing filled: its entry, stops and size can be changed there. */
+  waiting(d: PositionDrawing): boolean;
+  /** Such a position was changed on the chart (`before`: as it was): ask whether to change the order. */
+  waitingEdited(d: PositionDrawing, before: PositionBefore, x: number, y: number): void;
   toolChanged(tool: Tool): void;
   /** The magnet is in effect right now (always on, or the hold key is down). */
   magnetActive(active: boolean): void;
@@ -112,6 +122,8 @@ export type DrawingHost = {
   openSettings(d: Drawing, x: number, y: number): void;
   /** Status bar hint; null restores the default. */
   hint(text: string | null): void;
+  /** Drawings locked (the lock button): none can be added, moved, changed or deleted here. */
+  locked(): boolean;
   /** Room for the labels on the chart, and their size in px. */
   space: LabelSpace;
   textSize(): number;
@@ -163,6 +175,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private plans: LabelPlan[] = [];
   private measure: Measure | null = null;
   private measureGeo: MeasureGeo | null = null;
+  /** A refusal shown in the status bar, until the hint is put back. */
+  private flashTimer = 0;
   private readonly offs: (() => void)[] = [];
 
   private readonly views: IPrimitivePaneView[] = [
@@ -201,6 +215,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   /** The chart is going away: stop listening to the window. */
   destroy() {
+    clearTimeout(this.flashTimer);
     for (const off of this.offs) off();
     this.offs.length = 0;
   }
@@ -293,6 +308,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     return this.tool;
   }
   setTool(t: Tool) {
+    if (t !== "cursor" && t !== "measure" && this.refused()) return;
     this.tool = t;
     this.draft = null;
     this.placing = null;
@@ -340,7 +356,26 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   find(id: string): Drawing | undefined {
     return this.list.find((d) => d.id === id);
   }
+  /** A drawing that is on the chart now (not a hidden closed position): its alert's bell shows. */
+  findShown(id: string): Drawing | undefined {
+    const d = this.find(id);
+    return d && this.shown(d) ? d : undefined;
+  }
+  /** The lock was switched on or off: when on, the drawing being placed, its tool, the selection and a drag end. */
+  lockChanged() {
+    if (this.host.locked()) {
+      if (this.tool !== "cursor" && this.tool !== "measure") this.setTool("cursor");
+      this.selected = null;
+      if (this.drag) {
+        this.drag = null;
+        this.host.el.classList.remove("dragging");
+      }
+    }
+    this.refreshHint();
+    this.redraw();
+  }
   clearAll() {
+    if (this.refused()) return;
     this.list = [];
     this.selected = null;
     this.hovered = null;
@@ -349,6 +384,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.redraw();
   }
   remove(id: string) {
+    if (this.refused()) return;
     this.list = this.list.filter((d) => d.id !== id);
     if (this.selected === id) this.selected = null;
     if (this.hovered === id) this.hovered = null;
@@ -359,6 +395,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
   /** New style for a line, channel or rectangle; saved at once. */
   setStyle(id: string, style: LineStyle | RectStyle | ChannelStyle) {
+    if (this.refused()) return;
     const d = this.find(id);
     if (!d || d.kind === "fib" || d.kind === "position") return;
     (d as { style: LineStyle | RectStyle | ChannelStyle }).style = style;
@@ -366,32 +403,56 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.redraw();
   }
   /** Capital, risk or leverage of one position changed; saved at once. */
-  updatePosition(id: string, p: Partial<Pick<PositionDrawing, "capital" | "risk" | "riskMode" | "leverage">>) {
+  updatePosition(id: string, p: Partial<Pick<PositionDrawing, "capital" | "risk" | "riskMode" | "leverage">>, at?: { x: number; y: number }) {
+    if (this.refused()) return;
     const d = this.find(id);
     if (!d || d.kind !== "position") return;
+    const waiting = this.host.waiting(d);
+    if (waiting && p.leverage != null && p.leverage !== d.leverage) {
+      this.host.hint("掛單的槓桿不能改，要改請撤單重下");
+      return;
+    }
+    const was = before(d);
     Object.assign(d, p);
     this.host.changed(this.list);
     this.redraw();
+    if (waiting && !samePlace(d, was)) this.host.waitingEdited(d, was, at?.x ?? window.innerWidth / 2, at?.y ?? window.innerHeight / 3);
   }
   /** Entry, stop-loss and take-profit of one position, typed in its settings (checked there); saved at once. */
   setPrices(id: string, p: PositionPrices, at?: { x: number; y: number }) {
+    if (this.refused()) return;
     const d = this.find(id);
     if (!d || d.kind !== "position") return;
-    const before = { stop: d.b.p, target: d.target };
-    const live = this.host.isLive(d);
-    if (!live && !d.okx) d.a = { ...d.a, p: p.entry }; // on OKX the entry is OKX's
+    const was = before(d);
+    const waiting = this.host.waiting(d);
+    const live = !waiting && this.host.isLive(d);
+    if (waiting || (!live && !d.okx)) d.a = { ...d.a, p: p.entry }; // on OKX the entry is OKX's, until it fills the order's
     d.b = { ...d.b, p: p.stop };
     d.target = p.target;
     this.host.changed(this.list);
     this.redraw();
-    if (live && (before.stop !== d.b.p || before.target !== d.target)) {
-      this.host.stopsEdited(d, before, at?.x ?? window.innerWidth / 2, at?.y ?? window.innerHeight / 3);
-    }
+    const x = at?.x ?? window.innerWidth / 2;
+    const y = at?.y ?? window.innerHeight / 3;
+    if (waiting && !samePlace(d, was)) this.host.waitingEdited(d, was, x, y);
+    else if (live && (was.b.p !== d.b.p || was.target !== d.target)) this.host.stopsEdited(d, { stop: was.b.p, target: was.target }, x, y);
+  }
+  /** A waiting order's position back as it was (the change wasn't sent to OKX), not as a step to undo. */
+  restore(id: string, b: PositionBefore) {
+    const d = this.find(id);
+    if (!d || d.kind !== "position") return;
+    Object.assign(d, { a: { ...b.a }, b: { ...b.b }, target: b.target, capital: b.capital, risk: b.risk, riskMode: b.riskMode });
+    this.host.changed(this.list, false);
+    this.redraw();
   }
   /** A position closed on OKX (drawn from it, or with an order of ours in it): a record now. */
   private closedOnOkx(id: string): boolean {
     const d = this.find(id);
     return d?.kind === "position" && !!(d.okx?.closed || d.order?.closed);
+  }
+  /** Its order still waiting on OKX, nothing filled (see DrawingHost.waiting)? */
+  isWaiting(id: string): boolean {
+    const d = this.find(id);
+    return d?.kind === "position" && this.host.waiting(d);
   }
   /** Is this position on OKX now (see DrawingHost.isLive)? */
   isLive(id: string): boolean {
@@ -413,8 +474,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   priceText(p: number): string {
     return this.host.priceText(p);
   }
-  /** Settings changed (Fib levels, magnet key): redraw and refresh the hint. */
+  /** Settings changed (Fib levels, magnet key, 顯示歷史倉位): redraw and refresh the hint. */
   refresh() {
+    const gone = (id: string | null) => {
+      const d = id ? this.find(id) : undefined;
+      return !!d && !this.shown(d);
+    };
+    if (gone(this.selected)) this.selected = null;
+    if (gone(this.hovered)) this.hovered = null;
     this.refreshHint();
     this.host.magnetActive(this.host.magnet().on || this.holdDown);
     this.redraw();
@@ -440,8 +507,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private computeGeo(): Geo[] {
     const pr = this.projector();
     if (!pr) return [];
-    const items = this.draft ? [...this.list, this.draft] : this.list;
-    return computeGeo(items, pr, {
+    const items = this.list.filter((d) => this.shown(d));
+    if (this.draft) items.push(this.draft);
+    const geo = computeGeo(items, pr, {
       fib: this.host.fib(),
       rLevels: this.host.position().levels.filter((l) => l.on).map((l) => l.value),
       fmtPrice: this.host.fmtPrice,
@@ -450,6 +518,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       fit: (d) => this.fitOf(d),
       firstOnly: this.draft && isChannelDrawing(this.draft) && this.draft.kind !== "regression" && this.stage === 1 ? this.draft.id : null,
     });
+    if (this.host.locked()) for (const g of geo) g.handles = []; // nothing to drag
+    return geo;
+  }
+
+  /** On the chart: everything but positions closed on OKX while 顯示歷史倉位 is off (they stay saved). */
+  private shown(d: Drawing): boolean {
+    return !(d.kind === "position" && (d.okx?.closed || d.order?.closed) && !this.host.position().showClosed);
   }
 
   /** A regression trend fitted to the closes of the loaded bars from its first point to its second (null when
@@ -798,13 +873,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       return;
     }
     const h = this.hit(m.x, m.y);
-    if (!h) {
+    if (!h || this.host.locked()) {
       if (this.selected) {
         this.selected = null;
         this.refreshHint();
         this.redraw();
       }
-      return; // the chart pans as usual
+      return; // the chart pans as usual (locked: as if the drawings weren't there)
     }
     e.preventDefault();
     e.stopPropagation();
@@ -839,7 +914,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.refreshHint();
       this.redraw();
     }
-    const start = this.tool === "measure" || (this.tool === "cursor" && e.shiftKey && !this.spotAt(m.x, m.y) && !this.hit(m.x, m.y));
+    const start = this.tool === "measure" || (this.tool === "cursor" && e.shiftKey && !this.spotAt(m.x, m.y) && (this.host.locked() || !this.hit(m.x, m.y)));
     if (!start) return false;
     e.preventDefault();
     e.stopPropagation();
@@ -881,9 +956,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
     const h = m.inside ? this.hit(m.x, m.y) : null;
     const id = h ? h.id : null;
-    this.host.el.classList.toggle("over-drawing", !!h || (m.inside && !!this.spotAt(m.x, m.y)));
+    this.host.el.classList.toggle("over-drawing", (!!h && !this.host.locked()) || (m.inside && !!this.spotAt(m.x, m.y)));
     if (id !== this.hovered) {
       this.hovered = id;
+      if (this.host.locked()) this.refreshHint();
       this.redraw();
     }
   }
@@ -912,7 +988,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (moved) this.refit(moved);
       this.host.changed(this.list);
       const d = this.find(dr.id);
-      if (d?.kind === "position" && (dr.part === "stop" || dr.part === "target") && this.host.isLive(d)) {
+      if (d?.kind !== "position") return;
+      const was: PositionBefore = { ...before(d), a: { ...dr.orig.a }, b: { ...dr.orig.b }, target: dr.orig.target };
+      if (this.host.waiting(d)) {
+        if (!samePlace(d, was)) this.host.waitingEdited(d, was, e.clientX, e.clientY);
+      } else if ((dr.part === "stop" || dr.part === "target") && this.host.isLive(d)) {
         this.host.stopsEdited(d, { stop: dr.orig.b.p, target: dr.orig.target }, e.clientX, e.clientY);
       }
       return;
@@ -998,7 +1078,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.host.hint("OKX 已平倉，不能移動，可按 Delete 刪除");
       return;
     }
-    if (d.kind === "position" && (d.okx || this.host.isLive(d)) && dr.part !== "stop" && dr.part !== "target") {
+    const waiting = d.kind === "position" && this.host.waiting(d); // its order moves with it, after an OK
+    if (d.kind === "position" && !waiting && (d.okx || this.host.isLive(d)) && dr.part !== "stop" && dr.part !== "target") {
       this.host.hint("OKX 倉位只能拖止損、止盈");
       return;
     }
@@ -1031,8 +1112,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       const dir = posDir(d);
       const tiny = Math.abs(d.a.p) * 1e-6;
       if (dr.part === "stop") {
-        // stays on its side; with a direction of its own (on OKX) it may go past the entry (a profit locked in)
-        if (d.dir != null) d.b.p = Math.abs(pt.p - d.a.p) < tiny ? d.a.p - dir * tiny : pt.p;
+        // stays on its side; with a direction of its own (on OKX, filled) it may go past the entry (a profit
+        // locked in)
+        if (d.dir != null && !waiting) d.b.p = Math.abs(pt.p - d.a.p) < tiny ? d.a.p - dir * tiny : pt.p;
         else d.b.p = dir === 1 ? Math.min(pt.p, d.a.p - tiny) : Math.max(pt.p, d.a.p + tiny);
       } else if (dr.part === "target") {
         d.target = dir === 1 ? Math.max(pt.p, d.a.p) : Math.min(pt.p, d.a.p); // on the profit side
@@ -1122,7 +1204,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!down || !this.active || isTyping(document.activeElement)) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === "KeyZ" || e.code === "KeyY")) {
       e.preventDefault();
-      if (this.drag) return;
+      if (this.drag || this.refused()) return;
       const redo = e.code === "KeyY" || e.shiftKey;
       if (this.draft && !redo) this.cancel(); // the drawing being placed goes first
       else if (redo) this.host.redo();
@@ -1186,7 +1268,17 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
   }
 
+  /** Locked: say so for a moment and true (what was asked is not done). */
+  private refused(): boolean {
+    if (!this.host.locked()) return false;
+    this.host.hint("畫線已鎖定，按左側鎖頭解除");
+    clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => this.refreshHint(), 2500);
+    return true;
+  }
+
   private refreshHint() {
+    clearTimeout(this.flashTimer);
     const m = this.host.magnet();
     const snap = m.on ? "吸附開啟" : `按住 ${magnetKeyLabel(m.holdKey)} 吸附`;
     if (this.measure?.done) {
@@ -1214,8 +1306,12 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (info.points === 1) this.host.hint(`${info.name}：點一下放置，${snap}`);
       else if (this.draft) this.host.hint(`${info.name}：點第二個點，${shift}`);
       else this.host.hint(`${info.name}：點第一個點或拖曳，${snap}`);
+    } else if (this.host.locked()) {
+      this.host.hint(this.hovered ? "畫線已鎖定：雙擊看設定、設提醒" : null);
     } else if (this.selected && this.closedOnOkx(this.selected)) {
       this.host.hint("OKX 已平倉：雙擊看設定，Delete 刪除");
+    } else if (this.selected && this.isWaiting(this.selected)) {
+      this.host.hint("掛單中：拖進場、止損、止盈會問要不要改 OKX");
     } else if (this.selected && this.isLive(this.selected)) {
       this.host.hint("OKX 倉位：拖止損、止盈會問要不要改 OKX");
     } else if (this.selected && this.find(this.selected)?.kind === "position") {

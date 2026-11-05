@@ -87,12 +87,14 @@ export function openDrawingStyle(
   x: number,
   y: number,
   d: LineDrawing | ChannelDrawing | RectDrawing,
-  cb: { set: (s: LineStyle | RectStyle | ChannelStyle) => void; remove: () => void },
+  cb: { set: (s: LineStyle | RectStyle | ChannelStyle) => void; remove: () => void; locked?: boolean },
   extra?: Render,
 ) {
   // a channel's style as it is now, across redraws of the window (it changes with each pick)
   let cs: ChannelStyle | null = isChannelDrawing(d) ? clone(d.style) : null;
-  popoverAt(x, y, TOOL_INFO[d.kind].name, (body, rerender) => {
+  popoverAt(x, y, TOOL_INFO[d.kind].name, (outer, rerender) => {
+    // locked: its own settings show, greyed out; its alert can still be set
+    const body = cb.locked ? lockedPart(outer) : outer;
     if (cs && isChannelDrawing(d)) {
       channelRows(body, rerender, d, () => cs!, (v) => {
         cs = v;
@@ -129,7 +131,8 @@ export function openDrawingStyle(
       );
       body.append(row);
     }
-    extra?.(body, rerender);
+    extra?.(outer, rerender);
+    if (cb.locked) return;
     const foot = el("div", "pop-foot");
     foot.append(
       el("span", "pop-note"),
@@ -139,8 +142,17 @@ export function openDrawingStyle(
         cb.remove();
       }, "刪除這個畫線"),
     );
-    body.append(foot);
+    outer.append(foot);
   });
+}
+
+/** A drawing's own settings while the drawings are locked: shown, but nothing in it can be changed. */
+export function lockedPart(body: HTMLElement): HTMLElement {
+  body.append(el("div", "pop-note", "畫線已鎖定，只能看和設提醒"));
+  const box = el("fieldset", "pop-locked");
+  box.disabled = true;
+  body.append(box);
+  return box;
 }
 
 /** What a level is, in words: "下軌", "中間", "上軌上方 1 倍寬", ... */

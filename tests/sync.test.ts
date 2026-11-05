@@ -27,7 +27,7 @@ const drawn = (id: string, o?: PositionOrder, entry = 78000, stop = 77000, targe
   riskMode: "pct", leverage: 10, ...(o ? { order: o } : {}),
 });
 const upd = (o: Partial<SyncOrder>): SyncOrder => ({
-  instId: "BTC-USDT-SWAP", ordId: "700", clOrdId: "qtc1", state: "filled", side: "buy", sz: 3, accFillSz: 3, avgPx: 78000,
+  instId: "BTC-USDT-SWAP", ordId: "700", clOrdId: "qtc1", state: "filled", side: "buy", px: 78000, sz: 3, accFillSz: 3, avgPx: 78000,
   fillTime: 1_793_600_000_100, uTime: 1_793_600_000_100, sl: null, tp: null, attachAlgoClOrdId: "qts1", ...o,
 });
 const fmt = (p: number) => p.toFixed(1);
@@ -95,6 +95,20 @@ test("orders of ours: attached stops, the position they go into, stops moved on 
   const twice: Drawing[] = [drawn("p3", order({ ordId: "702", algoClOrdId: undefined, sl: undefined, state: "filled", fillSz: 3 }))];
   applySync(twice, state([pos()], [algo({ algoId: "77", sl: 77000 }), algo({ algoId: "79", sl: 77000 })]), [], NOW);
   assert.equal((twice[0] as PositionDrawing).order!.algoId, undefined); // two at that price: not guessed
+});
+
+test("a waiting order changed on OKX (or by us): the position's entry, stops and size follow", () => {
+  const d = drawn("p1", order());
+  const list: Drawing[] = [d];
+  // moved up as a whole: the new price is outside the old stops, all three move together
+  applySync(list, state([], []), [upd({ state: "live", accFillSz: 0, avgPx: null, px: 81000, sz: 2, sl: 80000, tp: 83000 })], NOW);
+  assert.deepEqual([d.a.p, d.b.p, d.target, d.order!.px, d.order!.sz], [81000, 80000, 83000, 81000, 2]);
+  // OKX's answer agrees with the chart already: nothing changes
+  assert.equal(applySync(list, state([], []), [upd({ state: "live", accFillSz: 0, avgPx: null, px: 81000, sz: 2, sl: 80000, tp: 83000 })], NOW).changed, false);
+  // prices that don't make a long any more (stop above the price) are not taken
+  applySync(list, state([], []), [upd({ state: "live", accFillSz: 0, avgPx: null, px: 79000, sz: 2, sl: 80000, tp: 83000 })], NOW);
+  assert.deepEqual([d.a.p, d.b.p], [81000, 80000]);
+  assert.equal(d.order!.px, 79000); // the record still says what OKX has
 });
 
 test("an add that fills moves the earlier stops; stops moved on the chart go to OKX", () => {

@@ -114,6 +114,9 @@ button:focus-visible, select:focus-visible, a:focus-visible, input[type=checkbox
 .icon-btn.active, .icon-btn.open, .icon-btn.held { --icon-hole: var(--raised); background: var(--raised); color: var(--text); box-shadow: var(--hilite); }
 .icon-btn.on { color: var(--text); }
 .icon-btn.armed { color: var(--down); background: rgba(239, 83, 80, 0.12); }
+/* drawings locked: the tools that would add, change or delete them are dimmed (a click says why) */
+.tools.locked .draw-tool { opacity: 0.38; }
+.tools.locked .draw-tool:hover { background: transparent; color: var(--text-2); }
 .tools-sep { width: 20px; height: 1px; margin: 4px 0; background: var(--line); }
 .icon-wrap { position: relative; }
 .icon-caret { position: absolute; right: -4px; bottom: 0; width: 12px; height: 12px; padding: 2px; border: 0; border-radius: 3px;
@@ -195,6 +198,15 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .pop-msg { min-height: 16px; max-width: 360px; color: var(--down); font-size: 12px; line-height: 16px; }
 .pop-note { color: var(--muted); font-size: 12px; line-height: 18px; padding: 4px 0; }
 .pop-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* 設定 → 資料: what 清除所有資料 deletes, and the second question */
+.data-list { margin: 0; padding: 0 0 4px 18px; color: var(--text-2); font-size: 12px; line-height: 20px; }
+.data-confirm { margin-top: 8px; padding: 8px 12px; border: 1px solid var(--down); border-radius: var(--r-ctl); background: rgba(239, 83, 80, 0.06); }
+.pop-row input.data-word { width: 120px; }
+.wipe-cover { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: var(--bg); }
+.wipe-cover-text { color: var(--text); font-size: 14px; }
+/* a drawing's own settings while the drawings are locked: shown, nothing can be changed */
+.pop-locked { min-width: 0; margin: 0; padding: 0; border: 0; opacity: 0.55; }
+.pop-locked .pop-check, .pop-locked input, .pop-locked select, .pop-locked button { cursor: default; }
 .text-btn { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border: 1px solid var(--line);
   border-radius: var(--r-ctl); background: var(--raised); color: var(--text); font: inherit; white-space: nowrap; cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }

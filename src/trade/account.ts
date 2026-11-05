@@ -5,6 +5,7 @@
 
 import {
   tradeAccount,
+  tradeAmendStops,
   tradeCancel,
   tradeClearKeys,
   tradeLock,
@@ -15,6 +16,7 @@ import {
   tradeStatus,
   tradeUnlock,
   type Account,
+  type AmendReq,
   type KeyStatus,
   type OrderInfo,
   type OrderReq,
@@ -112,6 +114,11 @@ export class TradeAccount {
   }
   async cancel(instId: string, ordId: string) {
     await tradeCancel(instId, ordId);
+    void this.refresh();
+  }
+  /** Change an order still waiting (price, size, its stops) or a stop-loss / take-profit. */
+  async amend(r: AmendReq) {
+    await tradeAmendStops(r);
     void this.refresh();
   }
 

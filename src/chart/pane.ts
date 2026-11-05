@@ -246,6 +246,10 @@ export class ChartPane {
       stopsEdited: (d, before, x, y) => {
         shared.sync.confirmEdit(feed.instId, d, before, x, y, feed.fmtPrice, () => this.drawings.setStops(d.id, before));
       },
+      waiting: (d) => !feed.replaying && shared.trading.waiting(d),
+      waitingEdited: (d, before, x, y) => {
+        shared.trading.amendWaiting(this.orders, d, this.drawings.tradeNow(d.id), x, y, () => this.drawings.restore(d.id, before));
+      },
       toolChanged: (t) => {
         if (inUse()) shared.tools.paintTools(t);
       },
@@ -257,6 +261,7 @@ export class ChartPane {
       hint: (text) => {
         if (inUse()) shared.status.hint(text);
       },
+      locked: () => settings.drawLock.get(),
       space,
       textSize,
     });
@@ -287,7 +292,7 @@ export class ChartPane {
       chart,
       series: candles,
       alerts: () => (this.drawingsFor ? shared.alerts.forSymbol(this.drawingsFor) : []),
-      drawing: (a) => (a.target.kind === "drawing" ? this.drawings.find(a.target.id) : undefined),
+      drawing: (a) => (a.target.kind === "drawing" ? this.drawings.findShown(a.target.id) : undefined),
       times: () => feed.times,
       barSec: () => feed.tf.sec,
       fmtPrice: feed.fmtPrice,
@@ -328,7 +333,11 @@ export class ChartPane {
       settings.appearance.watch(() => this.applyAppearance()),
       settings.fib.watch(() => this.drawings.refresh()),
       settings.magnet.watch(() => this.drawings.refresh()),
-      settings.position.watch(() => this.drawings.redraw()),
+      settings.position.watch(() => {
+        this.drawings.refresh(); // 顯示歷史倉位 may hide some
+        this.alertLayer.redraw();
+      }),
+      settings.drawLock.watch(() => this.drawings.lockChanged()),
     );
     this.applyLabels();
   }
@@ -413,7 +422,11 @@ export class ChartPane {
   stepHistory(back: boolean) {
     const id = this.drawingsFor;
     if (!id) return;
-    const { history, status, alerts } = this.s;
+    const { history, status, alerts, settings } = this.s;
+    if (settings.drawLock.get()) {
+      status.note("畫線已鎖定，不能還原或重做");
+      return;
+    }
     const list = back ? history.undo(id) : history.redo(id);
     if (!list) {
       status.note(back ? "沒有可以還原的畫線操作" : "沒有可以重做的畫線操作");

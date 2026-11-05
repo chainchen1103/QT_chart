@@ -47,6 +47,8 @@ export type Tool = {
   level: Level;
   input: { type: "object"; properties: Record<string, unknown>; required?: string[] };
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
+  /** Adds, changes or deletes drawings (always, or with these arguments): refused while the user has locked them. */
+  drawings?: true | ((a: Args) => boolean);
   run(a: Args, c: CallCtx): ToolResult | Promise<ToolResult>;
 };
 
@@ -142,7 +144,7 @@ export function findDrawing(list: readonly Drawing[], id: string, instId: string
 export type TradeRequest = {
   time: number;
   client: string;
-  what: "order" | "stops";
+  what: "order" | "stops" | "amend";
   symbol: string;
   drawingId: string;
   status: "waiting for the user" | "sending" | "done" | "declined" | "failed";

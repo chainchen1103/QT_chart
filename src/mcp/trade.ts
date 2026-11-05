@@ -1,4 +1,5 @@
-// Tools that trade on OKX: place an order from a position, cancel it, move the stop-loss / take-profit on OKX.
+// Tools that trade on OKX: place an order from a position, cancel it, change it while it waits (price, stops,
+// the size worked out again), move the stop-loss / take-profit on OKX.
 // Depending on the AI connection's settings each waits for the user's OK in QT Chart (the same windows the
 // user's own orders use), always so when it goes past the position defaults. A window waits up to five minutes;
 // the app is answered within WAIT_MS (AI apps give up on a call after about a minute), with "still waiting" when
@@ -10,7 +11,7 @@ import { checkPrices, fmtMoney } from "../drawings/trade.ts";
 import { loadDrawings } from "../settings/store.ts";
 import { MAX_DRAWINGS, type PositionDrawing } from "../settings/model.ts";
 import { isOpenState, type OrderPrefs } from "../trade/model.ts";
-import { isMissing, openOrderWindow, orderPlanFor, submitOrder, withInfo, type OrderDone } from "../trade/panel.ts";
+import { amendPlanFor, isMissing, openAmendWindow, openOrderWindow, orderPlanFor, sendAmend, submitOrder, withInfo, type OrderDone } from "../trade/panel.ts";
 import { closePopover } from "../ui/popover.ts";
 import { ArgError, bool, data, fail, needsConfirm, num, oneOf, riskAllowed, str, widensStop, withinDefaults, type Args, type ToolResult } from "./model.ts";
 import { chartFor, findDrawing, request, S, SYMBOL, symbolArg, who, type CallCtx, type McpApp, type Tool } from "./tools.ts";
@@ -105,6 +106,7 @@ export function tradeTools(app: McpApp): Tool[] {
         },
       },
       annotations: TRADE,
+      drawings: (a) => a.drawing_id == null, // a new position is drawn for it
       run: (a, c) => serial(() => placeOrder(app, a, c)),
     },
     {
@@ -117,10 +119,31 @@ export function tradeTools(app: McpApp): Tool[] {
       run: (a, c) => serial(() => cancelOrder(app, a, c)),
     },
     {
+      name: "amend_order",
+      title: "Change a waiting order",
+      description:
+        "Change an order still waiting on OKX with nothing filled (the order of a position: drawing_id): its price (entry), stop-loss and / or take-profit. The size is worked out again from the position's risk, as placing it would, and the position on the chart moves with it. Shown to the user for an OK as the settings say, always when the loss at the stop is past the position defaults. Side, order type and leverage can't change: cancel_order, then place_order again.",
+      level: "trade",
+      input: {
+        type: "object",
+        properties: {
+          symbol: SYMBOL,
+          drawing_id: S.str("The position whose order to change (list_drawings)."),
+          entry: S.num("New limit price."),
+          stop_loss: S.num("New stop-loss price."),
+          take_profit: S.num("New take-profit price (only when the order has one)."),
+        },
+        required: ["drawing_id"],
+      },
+      annotations: TRADE,
+      drawings: true,
+      run: (a, c) => serial(() => amendOrder(app, a, c)),
+    },
+    {
       name: "move_stops",
       title: "Move stop-loss / take-profit",
       description:
-        "Move the stop-loss and / or take-profit of a position on OKX (an open position, or an order still waiting with its stops), needs 與 OKX 同步 (okxSync) on. Shown to the user for an OK as the settings say, and always when the stop moves away from the entry. A position not on OKX just gets the new prices on the chart.",
+        "Move the stop-loss and / or take-profit of a position on OKX (an open position needs 與 OKX 同步, okxSync, on). For an order still waiting with nothing filled this is amend_order: the size is worked out again. Shown to the user for an OK as the settings say, and for an open position always when the stop moves away from the entry. A position not on OKX just gets the new prices on the chart.",
       level: "trade",
       input: {
         type: "object",
@@ -128,6 +151,7 @@ export function tradeTools(app: McpApp): Tool[] {
         required: ["drawing_id"],
       },
       annotations: TRADE,
+      drawings: true,
       run: (a, c) => serial(() => moveStops(app, a, c)),
     },
   ];
@@ -284,6 +308,7 @@ async function moveStops(app: McpApp, a: Args, c: CallCtx): Promise<ToolResult> 
   const d = findDrawing(loadDrawings(instId), id, instId);
   if (d.kind !== "position") throw new ArgError("That drawing is not a position");
   if (d.okx?.closed || d.order?.closed) return fail("That position was closed on OKX.");
+  if (app.trading.waiting(d)) return amendWaitingOrder(app, instId, id, { sl, tp }, c); // its size goes with it
   const dir = posDir(d);
   const bad = checkPrices({ entry: d.a.p, stop: sl ?? d.b.p, target: tp ?? d.target }, d.okx || d.order ? dir : undefined);
   if (bad) throw new ArgError(bad);
@@ -323,4 +348,96 @@ async function moveStops(app: McpApp, a: Args, c: CallCtx): Promise<ToolResult> 
     const note = widens ? "止損移離進場價，虧損會變大，所以要你確認" : undefined;
     void app.sync.amendForAi(instId, d, change, fmt, { from: who(c), note }).then((r) => resolve(outcome(r)));
   });
+}
+
+async function amendOrder(app: McpApp, a: Args, c: CallCtx): Promise<ToolResult> {
+  const instId = symbolArg(app, a);
+  const id = str(a, "drawing_id", { max: 80 });
+  const entry = num(a, "entry", { optional: true, min: 0 });
+  const sl = num(a, "stop_loss", { optional: true, min: 0 });
+  const tp = num(a, "take_profit", { optional: true, min: 0 });
+  if (entry == null && sl == null && tp == null) throw new ArgError("Give entry, stop_loss and / or take_profit");
+  return amendWaitingOrder(app, instId, id, { entry, sl, tp }, c);
+}
+
+/**
+ * A waiting order's prices changed by an AI app: its position moved on the chart, the size worked out again,
+ * the change asked for as the settings say, then sent; anything not sent puts the position back.
+ */
+async function amendWaitingOrder(app: McpApp, instId: string, id: string, p: { entry?: number; sl?: number; tp?: number }, c: CallCtx): Promise<ToolResult> {
+  const blocked = usableAccount(app);
+  if (blocked) return blocked;
+  const d0 = findDrawing(loadDrawings(instId), id, instId);
+  if (d0.kind !== "position") throw new ArgError("That drawing is not a position");
+  if (!app.trading.waiting(d0)) return fail("That position has no order waiting on OKX with nothing filled: move_stops moves the stops of a filled one.");
+  const o = d0.order!;
+  if (o.demo !== app.account.keys.demo) return fail(`That order was placed with the ${o.demo ? "demo" : "real-money"} API key, not the one set now.`);
+  const prices = { entry: p.entry ?? d0.a.p, stop: p.sl ?? d0.b.p, target: p.tp ?? d0.target };
+  const bad = checkPrices(prices, posDir(d0));
+  if (bad) throw new ArgError(bad);
+  const key = `amend:${id}`;
+  const wait = busy(key);
+  if (wait) return wait;
+  const pane = await chartFor(app, instId);
+  if (!pane) return fail(`${instId} couldn't be loaded on a chart (see the status bar in QT Chart).`);
+  if (pane.feed.replaying) return fail("That chart is in a bar replay: stop it first (replay with action stop).");
+  const put = (entry: number, stop: number, target: number) =>
+    app.quietDrawings(instId, (list) => {
+      const x = list.find((y) => y.id === id);
+      if (x?.kind !== "position") return false;
+      x.a = { ...x.a, p: entry };
+      x.b = { ...x.b, p: stop };
+      x.target = target;
+      return true;
+    });
+  put(prices.entry, prices.stop, prices.target);
+  const revert = () => put(d0.a.p, d0.b.p, d0.target);
+  const d = pane.drawings.find(id);
+  if (d?.kind !== "position") {
+    revert();
+    return fail(`No drawing ${id} on ${instId}.`);
+  }
+  const spot = { ...app.trading.spotFor(pane.orders, d), trade: pane.drawings.tradeNow(id) };
+  const plan = amendPlanFor(spot);
+  if (plan == null) {
+    revert();
+    return data({ amended: false, note: "Nothing changes on OKX: the prices round to what the order has." });
+  }
+  if (typeof plan === "string" || plan.problems.length) {
+    revert();
+    return fail(typeof plan === "string" ? plan : `The order can't be changed: ${plan.problems.join("，")}`);
+  }
+  const pos = app.settings.position.get();
+  const capital = app.trading.capital().amount;
+  const within = withinDefaults({ risk: plan.risk, leverage: d.leverage }, pos, capital);
+  const note = within ? undefined : `最大虧損約 ${fmtMoney(plan.risk)} U，超過倉位預設的 ${fmtMoney(riskAllowed(pos, capital))} U，所以要你確認`;
+  const ask = needsConfirm(app.mcp().confirm, o.demo, within);
+  const req = request({ client: who(c), what: "amend", symbol: instId, drawingId: id, status: ask ? "waiting for the user" : "sending" });
+  const outcome = (r: { ok: boolean; text: string }): ToolResult => {
+    req.status = r.ok ? "done" : ask && /沒有確認/.test(r.text) ? "declined" : "failed";
+    req.result = r.text;
+    if (!r.ok) return { ...fail(`${r.text}. The position is back as it was.`), log: r.text };
+    const now = pane.drawings.find(id);
+    const after = now?.kind === "position" ? now.order : undefined;
+    app.note(`${who(c)} 改了 ${shortName(instId)} 的掛單`);
+    const out = {
+      amended: true, symbol: instId, drawingId: id, orderId: o.ordId, demo: o.demo, price: after?.px ?? null, contracts: after?.sz ?? plan.contracts,
+      stopLoss: after?.sl ?? null, takeProfit: after?.tp ?? null, lossAtStop: Math.round(plan.risk * 100) / 100, changes: plan.lines,
+      ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
+    };
+    return { ...data(out), log: `已改掛單：${plan.lines.join("，")}` };
+  };
+  if (!ask) {
+    try {
+      await sendAmend(spot, plan);
+      return outcome({ ok: true, text: plan.lines.join("\n") });
+    } catch (e) {
+      revert();
+      return outcome({ ok: false, text: `OKX didn't take the change: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
+  const box = pane.el.getBoundingClientRect();
+  return confirmWith(app, key, (resolve) =>
+    openAmendWindow(box.left + box.width / 2 - 170, box.top + 48, spot, plan, revert, { from: who(c), note, done: (r) => resolve(outcome(r)) }),
+  );
 }

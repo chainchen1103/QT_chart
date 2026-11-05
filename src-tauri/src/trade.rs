@@ -116,7 +116,8 @@ pub struct OrderInfo {
 
 /// Moving the stop-loss and / or take-profit of an order's TP/SL. `kind` "algo": the TP/SL order itself (its
 /// order filled), found by algo_id or algo_cl_ord_id; "attached": the TP/SL still attached to order ord_id (not
-/// filled yet), found by algo_cl_ord_id (attachAlgoClOrdId) or algo_id (attachAlgoId).
+/// filled yet), found by algo_cl_ord_id (attachAlgoClOrdId) or algo_id (attachAlgoId). An order still waiting
+/// ("attached") can also get a new price and size, in the same request.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmendReq {
@@ -133,6 +134,11 @@ pub struct AmendReq {
     pub sl: Option<String>,
     #[serde(default)]
     pub tp: Option<String>,
+    /// "attached" only: the waiting order's new limit price and size (contracts); None leaves it as it is.
+    #[serde(default)]
+    pub px: Option<String>,
+    #[serde(default)]
+    pub sz: Option<String>,
 }
 
 /// A closed position (OKX's position history).
@@ -590,16 +596,23 @@ impl OrderReq {
 }
 
 impl AmendReq {
-    /// Where it goes and what it says; only trigger prices change (taken at market when hit, as placed).
+    /// Where it goes and what it says; trigger prices change (taken at market when hit, as placed), and a
+    /// waiting order's price and size.
     fn request(&self) -> Result<(&'static str, Value), String> {
         if !okx::valid_inst(&self.inst_id) || !self.inst_id.ends_with("-USDT-SWAP") {
             return Err(format!("只能改 USDT 永續合約的止損止盈：{}", self.inst_id));
         }
-        if self.sl.is_none() && self.tp.is_none() {
-            return Err("沒有要改的止損或止盈".into());
+        if self.sl.is_none() && self.tp.is_none() && self.px.is_none() && self.sz.is_none() {
+            return Err("沒有要改的價格".into());
         }
         if self.sl.as_deref().is_some_and(|v| !decimal(v)) || self.tp.as_deref().is_some_and(|v| !decimal(v)) {
             return Err("止損或止盈價不對".into());
+        }
+        if self.px.as_deref().is_some_and(|v| !decimal(v)) || self.sz.as_deref().is_some_and(|v| !decimal(v)) {
+            return Err("掛單價或張數不對".into());
+        }
+        if (self.px.is_some() || self.sz.is_some()) && self.kind != "attached" {
+            return Err("只有還沒成交的掛單能改價格和張數".into());
         }
         let algo_id = self.algo_id.as_deref().filter(|a| !a.is_empty());
         let cl = self.algo_cl_ord_id.as_deref().filter(|a| !a.is_empty());
@@ -631,13 +644,23 @@ impl AmendReq {
             "attached" => {
                 let ord_id = self.ord_id.as_deref().filter(|o| !o.is_empty() && o.len() <= 32 && o.chars().all(|c| c.is_ascii_digit()));
                 let ord_id = ord_id.ok_or("要指定訂單")?;
-                let mut algo = Value::Object(prices);
-                match (cl, algo_id) {
-                    (Some(c), _) => algo["attachAlgoClOrdId"] = json!(c),
-                    (None, Some(a)) => algo["attachAlgoId"] = json!(a),
-                    _ => return Err("要指定附帶的止損止盈".into()),
+                let mut b = json!({"instId": self.inst_id, "ordId": ord_id});
+                if let Some(px) = &self.px {
+                    b["newPx"] = json!(px);
                 }
-                Ok(("/api/v5/trade/amend-order", json!({"instId": self.inst_id, "ordId": ord_id, "attachAlgoOrds": [algo]})))
+                if let Some(sz) = &self.sz {
+                    b["newSz"] = json!(sz);
+                }
+                if !prices.is_empty() {
+                    let mut algo = Value::Object(prices);
+                    match (cl, algo_id) {
+                        (Some(c), _) => algo["attachAlgoClOrdId"] = json!(c),
+                        (None, Some(a)) => algo["attachAlgoId"] = json!(a),
+                        _ => return Err("要指定附帶的止損止盈".into()),
+                    }
+                    b["attachAlgoOrds"] = json!([algo]);
+                }
+                Ok(("/api/v5/trade/amend-order", b))
             }
             _ => Err("不知道要改哪一種止損止盈".into()),
         }
@@ -876,7 +899,9 @@ mod vault {
         std::fs::rename(&tmp, file).map_err(|e| format!("存不了 API：{e}"))
     }
 
+    /// The file, and what a save cut short left next to it.
     pub fn remove(file: &Path) -> Result<(), String> {
+        let _ = std::fs::remove_file(file.with_extension("tmp"));
         match std::fs::remove_file(file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("刪不掉 API：{e}")),
             _ => Ok(()),
@@ -1013,7 +1038,7 @@ mod tests {
         let b = m.body(None);
         assert!(b.get("px").is_none() && b.get("posSide").is_none());
         assert!(b["attachAlgoOrds"][0].get("tpTriggerPx").is_none());
-        assert_eq!(explain("50110", "Invalid IP"), "這台電腦的 IP 不在 API 白名單裡");
+        assert_eq!(explain("50110", "Invalid IP"), "這台電腦的 IP 不在這組 API 的白名單裡（OKX 50110：Invalid IP）");
     }
 
     #[test]
@@ -1026,6 +1051,8 @@ mod tests {
             algo_cl_ord_id: cl.map(Into::into),
             sl: sl.map(Into::into),
             tp: tp.map(Into::into),
+            px: None,
+            sz: None,
         };
         // a TP/SL order of its own (its order filled), by the id we gave it
         let (path, b) = amend("algo", None, None, Some("qtc1abcs"), Some("77800.5"), Some("80000")).request().unwrap();
@@ -1039,6 +1066,26 @@ mod tests {
         let (path, b) = amend("attached", Some("700000000000000001"), None, Some("qtc1abcs"), Some("77800"), None).request().unwrap();
         assert_eq!(path, "/api/v5/trade/amend-order");
         assert_eq!(b, json!({"instId": "BTC-USDT-SWAP", "ordId": "700000000000000001", "attachAlgoOrds": [{"attachAlgoClOrdId": "qtc1abcs", "newSlTriggerPx": "77800", "newSlOrdPx": "-1"}]}));
+        // a waiting order moved on the chart: its price, size and stops in one request
+        let mut moved = amend("attached", Some("700000000000000001"), None, Some("qtc1abcs"), Some("77700"), Some("80100"));
+        (moved.px, moved.sz) = (Some("78100.5".into()), Some("12".into()));
+        let (path, b) = moved.request().unwrap();
+        assert_eq!(path, "/api/v5/trade/amend-order");
+        assert_eq!(b["newPx"], "78100.5");
+        assert_eq!(b["newSz"], "12");
+        assert_eq!(b["attachAlgoOrds"][0]["newTpTriggerPx"], "80100");
+        // only the price: no attached part
+        let mut px_only = amend("attached", Some("700000000000000001"), None, Some("qtc1abcs"), None, None);
+        px_only.px = Some("78000".into());
+        let (_, b) = px_only.request().unwrap();
+        assert_eq!(b, json!({"instId": "BTC-USDT-SWAP", "ordId": "700000000000000001", "newPx": "78000"}));
+        // not for a TP/SL order of its own, nor a bad size
+        let mut algo_px = amend("algo", None, Some("1"), None, Some("5"), None);
+        algo_px.px = Some("6".into());
+        assert!(algo_px.request().is_err());
+        let mut bad_sz = amend("attached", Some("1"), None, Some("qtc1"), None, None);
+        bad_sz.sz = Some("1e3".into());
+        assert!(bad_sz.request().is_err());
         // refused: nothing to change, a bad price, no id, another market, an id with odd characters
         assert!(amend("algo", None, Some("1"), None, None, None).request().is_err());
         assert!(amend("algo", None, Some("1"), None, Some("-5"), None).request().is_err());

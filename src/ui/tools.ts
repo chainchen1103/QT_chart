@@ -1,6 +1,7 @@
 // The left bar: cursor, lines and channels (with a menu of kinds), Fib, rectangle, position (with its settings), the
-// ruler, magnet (with its settings), Fib levels, and "delete all drawings" (press twice), for the chart in use.
-// Also the settings window a drawing opens on double-click or right-click.
+// ruler, magnet (with its settings), Fib levels, the lock (no drawing added, changed or deleted while it is on),
+// and "delete all drawings" (press twice), for the chart in use. Also the settings window a drawing opens on
+// double-click or right-click (only to look and set its alert while the drawings are locked).
 
 import type { DrawingLayer, Tool } from "../drawings/layer.ts";
 import { readRaw, writeRaw } from "../core/storage.ts";
@@ -8,7 +9,7 @@ import {
   CHANNEL_KINDS, LINE_KINDS, magnetKeyLabel, TOOL_INFO, type ChannelKind, type Drawing, type DrawStyles, type LineKind,
 } from "../settings/model.ts";
 import type { Settings } from "../settings/store.ts";
-import { ICONS } from "./icons.ts";
+import { ICONS, LOCK_ICONS } from "./icons.ts";
 import { openDrawingStyle, toggleToolMenu } from "./panels/drawing.ts";
 import { toggleFibPanel } from "./panels/fib.ts";
 import { toggleMagnetPanel } from "./panels/magnet.ts";
@@ -36,6 +37,7 @@ export class Tools {
   private readonly d: ToolsDeps;
   private lastLine: LineTool;
   private clearArmedUntil = 0;
+  private hintTimer = 0;
 
   constructor(d: ToolsDeps) {
     this.d = d;
@@ -72,9 +74,21 @@ export class Tools {
     b.title = `吸附：${m.on ? "常開" : "常關"}，按住 ${magnetKeyLabel(m.holdKey)} 暫時吸附`;
   }
 
-  /** Double-click or right-click on a drawing of `drawings`: its settings, with its alert section. */
+  /** The lock button and the tools it keeps from being used. */
+  paintLock() {
+    const on = this.d.settings.drawLock.get();
+    const b = $("tool-lock");
+    b.innerHTML = on ? LOCK_ICONS.locked : LOCK_ICONS.open; // our own fixed SVG
+    b.classList.toggle("active", on);
+    b.title = on ? "畫線已鎖定，按一下解除" : "鎖定畫線：不能新增、修改、刪除";
+    $("tool-lock").closest(".tools")?.classList.toggle("locked", on);
+  }
+
+  /** Double-click or right-click on a drawing of `drawings`: its settings, with its alert section (only to look,
+   *  and for the alert, while the drawings are locked). */
   openSettings(drawings: DrawingLayer, d: Drawing, x: number, y: number, alert: Render) {
     const { settings } = this.d;
+    const locked = settings.drawLock.get();
     if (d.kind === "fib") {
       toggleFibPanel($("tool-settings"), settings.fib, alert);
       return;
@@ -83,12 +97,14 @@ export class Tools {
       positionPanelAt(x, y, this.positionIo(), {
         drawing: d,
         trade: () => drawings.tradeOf(d.id),
-        update: (p) => drawings.updatePosition(d.id, p),
+        update: (p) => drawings.updatePosition(d.id, p, { x, y }),
         setPrices: (p) => drawings.setPrices(d.id, p, { x, y }),
         isLive: () => drawings.isLive(d.id),
+        waiting: () => drawings.isWaiting(d.id),
         roundPrice: (p) => drawings.roundPrice(p),
         priceText: (p) => drawings.priceText(p),
         remove: () => drawings.remove(d.id),
+        locked,
       }, alert);
       return;
     }
@@ -98,6 +114,7 @@ export class Tools {
         settings.drawStyles.set({ ...settings.drawStyles.get(), [d.kind]: s } as DrawStyles); // new ones of this kind start from it
       },
       remove: () => drawings.remove(d.id),
+      locked,
     }, alert);
   }
 
@@ -135,8 +152,22 @@ export class Tools {
     $("tool-magnet-menu").onclick = magnetMenu;
     $("tool-settings").onclick = () => toggleFibPanel($("tool-settings"), settings.fib);
     $("tool-clear").onclick = () => this.clearAll();
+    $("tool-lock").onclick = () => {
+      const on = !settings.drawLock.get();
+      settings.drawLock.set(on);
+      this.flash(on ? "畫線已鎖定，不能新增、修改、刪除" : "畫線已解鎖");
+    };
+    settings.drawLock.watch(() => this.paintLock());
     this.paintTools("cursor");
     this.paintMagnet(settings.magnet.get().on);
+    this.paintLock();
+  }
+
+  /** A hint for a moment, then the default again. */
+  private flash(text: string) {
+    this.d.hint(text);
+    clearTimeout(this.hintTimer);
+    this.hintTimer = window.setTimeout(() => this.d.hint(null), 2000);
   }
 
   /** The position settings, and the account's equity when an API is set (it can be the starting capital). */
@@ -149,6 +180,10 @@ export class Tools {
   private clearAll() {
     const drawings = this.d.drawings();
     const btn = $("tool-clear");
+    if (this.d.settings.drawLock.get()) {
+      this.flash("畫線已鎖定，按左側鎖頭解除");
+      return;
+    }
     if (!drawings.count()) {
       this.d.hint("這個幣種沒有畫線");
       setTimeout(() => this.d.hint(null), 2000);

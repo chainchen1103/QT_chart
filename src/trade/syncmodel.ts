@@ -119,6 +119,42 @@ function follow(d: PositionDrawing, sl: number | null, tp: number | null, tick: 
   return moved;
 }
 
+/**
+ * A waiting order with nothing filled, as OKX has it (changed there, or by us): the position's entry at its
+ * price and its stops at the attached ones, all three together when they still make a position of its
+ * direction, and the record at its price and size.
+ */
+function followOrder(d: PositionDrawing, u: SyncOrder, tick: number): boolean {
+  const o = d.order;
+  if (!o) return false;
+  const dir = d.dir ?? (d.b.p <= d.a.p ? 1 : -1);
+  const entry = u.px ?? d.a.p;
+  const stop = u.sl ?? d.b.p;
+  const target = u.tp ?? d.target;
+  let moved = false;
+  if ((entry - stop) * dir > 0 && (target - entry) * dir >= 0) {
+    if (!samePrice(d.a.p, entry, tick)) {
+      d.a = { ...d.a, p: entry };
+      moved = true;
+    }
+    if (!samePrice(d.b.p, stop, tick)) {
+      d.b = { ...d.b, p: stop };
+      moved = true;
+    }
+    if (!samePrice(d.target, target, tick)) {
+      d.target = target;
+      moved = true;
+    }
+  }
+  const px = u.px ?? o.px;
+  const sz = u.sz > 0 ? u.sz : o.sz;
+  if (px !== o.px || sz !== o.sz) {
+    d.order = { ...o, px, sz };
+    moved = true;
+  }
+  return moved;
+}
+
 export type SyncResult = {
   changed: boolean;
   /** Positions that are gone from OKX: how they ended is to be looked up. */
@@ -157,8 +193,9 @@ export function applySync(list: Drawing[], s: SymbolState, orders: readonly Sync
         d.order = next;
         changed = true;
       }
-      // still waiting to fill: its attached stop-loss and take-profit as they are now
-      if (u.state === "live") changed = follow(d, u.sl, u.tp, s.tick) || changed;
+      // still waiting to fill: its price, size and attached stop-loss and take-profit as they are now (changed on
+      // OKX, or by us)
+      if (u.state === "live") changed = (u.accFillSz > 0 ? follow(d, u.sl, u.tp, s.tick) : followOrder(d, u, s.tick)) || changed;
     }
   }
 

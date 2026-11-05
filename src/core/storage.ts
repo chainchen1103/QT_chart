@@ -18,6 +18,7 @@ const KEY = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$/; // the backend accepts the sa
 
 let cache = new Map<string, string>(); // key → JSON text
 let files = true; // false: the files couldn't be read; fall back to localStorage
+let frozen = false; // 清除所有資料 is under way: nothing is saved any more (the app starts again)
 
 /** Load everything saved. Call once, before anything reads a setting. Never throws. */
 export async function initStorage(): Promise<void> {
@@ -72,8 +73,24 @@ function localEntries(): [string, string][] {
 function put(key: string, json: string | null): boolean {
   if (json == null) cache.delete(key);
   else cache.set(key, json);
+  if (frozen) return true;
   (json == null ? storeRemove(key) : storeSet(key, json)).catch((e) => console.error(`存不了 ${key}：`, e));
   return true;
+}
+
+/**
+ * 清除所有資料 is starting: from now on nothing is saved (the backend deletes the files, then the app starts
+ * again), and the web view's own storage is emptied. Returns what the emptied store starts with: the note that
+ * the web view's storage was dealt with, so the next start doesn't copy anything from it.
+ */
+export function freezeStorage(): Record<string, string> {
+  frozen = true;
+  try {
+    localStorage.clear();
+  } catch {
+    /* storage blocked: the backend clears it too */
+  }
+  return { [MIGRATED]: "1" };
 }
 
 function localGet(key: string): string | null {
@@ -84,6 +101,7 @@ function localGet(key: string): string | null {
   }
 }
 function localSet(key: string, v: string | null): boolean {
+  if (frozen) return true;
   try {
     if (v == null) localStorage.removeItem(PREFIX + key);
     else localStorage.setItem(PREFIX + key, v);

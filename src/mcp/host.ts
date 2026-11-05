@@ -20,6 +20,9 @@ const OFF: Record<Exclude<Level, "read">, string> = {
   trade: "Placing orders is off for AI apps: the user can allow it in QT Chart, 設定 → AI 連線.",
 };
 
+const LOCKED =
+  "Drawings are locked in QT Chart (the lock button in the left toolbar): no drawing can be added, changed or deleted, and no stop moved. Nothing was done. Only the user can unlock them. Orders from existing positions (place_order with drawing_id) and cancel_order still work.";
+
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 export class McpHost {
@@ -29,9 +32,11 @@ export class McpHost {
   private readonly log: CallEntry[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly setting: Setting<McpSettings>;
+  private readonly app: McpApp;
   private applying = Promise.resolve();
 
   constructor(app: McpApp, setting: Setting<McpSettings>) {
+    this.app = app;
     this.setting = setting;
     this.tools = [...readTools(app), ...writeTools(app), ...tradeTools(app)];
   }
@@ -100,7 +105,9 @@ export class McpHost {
     if (!tool) throw new Error(`Unknown tool: ${name}`);
     const args = isObj(p.arguments) ? p.arguments : {};
     let r: ToolResult;
+    const edits = tool.drawings === true || (typeof tool.drawings === "function" && tool.drawings(args));
     if (tool.level !== "read" && !allowed(tool.level, this.setting.get())) r = fail(OFF[tool.level]);
+    else if (edits && this.app.settings.drawLock.get()) r = fail(LOCKED);
     else {
       try {
         r = await tool.run(args, { client: c.client });

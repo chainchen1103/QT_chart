@@ -165,6 +165,8 @@ export type PositionSettings = {
   /** The info box (size, margin, capital, risk) shows only while the position is pointed at, selected or being
    *  placed; else all the time. */
   infoHover: boolean;
+  /** 顯示歷史倉位: positions closed on OKX stay on the charts (off: hidden, still saved). */
+  showClosed: boolean;
   /** Defaults for new positions; `chain`: a position starts with what the previous one ended with. */
   capital: number; risk: number; riskMode: RiskMode; leverage: number; chain: boolean;
   /** With an OKX API set, the starting capital is the account's equity instead of `capital`. */
@@ -187,6 +189,7 @@ export const DEFAULT_POSITION: PositionSettings = {
   transparency: 80,
   showPrices: true,
   infoHover: false,
+  showClosed: true,
   capital: 1000,
   risk: 1,
   riskMode: "pct",
@@ -648,6 +651,7 @@ export function cleanPosition(raw: unknown): PositionSettings {
     transparency: num(r.transparency, { min: 0, max: 100 }, d.transparency),
     showPrices: r.showPrices !== false,
     infoHover: r.infoHover === true,
+    showClosed: r.showClosed !== false,
     capital: num(r.capital, POSITION_LIMITS.capital, d.capital, false),
     risk: num(r.risk, POSITION_LIMITS[r.riskMode === "amount" ? "amount" : "pct"], d.risk, false),
     riskMode: r.riskMode === "amount" ? "amount" : "pct",

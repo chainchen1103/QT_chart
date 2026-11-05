@@ -7,6 +7,12 @@ const svg = (body: string) =>
 /** An anchor point: a hollow dot, filled with the button's own background (--icon-hole in style.css). */
 const dot = (x: number, y: number) => `<circle cx="${x}" cy="${y}" r="1.8" style="fill: var(--icon-hole, var(--bg-deep))"/>`;
 
+/** The lock button: closed while the drawings are locked, open while they aren't. */
+export const LOCK_ICONS = {
+  locked: svg(`<rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/>`),
+  open: svg(`<rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 5.8-1.1"/>`),
+};
+
 export const ICONS: Record<DrawKind, string> = {
   fib: svg(`<path d="M3 4h14M3 8h14M3 12h14M3 16h14"/><path d="M4 16 16 4" stroke-dasharray="2 2"/>`),
   trend: svg(`<path d="M4.5 15.5 15.5 4.5"/>${dot(4.5, 15.5)}${dot(15.5, 4.5)}`),

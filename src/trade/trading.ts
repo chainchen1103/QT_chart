@@ -1,6 +1,7 @@
 // Trading on the charts: what the order spot at the right of each position shows (下單, or the order placed
 // from it and its state), what a click on it opens, the positions' starting capital (the account's equity
-// when an API is set), and asking OKX every few seconds about orders still open.
+// when an API is set), changing an order still waiting when its position is moved, and asking OKX every few
+// seconds about orders still open.
 
 import type { Catalog } from "../chart/catalog.ts";
 import type { Setting } from "../core/setting.ts";
@@ -9,7 +10,7 @@ import type { OrderTag } from "../drawings/paint.ts";
 import type { PositionDrawing, PositionOrder, PositionSettings } from "../settings/model.ts";
 import type { TradeAccount } from "./account.ts";
 import { fmtCoins, isOpenState, type ContractSpec, type OrderPrefs } from "./model.ts";
-import { isMissing, openOrderDetails, openOrderWindow, toggleAccountPanel, withInfo, type OrderSpot } from "./panel.ts";
+import { amendPlanFor, isMissing, openAmendWindow, openOrderDetails, openOrderWindow, toggleAccountPanel, withInfo, type OrderSpot } from "./panel.ts";
 import { THEME } from "../ui/theme.ts";
 
 /** A chart, as the order parts see it. */
@@ -95,6 +96,34 @@ export class Trading {
 
   openAccount() {
     toggleAccountPanel(this.d.button, this.d.acct, this.d.position);
+  }
+
+  /** An order of ours still waiting on OKX with nothing filled: its price, size and stops can be changed there
+   *  by moving its position. */
+  waiting(d: PositionDrawing): boolean {
+    const o = d.order;
+    return !!o && o.state === "live" && !(o.fillSz > 0) && !o.closed && o.ordType !== "market";
+  }
+
+  /**
+   * A waiting order's position was changed on the chart (`trade`: its size and outcome as it is now): the
+   * change of the order, at (x, y), for an OK. Not sent: the chart is put back (`revert`).
+   */
+  amendWaiting(t: OrderTarget, d: PositionDrawing, trade: PositionResult | undefined, x: number, y: number, revert: () => void) {
+    const o = d.order;
+    if (!o) return;
+    const { acct } = this.d;
+    const back = (why: string) => {
+      revert();
+      this.d.note(`${why}，圖上已改回`);
+    };
+    if (!acct.usable()) return back(acct.keys.locked ? "先解鎖 API 才能改掛單" : "先設定 OKX API 才能改掛單");
+    if (o.demo !== acct.keys.demo) return back(`這張單是${o.demo ? "模擬盤" : "實盤"}下的，和現在的 API 不同`);
+    const s = { ...this.spotFor(t, d), trade };
+    const plan = amendPlanFor(s);
+    if (plan == null) return; // nothing OKX would see: moved less than a price step
+    if (typeof plan === "string") return back(plan);
+    openAmendWindow(x, y, s, plan, revert);
   }
 
   /** Ask OKX about every order still open on these charts (once each, one at a time). */

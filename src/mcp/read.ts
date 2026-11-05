@@ -12,7 +12,7 @@ import { loadDrawings } from "../settings/store.ts";
 import { TOOL_INFO, type Drawing, type PositionDrawing, type PositionOrder } from "../settings/model.ts";
 import { bool, data, iso, num, str, text } from "./model.ts";
 import { CHART, chartArg, chartsOf, orderRequests, S, SYMBOL, symbolArg, tfArg, TIMEFRAME, type McpApp, type Tool } from "./tools.ts";
-import guide from "../../docs/AGENT_GUIDE.md?raw";
+import guide from "../../docs/MCP_GUIDE.md?raw";
 
 const READ = { readOnlyHint: true, idempotentHint: true, openWorldHint: false } as const;
 
@@ -20,9 +20,9 @@ export function readTools(app: McpApp): Tool[] {
   return [
     {
       name: "get_guide",
-      title: "Guide for agents",
+      title: "MCP guide",
       description:
-        "The guide to working QT Chart with these tools, in Traditional Chinese: conventions (symbols, timeframes, times, chart numbers), drawings and Fib, positions, the rules for orders and what their answers mean, indicators, Pine, bar replay, alerts, settings and suggested workflows. Read it once before using the other tools.",
+        "QT Chart's MCP guide, in Traditional Chinese: permissions, confirmations and the drawing lock, conventions (symbols, timeframes, times, chart numbers), every tool with its parameters, the rules for orders and what their answers mean, errors and example workflows. Read it once before using the other tools.",
       level: "read",
       input: { type: "object", properties: {} },
       annotations: READ,
@@ -308,6 +308,8 @@ export function appState(app: McpApp) {
       orderConfirmation: m.confirm === "always" ? "every order" : m.confirm === "real" ? "real-money orders only (demo orders go straight to OKX)" : "none: orders go straight to OKX",
       note: "Orders whose risk or leverage is above the position defaults always wait for the user's confirmation.",
     },
+    drawingsLocked: app.settings.drawLock.get(),
+    showClosedPositions: pos.showClosed,
     alertsOn: app.alerts.all().filter((x) => x.on).length,
     pineScripts: app.settings.pine.get().map((s) => ({ id: s.id, name: s.name, on: s.on })),
   };
@@ -368,6 +370,8 @@ function positionOut(app: McpApp, instId: string, d: PositionDrawing, pane?: Cha
     ...(d.order ? { order: orderOut(d.order) } : {}),
     ...(d.okx ? { okxPosition: { posId: d.okx.posId, side: d.okx.side, demo: d.okx.demo, opened: Math.floor(d.okx.cTime / 1000), ...(d.okx.closed ? { closed: { time: d.okx.closed.t, price: d.okx.closed.px || null, pnl: d.okx.closed.pnl } } : {}) } } : {}),
     ...(live && !live.closed ? { onOkx: { coins: live.coins, avgPrice: live.avg, leverage: live.lever, unrealizedPnl: live.upl, demo: live.demo } } : {}),
+    // closed on OKX while 顯示歷史倉位 is off: saved, not on the charts
+    ...((d.okx?.closed || d.order?.closed) && !app.settings.position.get().showClosed ? { hidden: true } : {}),
   };
 }
 

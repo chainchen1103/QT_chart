@@ -177,6 +177,20 @@ impl Mcp {
         }
     }
 
+    /// 清除所有資料: the server stops, the token is forgotten (a new one next time) and mcp.json deleted.
+    pub fn forget(&self, app: &AppHandle) -> Result<(), String> {
+        self.stop();
+        *self.status.lock().unwrap() = None;
+        self.shared.token.lock().unwrap().clear();
+        self.shared.sessions.lock().unwrap().clear();
+        let path = config_path(app)?;
+        let _ = std::fs::remove_file(path.with_extension("tmp"));
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("刪不掉 mcp.json：{e}")),
+            _ => Ok(()),
+        }
+    }
+
     async fn start(&self, app: &AppHandle, port: u16) -> McpStatus {
         self.stop();
         let token = self.token(app);

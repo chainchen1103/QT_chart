@@ -15,7 +15,7 @@ const TOOL_TEXT: Record<string, string> = {
   get_indicators: "讀指標", list_alerts: "讀提醒", get_account: "讀帳戶", list_pine_scripts: "讀 Pine 腳本", get_settings: "讀設定",
   set_chart: "換圖表", set_layout: "改版面", manage_tabs: "分頁", replay: "K 線重播", add_drawing: "畫線", update_drawing: "改畫線",
   delete_drawings: "刪畫線", undo_drawings: "還原畫線", save_alert: "設提醒", delete_alert: "刪提醒", save_pine_script: "存 Pine 腳本",
-  delete_pine_script: "刪 Pine 腳本", update_settings: "改設定", place_order: "下單", cancel_order: "撤單", move_stops: "改止損止盈",
+  delete_pine_script: "刪 Pine 腳本", update_settings: "改設定", place_order: "下單", cancel_order: "撤單", amend_order: "改掛單", move_stops: "改止損止盈",
 };
 
 async function copy(text: string, b: HTMLButtonElement) {

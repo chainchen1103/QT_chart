@@ -39,6 +39,9 @@ export const getCandles = (instId: string, bar: string, before: number | null, c
 
 /** Opens https://www.tradingview.com/ in the default browser (credit for the chart library). */
 export const openTradingView = () => invoke<void>("open_tradingview");
+/** 清除所有資料: everything saved on this computer is deleted, then the app starts again (`fresh`: what the
+ *  emptied store starts with). */
+export const wipeData = (fresh: Record<string, string>) => invoke<void>("wipe_data", { fresh });
 
 /** Live candles for exactly these channels, over one connection (src-tauri/src/stream.rs); [] stops. */
 export const setStreams = (pairs: Pair[]) => invoke<void>("set_streams", { pairs });
@@ -88,7 +91,7 @@ export type SyncAlgo = {
 };
 /** An order that changed; sl / tp: its attached stop-loss and take-profit as they stand. */
 export type SyncOrder = {
-  instId: string; ordId: string; clOrdId: string; state: string; side: string; sz: number; accFillSz: number;
+  instId: string; ordId: string; clOrdId: string; state: string; side: string; px: number | null; sz: number; accFillSz: number;
   avgPx: number | null; fillTime: number; uTime: number; sl: number | null; tp: number | null; attachAlgoClOrdId: string;
 };
 export type SyncEvent = { demo: boolean; source: "rest" | "ws"; positions: SyncPos[]; algos: SyncAlgo[]; orders: SyncOrder[] };
@@ -99,8 +102,11 @@ export type ClosedPos = {
   openAvgPx: number; closeAvgPx: number; realizedPnl: number; kind: string;
 };
 /** Move a stop-loss / take-profit: its own order ("algo", its order filled) or still attached to ordId. */
+/** New trigger prices for a stop-loss / take-profit; "attached" (an order still waiting): also its new limit
+ *  price and size in contracts. */
 export type AmendReq = {
   instId: string; kind: "algo" | "attached"; ordId?: string; algoId?: string; algoClOrdId?: string; sl?: string; tp?: string;
+  px?: string; sz?: string;
 };
 export const tradeStatus = () => invoke<KeyStatus>("trade_status");
 export const tradeSetKeys = (key: string, secret: string, passphrase: string, demo: boolean, password: string) =>

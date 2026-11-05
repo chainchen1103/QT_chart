@@ -76,19 +76,19 @@
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3v14M3 10h14" /></svg>
         </button>
         <div class="icon-wrap">
-          <button id="tool-line" class="icon-btn" title="線"></button>
-          <button id="tool-line-menu" class="icon-caret" title="選擇線的種類：趨勢線、射線、水平線…">
+          <button id="tool-line" class="icon-btn draw-tool" title="線"></button>
+          <button id="tool-line-menu" class="icon-caret draw-tool" title="選擇線的種類：趨勢線、射線、水平線…">
             <svg viewBox="0 0 6 6"><path d="M6 0v6H0z" fill="currentColor" /></svg>
           </button>
         </div>
-        <button id="tool-fib" class="icon-btn" title="Fib 回撤（Alt+F）：點兩點或拖曳">
+        <button id="tool-fib" class="icon-btn draw-tool" title="Fib 回撤（Alt+F）：點兩點或拖曳">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 4h14M3 8h14M3 12h14M3 16h14" /><path d="M4 16 16 4" stroke-dasharray="2 2" />
           </svg>
         </button>
-        <button id="tool-rect" class="icon-btn" title="矩形（Alt+Shift+R）：點兩個對角或拖曳"></button>
+        <button id="tool-rect" class="icon-btn draw-tool" title="矩形（Alt+Shift+R）：點兩個對角或拖曳"></button>
         <div class="icon-wrap">
-          <button id="tool-position" class="icon-btn" title="倉位（Alt+P）：依序點進場、止損、止盈"></button>
+          <button id="tool-position" class="icon-btn draw-tool" title="倉位（Alt+P）：依序點進場、止損、止盈"></button>
           <button id="tool-position-menu" class="icon-caret" title="倉位設定：R 線、顏色">
             <svg viewBox="0 0 6 6"><path d="M6 0v6H0z" fill="currentColor" /></svg>
           </button>
@@ -115,7 +115,8 @@
           </svg>
         </button>
         <span class="tools-sep"></span>
-        <button id="tool-clear" class="icon-btn" title="刪除這個幣種的全部畫線（按兩次）">
+        <button id="tool-lock" class="icon-btn" title="鎖定畫線"></button>
+        <button id="tool-clear" class="icon-btn draw-tool" title="刪除這個幣種的全部畫線（按兩次）">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10" />
           </svg>

@@ -23,6 +23,7 @@ const COMMANDS: &[&str] = &[
     "gpu_pref",
     "set_gpu_pref",
     "open_tradingview",
+    "wipe_data",
     "mcp_status",
     "mcp_start",
     "mcp_stop",

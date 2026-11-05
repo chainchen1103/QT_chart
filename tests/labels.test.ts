@@ -7,7 +7,7 @@ import { computeGeo, type Projector } from "../src/drawings/geo.ts";
 import { labelPlans, type PaintOptions } from "../src/drawings/paint.ts";
 import { chainPositions } from "../src/drawings/trade.ts";
 import { drawingBellAsk, priceBellAsk } from "../src/alerts/layer.ts";
-import { cleanAppearance, DEFAULT_APPEARANCE, DEFAULT_POSITION, type Drawing, type FibSettings, type PositionDrawing } from "../src/settings/model.ts";
+import { cleanAppearance, cleanPosition, DEFAULT_APPEARANCE, DEFAULT_POSITION, type Drawing, type FibSettings, type PositionDrawing } from "../src/settings/model.ts";
 import type { Candle } from "../src/core/api.ts";
 
 const size = { width: 800, height: 400 };
@@ -193,4 +193,13 @@ test("what a label keeps off: the next free place first, then sliding past it", 
     d: [{ key: "r", w: 100, h: 18, prio: PRIO.drawing, avoid: candles, at: [{ x: 680, y: 100, slide: "left", range: { min: 300, max: 680 } }] }],
   });
   assert.ok(slid("d", "r").x + 100 <= 600 && slid("d", "r").x >= 300, String(slid("d", "r").x));
+});
+
+test("顯示歷史倉位: on unless turned off, kept when other settings are saved", () => {
+  assert.equal(DEFAULT_POSITION.showClosed, true);
+  assert.equal(cleanPosition(undefined).showClosed, true);
+  assert.equal(cleanPosition({}).showClosed, true); // saved before the setting existed
+  assert.equal(cleanPosition({ showClosed: false }).showClosed, false);
+  assert.equal(cleanPosition({ showClosed: "no" }).showClosed, true);
+  assert.equal(cleanPosition({ ...DEFAULT_POSITION, showClosed: false, infoHover: true }).showClosed, false);
 });

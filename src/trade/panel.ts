@@ -1,5 +1,6 @@
 // Trading windows: the OKX API settings (from the account button at the bottom right), the order window a
-// position's 下單 button opens (nothing is sent before 確認下單), and an order's details with 撤單.
+// position's 下單 button opens (nothing is sent before 確認下單), an order's details with 撤單, and the change of
+// an order still waiting when its position is moved on the chart (nothing is sent before 改 OKX).
 
 import type { Setting } from "../core/setting.ts";
 import { fmtClock, shortName } from "../core/format.ts";
@@ -15,7 +16,9 @@ import {
   isOpenState,
   newClOrdId,
   ORD_TYPE_TEXT,
+  planAmend,
   planOrder,
+  type AmendPlan,
   TD_MODE_TEXT,
   type ContractSpec,
   type OrderPlan,
@@ -608,6 +611,89 @@ export function openOrderWindow(x: number, y: number, s: OrderSpot, ask?: OrderA
   });
 }
 
+// ----------------------------------------------------------------------------- changing a waiting order
+/** An AI app asked for the change (MCP): who asks, why it is asked, and how it ended. */
+export type AmendAsk = { from: string; note?: string; done(r: { ok: boolean; text: string }): void };
+
+/** What a waiting order's position, as it is now, changes of the order: null when nothing OKX would see
+ *  (moved less than a price step), or why it can't be worked out. */
+export function amendPlanFor(s: OrderSpot): AmendPlan | string | null {
+  const { drawing: d, trade: t } = s;
+  const o = d.order;
+  if (!o) return "這個倉位沒有掛單";
+  if (!s.spec) return "讀不到這個幣種的合約資料，請稍後再試";
+  if (!t) return "這個倉位還算不出數量，K 線還沒載入";
+  const plan = planAmend(
+    o,
+    { instId: s.instId, entry: d.a.p, stop: d.b.p, target: d.target, qty: t.plan.qty, leverage: d.leverage, last: s.last, avail: s.acct.account?.avail ?? null, spec: s.spec },
+    s.fmtPrice,
+  );
+  return plan.lines.length || plan.problems.length ? plan : null;
+}
+
+/** Send the change and keep it on the position; throws OKX's answer. */
+export async function sendAmend(s: OrderSpot, plan: AmendPlan): Promise<void> {
+  const o = s.drawing.order;
+  if (!o) throw new Error("這個倉位沒有掛單");
+  await s.acct.amend({ instId: s.instId, kind: "attached", ordId: o.ordId, ...(o.algoClOrdId ? { algoClOrdId: o.algoClOrdId } : { algoId: o.algoId }), ...plan.change });
+  const c = plan.change;
+  s.record({
+    ...o,
+    ...(c.px != null ? { px: Number(c.px) } : {}),
+    ...(c.sz != null ? { sz: plan.contracts } : {}),
+    ...(c.sl != null ? { sl: Number(c.sl) } : {}),
+    ...(c.tp != null ? { tp: Number(c.tp) } : {}),
+  });
+}
+
+/**
+ * The change of a waiting order, at (x, y): old → new, the size worked out again, what to know. 改 OKX sends
+ * it; 不改, closing the window or a change that can't be sent puts the chart back (`revert`). `ask`: an AI app
+ * asked for it.
+ */
+export function openAmendWindow(x: number, y: number, s: OrderSpot, plan: AmendPlan, revert: () => void, ask?: AmendAsk) {
+  let done = false;
+  popoverAt(x, y, "改 OKX 上的掛單", (body) => {
+    const o = s.drawing.order;
+    const demo = o?.demo ?? s.acct.keys.demo;
+    if (ask) {
+      body.append(el("div", "trade-ai", `${ask.from} 要求改這張掛單：確認後才會送出`));
+      if (ask.note) body.append(el("div", "trade-warn", ask.note));
+    }
+    body.append(el("div", `trade-env ${demo ? "demo" : "live"}`, demo ? "模擬盤" : "實盤：會改真的委託"));
+    for (const line of plan.lines) body.append(el("div", "pop-note", line));
+    if (plan.contracts > 0) body.append(el("div", "pop-note", `張數照風險重算，止損時虧損約 ${fmtMoney(plan.risk)} U`));
+    for (const w of plan.warnings) body.append(el("div", "trade-warn", w));
+    const msg = el("div", "pop-msg", plan.problems.length ? `不能改：${plan.problems.join("，")}` : "");
+    const go = textButton("改 OKX", "text-btn " + (demo ? "primary" : "danger-solid"), async () => {
+      go.disabled = true;
+      go.textContent = "送出中…";
+      msg.textContent = "";
+      try {
+        await sendAmend(s, plan);
+      } catch (e) {
+        msg.textContent = `沒改成：${e instanceof Error ? e.message : String(e)}`;
+        go.textContent = "改 OKX";
+        go.disabled = false;
+        return;
+      }
+      done = true;
+      ask?.done({ ok: true, text: plan.lines.join("\n") });
+      closePopover();
+      s.note("OKX 上的掛單改好了");
+    });
+    go.disabled = plan.problems.length > 0;
+    const foot = el("div", "pop-foot");
+    foot.append(textButton(ask ? "不改" : "不改，圖上改回去", "text-btn", () => closePopover()), el("span", "spacer"), go);
+    body.append(msg, foot);
+    body.addEventListener(POPOVER_CLOSED, () => {
+      if (done) return;
+      revert(); // the chart follows the order: what wasn't sent goes back
+      ask?.done({ ok: false, text: plan.problems.length ? `不能改：${plan.problems.join("，")}` : "使用者沒有確認，OKX 沒有改" });
+    }, { once: true });
+  });
+}
+
 // ----------------------------------------------------------------------------- an order's details
 export function openOrderDetails(x: number, y: number, s: OrderSpot) {
   popoverAt(x, y, `訂單：${shortName(s.instId)}`, (body, rerender) => {
@@ -632,6 +718,9 @@ export function openOrderDetails(x: number, y: number, s: OrderSpot) {
     body.append(row(lbl("下單時間"), fmtClock(o.at)), row(lbl("訂單編號"), o.ordId));
     if (other) body.append(el("div", "pop-note", `這張單是用${envText(o.demo)}的 API 下的，現在的 API 查不到它`));
     else body.append(el("div", "pop-note", "止損、止盈在成交後由交易所掛上，可以在 OKX 的「委託」裡看到"));
+    if (!other && o.state === "live" && !(o.fillSz > 0) && o.ordType !== "market") {
+      body.append(el("div", "pop-note", "掛單中：拖圖上的倉位可改價格和止損止盈"));
+    }
     const msg = el("div", "pop-msg");
     const busy = (b: HTMLButtonElement, text: string, job: () => Promise<void>) => async () => {
       const was = b.textContent;
@@ -680,13 +769,17 @@ export function openOrderDetails(x: number, y: number, s: OrderSpot) {
   });
 }
 
-/** The order with what OKX says about it now. */
-export function withInfo(o: PositionOrder, info: { state: string; avgPx: string; accFillSz: string; fillTime?: string; uTime?: string }): PositionOrder {
+/** The order with what OKX says about it now (its price and size too: they can be changed while it waits). */
+export function withInfo(o: PositionOrder, info: { state: string; px?: string; sz?: string; avgPx: string; accFillSz: string; fillTime?: string; uTime?: string }): PositionOrder {
   const avg = Number(info.avgPx);
   const fill = Number(info.accFillSz);
   const fillT = Number(info.fillTime) || Number(info.uTime) || 0;
+  const px = Number(info.px);
+  const sz = Number(info.sz);
   return {
     ...o,
+    ...(o.px != null && px > 0 ? { px } : {}),
+    ...(sz > 0 ? { sz } : {}),
     state: STATE_TEXT[info.state] && info.state !== "missing" ? info.state : "unknown",
     avgPx: avg > 0 ? avg : o.avgPx,
     fillSz: Number.isFinite(fill) && fill >= 0 ? fill : o.fillSz,

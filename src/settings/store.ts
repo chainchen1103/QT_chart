@@ -61,6 +61,8 @@ export function loadSettings() {
     okxSync: setting("okxsync", cleanSync),
     /** The AI connection (MCP): on or off, its port, what AI apps may do, when orders wait for the user. */
     mcp: setting("mcp", cleanMcp),
+    /** Drawings locked (the lock button): none can be added, changed or deleted, by the user or AI apps. */
+    drawLock: setting("drawlock", (r) => r === true),
   };
 }
 export type Settings = ReturnType<typeof loadSettings>;

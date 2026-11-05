@@ -16,10 +16,10 @@
 //   ui/        the toolbars, menus, status bar and settings windows
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
 
-import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, windowAttention, type CandleEvent } from "./core/api.ts";
+import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, wipeData, windowAttention, type CandleEvent } from "./core/api.ts";
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
-import { keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
+import { freezeStorage, keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
 import { findTf } from "./core/timeframes.ts";
 import { Backdrop } from "./chart/backdrop.ts";
 import { DrawingHistory } from "./drawings/history.ts";
@@ -52,6 +52,7 @@ import { Tools } from "./ui/tools.ts";
 import { McpHost } from "./mcp/host.ts";
 import type { McpApp } from "./mcp/tools.ts";
 import { renderMcp } from "./ui/panels/mcp.ts";
+import { renderData } from "./ui/panels/data.ts";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -221,6 +222,17 @@ const settingsIo: SettingsIo = {
   account: accountSection,
   ai: renderMcp({ setting: settings.mcp, host: mcpHost }),
   performance: performanceSection({ gpu: gpuPref, setGpu: setGpuPref }, false),
+  data: renderData({
+    wipe: async () => {
+      const fresh = freezeStorage(); // nothing more is saved in this run
+      try {
+        await wipeData(fresh);
+      } catch (e) {
+        status.error("資料沒有清除完成，重新開啟程式再試一次");
+        throw e;
+      }
+    },
+  }),
   openTradingView: () => void openTradingView().catch((err) => status.error(String(err))),
 };
 function openSettingsAt(section: SettingsSection) {
@@ -274,11 +286,12 @@ const pineUi: PineUi = {
   },
   note: (text) => status.note(text),
 };
-/** 還原 / 重做 follow the drawings of the chart in use. */
+/** 還原 / 重做 follow the drawings of the chart in use (off while the drawings are locked). */
 function paintUndoButtons() {
   const id = workspace.inUse().feed.instId;
-  ($("undo-btn") as HTMLButtonElement).disabled = !drawingHistory.canUndo(id);
-  ($("redo-btn") as HTMLButtonElement).disabled = !drawingHistory.canRedo(id);
+  const locked = settings.drawLock.get();
+  ($("undo-btn") as HTMLButtonElement).disabled = locked || !drawingHistory.canUndo(id);
+  ($("redo-btn") as HTMLButtonElement).disabled = locked || !drawingHistory.canRedo(id);
 }
 /** The replay button follows the chart in use: on while it replays or picks where to start. */
 function paintReplayButton(r: { active: boolean }) {
@@ -298,6 +311,7 @@ function route(e: CandleEvent) {
 // ----------------------------------------------------------------------------- settings and buttons
 settings.appearance.watch(applyAppearance);
 settings.pine.watch(paintPineButton);
+settings.drawLock.watch(paintUndoButtons);
 alerts.subscribe(() => {
   for (const p of workspace.charts()) p.redrawAlerts();
   paintAlertButton();

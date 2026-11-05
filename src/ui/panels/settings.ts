@@ -13,7 +13,7 @@ import { MAX_BARS } from "../../chart/feed.ts";
 import chartsLicense from "../../assets/licenses/lightweight-charts-LICENSE.txt?raw";
 import fontLicense from "../../assets/licenses/Geist-OFL.txt?raw";
 
-export type SettingsSection = "appearance" | "labels" | "bars" | "alerts" | "position" | "account" | "ai" | "performance" | "about";
+export type SettingsSection = "appearance" | "labels" | "bars" | "alerts" | "position" | "account" | "ai" | "performance" | "data" | "about";
 
 export type SettingsIo = {
   appearance: Render;
@@ -25,6 +25,7 @@ export type SettingsIo = {
   account: Render;
   ai: Render;
   performance: Render;
+  data: Render;
   /** Open tradingview.com (the chart library's credit). */
   openTradingView(): void;
 };
@@ -38,6 +39,7 @@ const SECTIONS: { id: SettingsSection; name: string; note: string }[] = [
   { id: "account", name: "交易帳戶", note: "下單用的 OKX API" },
   { id: "ai", name: "AI 連線", note: "讓 AI 應用程式透過 MCP 操作 QT Chart" },
   { id: "performance", name: "效能", note: "繪圖方式" },
+  { id: "data", name: "資料", note: "這台電腦上的 QT Chart 資料" },
   { id: "about", name: "關於", note: "QT Chart 用到的套件和它們的授權" },
 ];
 
@@ -120,6 +122,8 @@ function sectionRender(io: SettingsIo, id: SettingsSection): Render {
       return io.ai;
     case "performance":
       return io.performance;
+    case "data":
+      return io.data;
     case "about":
       return (body) => {
         const credit = textButton("TradingView Lightweight Charts™", "link-btn set-link", () => io.openTradingView(), "開啟 tradingview.com");

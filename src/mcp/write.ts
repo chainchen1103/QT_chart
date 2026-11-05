@@ -224,6 +224,7 @@ export function writeTools(app: McpApp): Tool[] {
       description:
         "Draw on a symbol (it shows on every chart of the symbol; the user can undo it with 還原 or Ctrl+Z). Points by kind: hline, hray (to the right), vline, cross: 1 point. trend, ray, extended (both ways), info, angle, fib, rect, regression: 2 points. channel (parallel), flat (flat top / bottom), disjoint: 2 points for the first line plus second_line_price, the second line's price at the first point's time. position (a planned trade, sized from the risk settings; place_order sends it to OKX): entry, stop_loss, take_profit instead of points.",
       level: "write",
+      drawings: true,
       input: {
         type: "object",
         properties: {
@@ -256,6 +257,7 @@ export function writeTools(app: McpApp): Tool[] {
       description:
         "Move or restyle a drawing: new points, second_line_price, style, or a position's prices, times, risk, leverage and capital (fields not given stay). A position with an order on OKX keeps its entry; use move_stops for its stop-loss and take-profit. One step to undo.",
       level: "write",
+      drawings: true,
       input: {
         type: "object",
         properties: {
@@ -289,6 +291,7 @@ export function writeTools(app: McpApp): Tool[] {
       title: "Delete drawings",
       description: "Delete drawings of a symbol by id, or all of them. Their alerts go too. An order already on OKX stays there: cancel_order cancels it. One step to undo.",
       level: "write",
+      drawings: true,
       input: {
         type: "object",
         properties: { symbol: SYMBOL, ids: { type: "array", items: { type: "string" }, description: "The drawings to delete." }, all: S.bool("Delete every drawing of the symbol.") },
@@ -317,6 +320,7 @@ export function writeTools(app: McpApp): Tool[] {
       title: "Undo drawings",
       description: "Undo the last change to a symbol's drawings (by the user or an AI app), or redo the change undone last, as 還原 / 重做 in QT Chart do. Orders on OKX are not undone.",
       level: "write",
+      drawings: true,
       input: { type: "object", properties: { symbol: SYMBOL, redo: S.bool("Redo instead of undo.") } },
       annotations: EDIT,
       run: (a, c) => {
@@ -379,7 +383,7 @@ export function writeTools(app: McpApp): Tool[] {
       name: "save_pine_script",
       title: "Add or change a Pine script",
       description:
-        "Add a Pine Script v5 / v6 indicator or strategy (every chart runs the ones switched on), or change one by id: name, source, on, inputs (by input title or id; null puts one back to its default). The source must compile; the error says the line. Results: get_indicators.",
+        "Add a Pine Script v4 / v5 / v6 indicator or strategy (every chart runs the ones switched on), or change one by id: name, source, on, inputs (by input title or id; null puts one back to its default). The source must compile; the error says the line. Results: get_indicators.",
       level: "write",
       input: {
         type: "object",
@@ -417,7 +421,7 @@ export function writeTools(app: McpApp): Tool[] {
       name: "update_settings",
       title: "Change settings",
       description:
-        "Change settings. Send only the sections and fields to change, shaped as get_settings returns them: appearance, labels, timeframes, bars, fib, magnet, position (its look: levels, profit, loss, transparency, showPrices, infoHover; capital, risk and leverage defaults only change in QT Chart), indicatorSwitches, movingAverages, maOptions, fvg, orderBlocks, supportResistance, alertOptions, okxSync. Objects merge field by field; lists (movingAverages, fvg, orderBlocks, supportResistance, fib.levels, position.levels, timeframes.bar) replace the whole list. Values out of range are put back and listed in the answer.",
+        "Change settings. Send only the sections and fields to change, shaped as get_settings returns them: appearance, labels, timeframes, bars, fib, magnet, position (its look: levels, profit, loss, transparency, showPrices, infoHover, showClosed; capital, risk and leverage defaults only change in QT Chart), indicatorSwitches, movingAverages, maOptions, fvg, orderBlocks, supportResistance, alertOptions, okxSync. Objects merge field by field; lists (movingAverages, fvg, orderBlocks, supportResistance, fib.levels, position.levels, timeframes.bar) replace the whole list. Values out of range are put back and listed in the answer.",
       level: "write",
       input: {
         type: "object",
@@ -739,7 +743,7 @@ const SECTIONS: Record<string, Section> = {
   fib: { about: "{levels: [{value, color, on}], extend, fill, showPrice, reverse}", apply: (app, v) => app.settings.fib.set(cleanFib(merged(app.settings.fib.get(), v, "fib")) ?? app.settings.fib.get()) },
   magnet: { about: "{on: always snap to open/high/low/close, holdKey: Control|Alt}", apply: (app, v) => app.settings.magnet.set(cleanMagnet(merged(app.settings.magnet.get(), v, "magnet")) ?? app.settings.magnet.get()) },
   position: {
-    about: "The look of positions: {levels: [{value, on}] (R lines), profit, loss (#rrggbb), transparency 0-100, showPrices, infoHover}",
+    about: "The look of positions: {levels: [{value, on}] (R lines), profit, loss (#rrggbb), transparency 0-100, showPrices, infoHover, showClosed (positions closed on OKX on the charts)}",
     apply: (app, v) => {
       if (isObj(v)) {
         const bad = SIZING_KEYS.filter((k) => k in v);

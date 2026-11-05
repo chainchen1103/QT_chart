@@ -1,7 +1,7 @@
 // Positions turned into OKX orders (src/trade/model.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanOrderPrefs, floorStep, newClOrdId, planOrder, roundStep, stepDecimals, type OrderInput } from "../src/trade/model.ts";
+import { cleanOrderPrefs, floorStep, newClOrdId, planAmend, planOrder, roundStep, stepDecimals, type OrderInput, type WaitingOrder } from "../src/trade/model.ts";
 import { cleanOrder } from "../src/settings/model.ts";
 
 const btc = { ctVal: 0.01, lotSz: "0.01", minSz: "0.01", maxLever: 100, tickSz: "0.1" };
@@ -49,6 +49,29 @@ test("what blocks an order", () => {
   const noTp = planOrder({ ...base, prefs: { ...base.prefs, attachTp: false } });
   assert.equal(noTp.tp, null);
   assert.match(planOrder({ ...base, avail: 50 }).warnings.join(), /超過可用/);
+});
+
+test("a waiting order moved on the chart: only what changes, the size worked out again", () => {
+  const o: WaitingOrder = { side: "buy", ordType: "limit", px: 78000, sz: 2, sl: 77500, tp: 79000, algoClOrdId: "qts1" };
+  const { prefs: _p, ...i } = base;
+  const fmt = (p: number) => p.toFixed(1);
+  // the stop twice as far: half the size for the same risk; the price and take-profit stay
+  const wider = planAmend(o, { ...i, entry: 78000, stop: 77000, qty: 0.01 }, fmt);
+  assert.deepEqual(wider.change, { sz: "1.00", sl: "77000.0" });
+  assert.deepEqual(wider.lines, ["張數 2 → 1.00", "止損 77500.0 → 77000.0"]);
+  assert.deepEqual(wider.problems, []);
+  // the whole position moved down: price, stop and take-profit; within a price step is no change
+  const down = planAmend(o, { ...i, entry: 77000.02, stop: 76500, target: 78000, qty: 0.02, last: 77900 }, fmt);
+  assert.deepEqual(down.change, { px: "77000.0", sl: "76500.0", tp: "78000.0" });
+  assert.deepEqual(planAmend(o, { ...i, entry: 78000.04, qty: 0.02 }, fmt).change, {});
+  // what needs a new order: the other side, a market order, stops without an id to find them by
+  assert.match(planAmend(o, { ...i, entry: 78000, stop: 78500, target: 77000, qty: 0.02 }, fmt).problems.join(), /方向不能改/);
+  assert.match(planAmend({ ...o, ordType: "market" }, { ...i, qty: 0.02 }, fmt).problems.join(), /市價單/);
+  assert.match(planAmend({ ...o, algoClOrdId: undefined }, { ...i, stop: 77000, qty: 0.01 }, fmt).problems.join(), /找不到/);
+  // a post-only order moved through the market can't be a maker
+  assert.match(planAmend({ ...o, ordType: "post_only" }, { ...i, entry: 78500, target: 80000, qty: 0.01 }, fmt).problems.join(), /Maker/);
+  // no take-profit on the order: none is added
+  assert.equal(planAmend({ ...o, tp: null }, { ...i, target: 80000, qty: 0.02 }, fmt).change.tp, undefined);
 });
 
 test("market orders size from the latest price", () => {

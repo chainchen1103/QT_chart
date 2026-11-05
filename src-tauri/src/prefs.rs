@@ -24,6 +24,14 @@ pub fn load(dir: &Path) -> Prefs {
     std::fs::read_to_string(dir.join(FILE)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
+/// Back to the defaults (清除所有資料).
+pub fn remove(dir: &Path) -> Result<(), String> {
+    match std::fs::remove_file(dir.join(FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("刪不掉 {FILE}：{e}")),
+        _ => Ok(()),
+    }
+}
+
 pub fn save(dir: &Path, p: &Prefs) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(p).map_err(|e| e.to_string())?;
@@ -44,6 +52,10 @@ mod tests {
         std::fs::write(dir.join(FILE), "{not json").unwrap();
         assert_eq!(load(&dir), Prefs::default());
         std::fs::write(dir.join(FILE), "{}").unwrap();
+        assert!(load(&dir).gpu);
+        save(&dir, &Prefs { gpu: false }).unwrap();
+        remove(&dir).unwrap();
+        remove(&dir).unwrap(); // already gone: fine
         assert!(load(&dir).gpu);
         let _ = std::fs::remove_dir_all(&dir);
     }

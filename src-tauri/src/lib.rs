@@ -180,7 +180,8 @@ async fn trade_closed_positions(state: State<'_, AppState>, inst_id: String) -> 
     state.trader.closed_positions(&inst_id).await
 }
 
-/// Move the trigger prices of a stop-loss / take-profit on OKX (only the prices).
+/// Move the trigger prices of a stop-loss / take-profit on OKX; an order still waiting can get a new price and
+/// size with them.
 #[tauri::command]
 async fn trade_amend_stops(state: State<'_, AppState>, req: AmendReq) -> Result<(), String> {
     state.trader.amend_stops(req).await
@@ -219,6 +220,36 @@ fn set_gpu_pref(state: State<'_, AppState>, on: bool) -> Result<(), String> {
     let mut p = prefs::load(&state.config_dir);
     p.gpu = on;
     prefs::save(&state.config_dir, &p)
+}
+
+/// 清除所有資料: the tabs, drawings, alerts, settings and Pine scripts (the store folder), the OKX API key, the AI
+/// connection's token (mcp.json), the GPU choice (prefs.json) and the web view's own storage and cache; then the
+/// app starts again, as on the first run. `fresh`: what the emptied store starts with (the page's note that the
+/// web view's old storage is not to be copied in again). Nothing is saved from here on: the page still holds the
+/// old values until the new start.
+#[tauri::command]
+fn wipe_data(app: AppHandle, state: State<'_, AppState>, mcp: State<'_, mcp::Mcp>, fresh: HashMap<String, String>) -> Result<(), String> {
+    state.store.close();
+    state.sync.set(&app, false);
+    // every step, even after one fails: as much as can be is gone
+    let failed: Vec<String> = [mcp.forget(&app), state.trader.clear(), prefs::remove(&state.config_dir), state.store.wipe(&fresh)]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+    if let Some(w) = app.get_webview_window("main") {
+        // older versions kept everything in the web view's storage; this finishes on its own, in a moment
+        if let Err(e) = w.clear_all_browsing_data() {
+            eprintln!("web view storage not cleared: {e}");
+        }
+    }
+    if !failed.is_empty() {
+        return Err(failed.join("，"));
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        app.request_restart();
+    });
+    Ok(())
 }
 
 /// Open https://www.tradingview.com/ in the default browser. The chart library's licence asks for a link to
@@ -293,6 +324,7 @@ pub fn run() {
             gpu_pref,
             set_gpu_pref,
             open_tradingview,
+            wipe_data,
             mcp::mcp_status,
             mcp::mcp_start,
             mcp::mcp_stop,

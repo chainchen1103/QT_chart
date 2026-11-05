@@ -31,6 +31,7 @@
     "allow-gpu-pref",
     "allow-set-gpu-pref",
     "allow-open-tradingview",
+    "allow-wipe-data",
     "allow-mcp-status",
     "allow-mcp-start",
     "allow-mcp-stop",
