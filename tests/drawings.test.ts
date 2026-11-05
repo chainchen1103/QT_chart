@@ -99,10 +99,15 @@ test("closed on OKX: the box ends at the close, the exit is OKX's, no handles", 
     avgPx: 100, fillSz: 1, posKey: "1:1", closed,
   };
   const list: Drawing[] = [
-    { id: "p", kind: "position", a: { t: 6000, p: 100 }, b: { t: 30000, p: 98 }, target: 105, capital: null, risk: 1, riskMode: "pct", leverage: 10, order },
+    { id: "p", kind: "position", a: { t: 6000, p: 100 }, b: { t: 30000, p: 80 }, target: 130, capital: null, risk: 1, riskMode: "pct", leverage: 10, order },
   ];
   const [p] = computeGeo(list, pr, opts);
   assert.equal(p.pos?.x1, 150); // 9000 s at 1 px a minute, not the drawn 30000
   assert.deepEqual(p.pos?.exit, { x: 150, y: 97 });
   assert.deepEqual(p.handles, []);
+  // only entry to close is drawn, and only that is the drawing under the mouse
+  assert.deepEqual(p.pos?.closed, { y: 97, profit: true });
+  assert.equal(hitTest([p], 120, 99, 800, null)?.id, "p"); // between the entry (100) and the close (103)
+  assert.equal(hitTest([p], 120, 115, 800, null), null); // in the stop zone, no longer drawn
+  assert.equal(hitTest([p], 120, 80, 800, null), null); // in the take-profit zone past the close
 });

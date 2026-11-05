@@ -43,6 +43,8 @@ export type Geo = {
     levels: { k: number; price: number; y: number }[];
     /** Where it was closed (take-profit, stop or the end of the box). */
     exit: { x: number; y: number } | null;
+    /** Closed on OKX at a known price: only entry to close is drawn (a record), `profit` or not. */
+    closed?: { y: number; profit: boolean };
   };
 };
 export type Hit = { id: string; part: Part };
@@ -193,6 +195,7 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
           if (ex != null && ey != null) exit = { x: ex, y: ey };
         }
         g.pos = { x0: ax, x1, entryY: ay, stopY: by, targetY, levels, exit };
+        if (real && exit) g.pos.closed = { y: exit.y, profit: real.pnl >= 0 };
         g.handles = [
           { x: ax, y: ay, part: "a" },
           { x: ax, y: by, part: "stop" },
@@ -258,8 +261,9 @@ export function onBody(g: Geo, x: number, y: number, paneWidth: number): boolean
     case "position": {
       const p = g.pos;
       if (!p) return false;
-      const top = Math.min(p.stopY, p.targetY);
-      const bottom = Math.max(p.stopY, p.targetY);
+      // closed on OKX: only what is drawn, entry to close
+      const top = p.closed ? Math.min(p.entryY, p.closed.y) : Math.min(p.stopY, p.targetY);
+      const bottom = p.closed ? Math.max(p.entryY, p.closed.y) : Math.max(p.stopY, p.targetY);
       return x >= p.x0 - LINE_HIT && x <= p.x1 + LINE_HIT && y >= top - LINE_HIT && y <= bottom + LINE_HIT;
     }
     case "rect": {

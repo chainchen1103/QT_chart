@@ -523,6 +523,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         time.push({ pos: g.ax, text: ft(d.a.t), color: ACCENT }, { pos: g.bx, text: ft(d.b.t), color: ACCENT });
       } else if (d.kind === "position") {
         const ps = this.host.position();
+        const real = d.okx?.closed ?? d.order?.closed;
+        if (g.pos?.closed && g.pos.exit && real) {
+          // closed on OKX: entry and close
+          price.push({ pos: g.ay, text: fp(d.a.p), color: "#787b86" }, { pos: g.pos.closed.y, text: fp(real.px), color: g.pos.closed.profit ? ps.profit : ps.loss });
+          time.push({ pos: g.ax, text: ft(d.a.t), color: ACCENT }, { pos: g.pos.exit.x, text: ft(real.t), color: ACCENT });
+          continue;
+        }
         price.push(
           { pos: g.ay, text: fp(d.a.p), color: "#787b86" },
           { pos: g.by, text: fp(d.b.p), color: ps.loss },

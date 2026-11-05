@@ -87,6 +87,13 @@ export function paintUnder(target: CanvasRenderingTarget2D, geo: readonly Geo[],
         const x0 = Math.round(g.pos.x0 * hr);
         const x1 = Math.round(g.pos.x1 * hr);
         const e = Math.round(g.pos.entryY * vr);
+        if (g.pos.closed) {
+          // closed on OKX: entry to close only, in the color of how it went
+          const c = Math.round(g.pos.closed.y * vr);
+          ctx.fillStyle = hexToRgba(g.pos.closed.profit ? ps.profit : ps.loss, alpha);
+          ctx.fillRect(x0, Math.min(e, c), x1 - x0, Math.max(1, Math.abs(c - e)));
+          continue;
+        }
         const t = Math.round(g.pos.targetY * vr);
         const sl = Math.round(g.pos.stopY * vr);
         const lossSide = d.dir == null || (d.a.p - d.b.p) * d.dir > 0;
@@ -214,9 +221,14 @@ export function paintOver(
           const t = o.trades.get(d.id);
           const sc = t?.scale;
           const dim = sc && sc.step < sc.count ? 0.4 : 1; // an earlier part: a later add's stop and take-profit rule
-          for (const l of g.pos.levels) hl(l.y, hexToRgba(ps.profit, 0.9 * dim), "dash");
-          if (!d.okx?.noTp) hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
-          if (!d.okx?.noSl) hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
+          if (g.pos.closed) {
+            // closed on OKX: the entry and where it was closed, nothing of the plan beyond
+            hl(g.pos.closed.y, g.pos.closed.profit ? ps.profit : ps.loss, "solid");
+          } else {
+            for (const l of g.pos.levels) hl(l.y, hexToRgba(ps.profit, 0.9 * dim), "dash");
+            if (!d.okx?.noTp) hl(g.pos.targetY, hexToRgba(ps.profit, dim), "solid");
+            if (!d.okx?.noSl) hl(g.pos.stopY, hexToRgba(ps.loss, dim), "solid");
+          }
           hl(g.pos.entryY, "#b2b5be", "solid");
           // where it went out: as closed on OKX, else as worked out on the bars (an open one on OKX: none yet)
           const real = d.okx?.closed ?? d.order?.closed;
@@ -503,7 +515,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
    *  row clear of the entry's handle (also where it goes with no stop drawn). Left out unless it is to show all
    *  the time or the position is pointed at, selected or placed. */
   const infoBox = (lines: string[], sl: { x: number; w: number; h: number } | null, fg = "#ffffff") => {
-    if (ps.infoHover && !g.active) return;
+    if ((ps.infoHover || p.closed) && !g.active) return; // closed on OKX: a record, its info when asked for
     const s = size(lines);
     const side = -up; // the stop's side: 1 below the entry, −1 above
     const rx = fitX(right - 4 - s.w, s.w);
@@ -530,10 +542,18 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const lx = fitX(left + 10, w);
     const rx = fitX(right - 4 - w, w);
     const along = { slide: "left" as const, range: { min: Math.min(rx, Math.max(0, p.x0 + 10)), max: rx } };
-    out.push({
-      ask: {
-        key: `${d.id}:result`, w, h, prio: PRIO.drawing, avoid: o.covers,
-        at: [
+    // closed on OKX: around entry to close (the rest isn't drawn): right of it, past the close or the entry line
+    const c = p.closed;
+    const away = c && c.y >= p.entryY ? 1 : -1; // from the entry towards the close
+    const at: Spot[] = c
+      ? [
+          { x: p.x1 + 10, y: y - h / 2 },
+          { x: p.x1 + 10, y: c.y - h / 2 },
+          { x: rx, y: beside(c.y, away, h), ...along },
+          { x: rx, y: beside(p.entryY, -away, h), ...along },
+          { x: p.x0 - 10 - w, y: y - h / 2 },
+        ]
+      : [
           { x: p.x1 + 10, y: y - h / 2 },
           { x: rx, y: y - h / 2, ...along },
           { x: rx, y: beside(p.targetY, -up, h), ...along },
@@ -541,8 +561,9 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
           { x: lx, y: y + h / 2 + 4 },
           { x: lx, y: y - h / 2 - 4 - h },
           { x: p.x0 - 10 - w, y: y - h / 2 },
-        ],
-      },
+        ];
+    out.push({
+      ask: { key: `${d.id}:result`, w, h, prio: PRIO.drawing, avoid: o.covers, at },
       paint: (ctx, b) => {
         boxed(ctx, T, [text], { x: b.x, y: b.y, w: r.w, h }, bg, "#ffffff");
         if (!order) return;
@@ -568,8 +589,8 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
       return `${r >= 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}%`;
     };
     const open = !v.closed;
-    if (!k.noTp) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
-    const sl = k.noSl ? null : lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss, true);
+    if (!k.noTp && !p.closed) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
+    const sl = k.noSl || p.closed ? null : lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss, true);
     infoBox(
       [
         `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
@@ -593,8 +614,9 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
   const slR = risk > 0 || !sc ? "  −1.00R" : "";
   const tpText = `止盈 ${show ? fp(d.target) + " " : ""}(${pct(d.target)})${earlier ? "" : `${tpR}${t ? "  " + money(reward) : ""}`}`;
   const slText = `止損 ${show ? fp(d.b.p) + " " : ""}(${pct(d.b.p)})${earlier ? "" : `${slR}${t ? "  " + money(-risk) : ""}`}`;
-  lineTag("tp", tpText, p.targetY, up, earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
-  const sl = lineTag("sl", slText, p.stopY, -up, earlier ? hexToRgba(ps.loss, 0.45) : ps.loss, true);
+  // closed on OKX: a record of entry to close, without the plan's take-profit and stop
+  if (!p.closed) lineTag("tp", tpText, p.targetY, up, earlier ? hexToRgba(ps.profit, 0.45) : ps.profit);
+  const sl = p.closed ? null : lineTag("sl", slText, p.stopY, -up, earlier ? hexToRgba(ps.loss, 0.45) : ps.loss, true);
   if (t) {
     const pl = t.plan;
     const side = dir === 1 ? "多單" : "空單";
@@ -641,8 +663,8 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     resultRow(text, bg, rowY, o.orderTag(d));
   }
   // R lines' names over the right end of each line on screen, or under it, else further left along it, inside the
-  // box; left out when there is no room (the line still shows)
-  p.levels.forEach((l, k) => {
+  // box; left out when there is no room (the line still shows); none on a closed record
+  if (!p.closed) p.levels.forEach((l, k) => {
     const text = `${l.k}R${show ? "  " + fp(l.price) : ""}`;
     const w = T.tw(text);
     const x = right - 4 - w;
