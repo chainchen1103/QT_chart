@@ -91,3 +91,22 @@ test("orders from the exchange are not undone; only so many steps are kept", () 
   while (many.undo("BTC")) n++;
   assert.equal(n, MAX_STEPS);
 });
+
+test("the 還原 / 重做 buttons: whether there is a step each way, told when that may have changed", () => {
+  let told = 0;
+  const h = new DrawingHistory(() => 0, () => told++);
+  assert.equal(h.canUndo("BTC"), false); // nothing loaded yet
+  h.start("BTC", []);
+  assert.deepEqual([h.canUndo("BTC"), h.canRedo("BTC")], [false, false]);
+  h.record("BTC", [line("a", 1)]);
+  assert.deepEqual([h.canUndo("BTC"), h.canRedo("BTC"), told], [true, false, 1]);
+  h.record("BTC", [line("a", 1)]); // nothing changed: no step, nothing told
+  assert.equal(told, 1);
+  h.undo("BTC");
+  assert.deepEqual([h.canUndo("BTC"), h.canRedo("BTC"), told], [false, true, 2]);
+  h.quiet("BTC", [line("o", 4)]); // an order's state: no step of its own
+  assert.deepEqual([h.canUndo("BTC"), h.canRedo("BTC"), told], [false, true, 2]);
+  h.redo("BTC");
+  assert.deepEqual([h.canUndo("BTC"), h.canRedo("BTC"), told], [true, false, 3]);
+  assert.equal(h.canUndo("ETH"), false); // each symbol its own
+});

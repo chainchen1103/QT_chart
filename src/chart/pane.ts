@@ -407,9 +407,9 @@ export class ChartPane {
     this.el.remove();
   }
 
-  // ------------------------------------------------------------------- internals
-  /** Ctrl+Z (back) or Ctrl+Y on this chart: its symbol's drawings one step back, or forward again. */
-  private stepHistory(back: boolean) {
+  /** Ctrl+Z (back) or Ctrl+Y on this chart, or the 還原 / 重做 buttons: its symbol's drawings one step back, or
+   *  forward again. */
+  stepHistory(back: boolean) {
     const id = this.drawingsFor;
     if (!id) return;
     const { history, status, alerts } = this.s;
@@ -426,6 +426,7 @@ export class ChartPane {
     status.note(back ? "已還原上一步（Ctrl+Y 重做）" : "已重做");
   }
 
+  // ------------------------------------------------------------------- internals
   /** Where a position stands on the chart: an alert made after its entry waits for the exit. */
   private tradeStage(d: Drawing): TradeStage | null {
     if (d.kind !== "position") return null;

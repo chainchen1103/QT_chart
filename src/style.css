@@ -88,6 +88,7 @@ button:focus-visible, select:focus-visible, a:focus-visible, input[type=checkbox
 .tool-btn.open { background: var(--panel); color: var(--text); }
 .tool-btn.icon-only { justify-content: center; width: 32px; padding: 0; }
 .tool-btn.icon-only svg { width: 18px; height: 18px; flex: none; }
+.tool-btn:disabled { opacity: 0.35; cursor: default; background: transparent; color: var(--text-2); }
 /* indicator switches: grey when off, white when on; the caret opens their settings */
 .split { display: inline-flex; border-radius: var(--r-ctl); }
 .split:hover { background: var(--panel); }

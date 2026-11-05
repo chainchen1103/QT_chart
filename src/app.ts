@@ -113,7 +113,7 @@ const trading = new Trading({
   note: (text) => status.note(text),
   filled: (instId) => sync.orderFilled(instId),
 });
-const drawingHistory = new DrawingHistory();
+const drawingHistory = new DrawingHistory(undefined, () => paintUndoButtons());
 /** Change a symbol's saved drawings from outside the charts (OKX): saved, not a step to undo, shown at once. */
 function editDrawings(instId: string, edit: (list: Drawing[]) => boolean) {
   const list = loadDrawings(instId);
@@ -215,6 +215,7 @@ const workspace: Workspace = new Workspace(
       tools.paintTools(p.drawings.getTool());
       renderQuote($("quote"), p.feed, catalog);
       paintReplayButton(p.replay);
+      paintUndoButtons();
     },
     replayChanged: (p) => paintReplayButton(p.replay),
     priced: (p) => renderQuote($("quote"), p.feed, catalog),
@@ -238,6 +239,12 @@ const pineUi: PineUi = {
   },
   note: (text) => status.note(text),
 };
+/** 還原 / 重做 follow the drawings of the chart in use. */
+function paintUndoButtons() {
+  const id = workspace.inUse().feed.instId;
+  ($("undo-btn") as HTMLButtonElement).disabled = !drawingHistory.canUndo(id);
+  ($("redo-btn") as HTMLButtonElement).disabled = !drawingHistory.canRedo(id);
+}
 /** The replay button follows the chart in use: on while it replays or picks where to start. */
 function paintReplayButton(r: { active: boolean }) {
   $("replay-btn").classList.toggle("on", r.active);
@@ -278,6 +285,8 @@ document.addEventListener("mousedown", (e) => {
 $("layout-btn").onclick = () => toggleLayoutPicker($("layout-btn"), () => workspace.layout(), (id) => workspace.setLayout(id));
 $("settings-btn").onclick = () => openSettingsAt("appearance");
 $("replay-btn").onclick = () => workspace.inUse().replay.toggle();
+$("undo-btn").onclick = () => workspace.inUse().stepHistory(true);
+$("redo-btn").onclick = () => workspace.inUse().stepHistory(false);
 $("alert-btn").onclick = () => toggleAlertManager($("alert-btn"), alertUi);
 $("account-btn").onclick = () => trading.openAccount();
 $("pine-btn").onclick = () => togglePineManager($("pine-btn"), pineUi);

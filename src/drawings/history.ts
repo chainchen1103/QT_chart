@@ -17,9 +17,20 @@ const same = (a: readonly Drawing[], b: readonly Drawing[]) => JSON.stringify(a)
 export class DrawingHistory {
   private readonly books = new Map<string, Book>();
   private readonly clock: () => number;
+  private readonly changed: () => void;
 
-  constructor(clock: () => number = () => Date.now()) {
+  /** `changed`: a step was added, undone or redone (the 還原 / 重做 buttons follow). */
+  constructor(clock: () => number = () => Date.now(), changed: () => void = () => undefined) {
     this.clock = clock;
+    this.changed = changed;
+  }
+
+  /** Is there a step to undo, or one to redo, for this symbol? */
+  canUndo(instId: string): boolean {
+    return !!this.books.get(instId)?.undo.length;
+  }
+  canRedo(instId: string): boolean {
+    return !!this.books.get(instId)?.redo.length;
   }
 
   /** A symbol's drawings as loaded: where its history starts (a symbol that has one keeps it). */
@@ -49,6 +60,7 @@ export class DrawingHistory {
     b.redo = [];
     b.merge = merge ?? null;
     b.at = t;
+    this.changed();
   }
 
   /** A change that is no step of its own (an order's state from the exchange): taken in as it is. */
@@ -75,6 +87,7 @@ export class DrawingHistory {
     (back ? b.redo : b.undo).push(b.now);
     b.now = keepOrders(to, b.now);
     b.merge = null;
+    this.changed();
     return clone(b.now);
   }
 }
