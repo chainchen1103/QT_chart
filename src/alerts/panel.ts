@@ -1,7 +1,7 @@
 // Alert windows: the list with the log and options, a new price alert at a point, and the alert section in a
 // drawing's settings. Changes go straight to the AlertService; the windows redraw when it changes.
 
-import type { Drawing } from "../settings/model.ts";
+import { isChannel, type Drawing } from "../settings/model.ts";
 import { shortName } from "../core/format.ts";
 import { checkbox, el, flagBad, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
@@ -240,6 +240,7 @@ export function alertDialogAt(x: number, y: number, ui: AlertUi, price: number |
 }
 
 // ----------------------------------------------------------------------------- inside a drawing's settings
+const CHANNEL_NOTE = "離開、進入：價格出了或進了上下緣之間；觸及、突破、跌破：碰到通道的任何一條線（上下緣、顯示的中線和等比線）。畫完之後照同樣斜率往右延伸";
 const WHAT: Partial<Record<Drawing["kind"], string>> = {
   trend: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
   info: "價格碰到這條線時提醒；線段畫完之後，照同樣斜率往右延伸",
@@ -252,6 +253,10 @@ const WHAT: Partial<Record<Drawing["kind"], string>> = {
   vline: "到了這條垂直線的時間時提醒",
   rect: "價格進入或離開矩形的價格範圍時提醒（右邊界之後也算）",
   fib: "價格碰到任何一條勾選的 Fib 線時提醒",
+  channel: CHANNEL_NOTE,
+  regression: CHANNEL_NOTE,
+  flat: CHANNEL_NOTE,
+  disjoint: CHANNEL_NOTE,
   position: "價格到進場價時提醒一次，之後碰到止盈或止損再提醒一次",
 };
 
@@ -259,7 +264,9 @@ const WHAT: Partial<Record<Drawing["kind"], string>> = {
 function cannot(d: Drawing, stage: TradeStage | null): string | null {
   const now = Date.now() / 1000;
   if (d.kind === "ray" && d.b.t <= d.a.t) return "往左的射線碰不到之後的價格，不能設提醒";
-  if ((d.kind === "trend" || d.kind === "info" || d.kind === "angle" || d.kind === "extended") && d.a.t === d.b.t) return "垂直的線沒辦法用價格提醒";
+  if ((d.kind === "trend" || d.kind === "info" || d.kind === "angle" || d.kind === "extended" || isChannel(d.kind)) && d.a.t === d.b.t) {
+    return "垂直的線沒辦法用價格提醒";
+  }
   if (d.kind === "vline" && d.a.t <= now) return "這條垂直線的時間已經過了";
   if (d.kind === "position" && stage === "done") return "這個倉位已經出場了";
   return null;

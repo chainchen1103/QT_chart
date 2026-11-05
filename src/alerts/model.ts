@@ -57,6 +57,7 @@ export const REPEAT_TEXT: Record<Repeat, string> = { once: "只提醒一次", ev
 /** The conditions that make sense for a price or a kind of drawing. */
 export function condsFor(kind: "price" | DrawKind): AlertCond[] {
   if (kind === "rect") return ["enter", "exit"];
+  if (kind === "channel" || kind === "regression" || kind === "flat" || kind === "disjoint") return ["exit", "enter", "touch", "up", "down"];
   if (kind === "vline") return ["time"];
   if (kind === "position") return ["trade"];
   return ["touch", "up", "down"];

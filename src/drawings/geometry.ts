@@ -180,3 +180,84 @@ export function snapSquare(ax: number, ay: number, bx: number, by: number): { x:
 
 /** Shift while moving: only across or only up and down, whichever way the mouse went further. */
 export const lockAxis = (dx: number, dy: number): "h" | "v" => (Math.abs(dx) >= Math.abs(dy) ? "h" : "v");
+
+// ----------------------------------------------------------------------------- channels
+/** A line from one point to another (a channel's lines run from its first point's time to its second's). */
+export type Line2 = [Anchor, Anchor];
+/** The channels whose second line is placed by hand: parallel to the first, level, or mirroring it. */
+export type HandChannel = "channel" | "flat" | "disjoint";
+
+/** Price at time t on the line through a and b, continued past them (a's price when they share a time). */
+export function priceOnLine(a: Anchor, b: Anchor, t: number): number {
+  return b.t === a.t ? a.p : a.p + ((b.p - a.p) * (t - a.t)) / (b.t - a.t);
+}
+
+/** A channel's second line, from a's time to b's, starting at c.p: parallel to a–b, level, or mirrored (the
+ *  same move the other way). */
+export function secondLine(kind: HandChannel, a: Anchor, b: Anchor, c: Anchor): Line2 {
+  const rise = b.p - a.p;
+  return [{ t: a.t, p: c.p }, { t: b.t, p: kind === "channel" ? c.p + rise : kind === "flat" ? c.p : c.p - rise }];
+}
+
+/** The c.p that puts a channel's second line through point pt (placing or dragging that line). */
+export function secondThrough(kind: HandChannel, a: Anchor, b: Anchor, pt: Anchor): number {
+  const k = b.t === a.t ? 0 : (b.p - a.p) / (b.t - a.t); // the first line's slope, price per second
+  const s = kind === "channel" ? k : kind === "flat" ? 0 : -k;
+  return pt.p - s * (pt.t - a.t);
+}
+
+/** A regression trend's lines: `half` above and below the fitted line a–b. */
+export const bandLines = (a: Anchor, b: Anchor, half: number): [Line2, Line2] => [
+  [{ t: a.t, p: a.p - half }, { t: b.t, p: b.p - half }],
+  [{ t: a.t, p: a.p + half }, { t: b.t, p: b.p + half }],
+];
+
+/** A channel's two lines as [lower, upper]: the one lower halfway along is the lower one. */
+export function lowerUpper(l1: Line2, l2: Line2): [Line2, Line2] {
+  const m1 = l1[0].p + l1[1].p; // twice the price halfway
+  const m2 = l2[0].p + l2[1].p;
+  return (m1 !== m2 ? m1 < m2 : l1[0].p <= l2[0].p) ? [l1, l2] : [l2, l1];
+}
+
+/** The line `k` channel widths up from the lower line, at each end: 0 the lower line, 1 the upper one, 0.5
+ *  halfway, −1 one width under the lower line. Where the lines aren't parallel, the width of each end. */
+export function widthLine(lo: Line2, up: Line2, k: number): Line2 {
+  return [
+    { t: lo[0].t, p: lo[0].p + k * (up[0].p - lo[0].p) },
+    { t: lo[1].t, p: lo[1].p + k * (up[1].p - lo[1].p) },
+  ];
+}
+
+/** A line fitted to closes: the fitted price at the two ends asked for, the closes' standard deviation from it
+ *  (divided by n − 1, as TradingView's linear regression channel) and Pearson's R of the closes against time. */
+export type Fit = { p0: number; p1: number; sd: number; r: number };
+
+/**
+ * Least squares through the closes of bars i0 to i1 (logical indexes, either order; `close(i)` for 0 ≤ i < n).
+ * Bars past the newest one are left out, and the line goes on to i1. null when the first bar isn't loaded or
+ * fewer than two bars are left.
+ */
+export function fitLine(n: number, close: (i: number) => number, i0: number, i1: number): Fit | null {
+  const lo = Math.round(Math.min(i0, i1));
+  const hi = Math.min(n - 1, Math.round(Math.max(i0, i1)));
+  if (!(lo >= 0) || !(hi - lo >= 1)) return null;
+  const m = hi - lo + 1;
+  let sy = 0;
+  for (let i = lo; i <= hi; i++) sy += close(i);
+  const mx = (lo + hi) / 2;
+  const my = sy / m;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (let i = lo; i <= hi; i++) {
+    const dx = i - mx;
+    const dy = close(i) - my;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  const slope = sxy / sxx;
+  const at = (i: number) => my + slope * (i - mx);
+  const ss = Math.max(0, syy - slope * sxy); // what the line leaves unexplained
+  return { p0: at(i0), p1: at(i1), sd: Math.sqrt(ss / (m - 1)), r: syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0 };
+}

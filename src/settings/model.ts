@@ -54,15 +54,42 @@ export type MagnetSettings = { on: boolean; holdKey: MagnetKey };
 
 // ----------------------------------------------------------------------------- drawings
 export type LineKind = "trend" | "ray" | "info" | "extended" | "angle" | "hline" | "hray" | "vline" | "cross";
-export type DrawKind = "fib" | LineKind | "rect" | "position";
+/** Channels: two lines with the space between them filled (see ChannelDrawing). */
+export type ChannelKind = "channel" | "regression" | "flat" | "disjoint";
+export type DrawKind = "fib" | LineKind | ChannelKind | "rect" | "position";
 export type Dash = "solid" | "dash" | "dot";
 export type LineStyle = { color: string; width: number; dash: Dash };
 /** `transparency` of the fill: 0 = solid, 100 = fully clear. */
 export type RectStyle = { border: string; width: number; dash: Dash; fill: string; transparency: number; extend: boolean };
+/** A line in proportion to a channel's width, counted up from its lower line: 0.5 halfway, 1 on the upper line,
+ *  −1 one width under the lower line. */
+export type ChannelLevel = { value: number; on: boolean };
+/**
+ * How a channel looks. `transparency` of the fill between its lines: 0 = solid, 100 = no fill. `middle`: the
+ * dashed line halfway (a regression trend's fitted line). `dev`: how far a regression trend's outer lines are
+ * from the fitted line, in standard deviations of the closes; `pearson`: show its Pearson's R.
+ */
+export type ChannelStyle = {
+  color: string; width: number; dash: Dash; fill: string; transparency: number;
+  middle: boolean; extendLeft: boolean; extendRight: boolean;
+  dev: number; pearson: boolean;
+  levels: ChannelLevel[];
+};
 
 export type FibDrawing = { id: string; kind: "fib"; a: Anchor; b: Anchor };
 /** One-point lines (horizontal, horizontal ray, vertical, cross) keep b equal to a. */
 export type LineDrawing = { id: string; kind: LineKind; a: Anchor; b: Anchor; style: LineStyle };
+/**
+ * A channel. a–b is its first line, c.p the second line's price at a's time (c.t is a.t): a parallel channel's
+ * second line runs parallel to the first, a flat top/bottom's stays level, a disjoint channel's mirrors the first
+ * (the same move the other way). A regression trend is fitted to the closes of the bars from a.t to b.t; its a.p,
+ * b.p (the fitted line there) and `fit` (the closes' standard deviation from the line, and Pearson's R) are as last
+ * fitted: the chart fits it again on the bars it has, alerts read these.
+ */
+export type ChannelDrawing = {
+  id: string; kind: ChannelKind; a: Anchor; b: Anchor; c: Anchor; style: ChannelStyle;
+  fit?: { sd: number; r: number };
+};
 export type RectDrawing = { id: string; kind: "rect"; a: Anchor; b: Anchor; style: RectStyle };
 /**
  * A trade: a = entry (bar time, price); b.p = stop-loss price, b.t = where the box ends; target = take-profit.
@@ -109,7 +136,7 @@ export type OkxPos = {
   noSl: boolean; noTp: boolean;
   closed?: OkxClosed;
 };
-export type Drawing = FibDrawing | LineDrawing | RectDrawing | PositionDrawing;
+export type Drawing = FibDrawing | LineDrawing | ChannelDrawing | RectDrawing | PositionDrawing;
 
 /** Name, shortcut and number of points of each drawing tool. */
 export const TOOL_INFO: Record<DrawKind, { name: string; key: string; points: 1 | 2 | 3 }> = {
@@ -123,6 +150,10 @@ export const TOOL_INFO: Record<DrawKind, { name: string; key: string; points: 1 
   hray: { name: "水平射線", key: "Alt+J", points: 1 },
   vline: { name: "垂直線", key: "Alt+V", points: 1 },
   cross: { name: "十字線", key: "Alt+C", points: 1 },
+  channel: { name: "平行通道", key: "", points: 3 },
+  regression: { name: "迴歸趨勢", key: "", points: 2 },
+  flat: { name: "平頂/平底", key: "", points: 3 },
+  disjoint: { name: "不相交通道", key: "", points: 3 },
   rect: { name: "矩形", key: "Alt+Shift+R", points: 2 },
   position: { name: "倉位", key: "Alt+P", points: 3 },
 };
@@ -161,6 +192,19 @@ export const DEFAULT_POSITION: PositionSettings = {
 };
 export const MAX_R_LEVELS = 12;
 export const LINE_KINDS: LineKind[] = ["trend", "ray", "info", "extended", "angle", "hline", "hray", "vline", "cross"];
+export const CHANNEL_KINDS: ChannelKind[] = ["channel", "regression", "flat", "disjoint"];
+export const isChannel = (k: string): k is ChannelKind => (CHANNEL_KINDS as string[]).includes(k);
+export const isChannelDrawing = (d: Drawing): d is ChannelDrawing => isChannel(d.kind);
+export const MAX_CHANNEL_LEVELS = 12;
+/** A regression trend's outer lines: this many standard deviations from the fitted line. */
+export const CHANNEL_DEV = { min: 0.1, max: 10 };
+export function defaultChannelStyle(kind: ChannelKind): ChannelStyle {
+  return {
+    color: "#2962ff", width: 1, dash: "solid", fill: "#2962ff", transparency: 85,
+    middle: kind === "channel" || kind === "regression", extendLeft: false, extendRight: false,
+    dev: 2, pearson: true, levels: [],
+  };
+}
 export const DASHES: { key: Dash; label: string }[] = [
   { key: "solid", label: "實線" },
   { key: "dash", label: "虛線" },
@@ -171,7 +215,7 @@ export const DEFAULT_LINE_STYLE: LineStyle = { color: "#2962ff", width: 2, dash:
 export const DEFAULT_RECT_STYLE: RectStyle = {
   border: "#9c27b0", width: 1, dash: "solid", fill: "#9c27b0", transparency: 80, extend: false,
 };
-export type DrawStyles = Partial<Record<LineKind, LineStyle>> & { rect?: RectStyle };
+export type DrawStyles = Partial<Record<LineKind, LineStyle>> & Partial<Record<ChannelKind, ChannelStyle>> & { rect?: RectStyle };
 
 export const MAX_MAS = 10;
 export const MAX_ZONE_SETS = 4;
@@ -394,6 +438,36 @@ export function cleanRectStyle(raw: unknown): RectStyle {
     extend: r.extend === true,
   };
 }
+export function cleanChannelStyle(raw: unknown, kind: ChannelKind): ChannelStyle {
+  const r = isObj(raw) ? raw : {};
+  const d = defaultChannelStyle(kind);
+  return {
+    color: isColor(r.color) ? r.color : d.color,
+    width: cleanWidth(r.width, d.width),
+    dash: cleanDash(r.dash),
+    fill: isColor(r.fill) ? r.fill : d.fill,
+    transparency: num(r.transparency, { min: 0, max: 100 }, d.transparency),
+    middle: typeof r.middle === "boolean" ? r.middle : d.middle,
+    extendLeft: r.extendLeft === true,
+    extendRight: r.extendRight === true,
+    dev: Math.round(num(r.dev, CHANNEL_DEV, d.dev, false) * 100) / 100,
+    pearson: r.pearson !== false,
+    levels: cleanChannelLevels(r.levels),
+  };
+}
+/** Valid, different values in range, sorted. */
+export function cleanChannelLevels(raw: unknown): ChannelLevel[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChannelLevel[] = [];
+  for (const l of raw) {
+    if (out.length >= MAX_CHANNEL_LEVELS) break;
+    if (!isObj(l) || !isNum(l.value)) continue;
+    const value = Math.round(l.value * 1e4) / 1e4;
+    if (value < LEVEL_RANGE.min || value > LEVEL_RANGE.max || out.some((x) => x.value === value)) continue;
+    out.push({ value, on: l.on !== false });
+  }
+  return out.sort((x, y) => x.value - y.value);
+}
 
 export function cleanDrawings(raw: unknown): Drawing[] {
   if (!Array.isArray(raw)) return [];
@@ -425,6 +499,14 @@ export function cleanDrawings(raw: unknown): Drawing[] {
         ...(order ? { order } : {}),
         ...(okx ? { okx } : {}),
         ...(d.dir === 1 || d.dir === -1 ? { dir: d.dir } : {}),
+      });
+    } else if (isChannel(kind)) {
+      const c = anchor(d.c);
+      const f = d.fit;
+      const fit = isObj(f) && isNum(f.sd) && f.sd >= 0 && isNum(f.r) ? { sd: f.sd, r: Math.max(-1, Math.min(1, f.r)) } : null;
+      out.push({
+        id, kind, a, b, c: { t: a.t, p: c ? c.p : a.p }, style: cleanChannelStyle(d.style, kind),
+        ...(kind === "regression" && fit ? { fit } : {}),
       });
     }
     else out.push({ id, kind: kind as LineKind, a, b: TOOL_INFO[kind as LineKind].points === 1 ? { ...a } : b, style: cleanLineStyle(d.style) });
@@ -496,6 +578,7 @@ export function cleanDrawStyles(raw: unknown): DrawStyles {
   const r = isObj(raw) ? raw : {};
   const out: DrawStyles = {};
   for (const k of LINE_KINDS) if (isObj(r[k])) out[k] = cleanLineStyle(r[k]);
+  for (const k of CHANNEL_KINDS) if (isObj(r[k])) out[k] = cleanChannelStyle(r[k], k);
   if (isObj(r.rect)) out.rect = cleanRectStyle(r.rect);
   return out;
 }
@@ -597,13 +680,13 @@ export function cleanTimeframes(raw: unknown): TimeframeSettings {
   return { bar: bar.length ? bar : [...DEFAULT_TF_BAR], custom: list(r.custom, MAX_TF_CUSTOM) };
 }
 
-/** How many bars a chart keeps: a cap (older history stops loading there), or none at all. */
 /** Following the OKX account on the charts (positions, stop-losses, take-profits). */
 export type SyncSettings = { on: boolean };
 export function cleanSync(raw: unknown): SyncSettings {
   return { on: !(isObj(raw) && raw.on === false) };
 }
 
+/** How many bars a chart keeps: a cap (older history stops loading there), or none at all. */
 export type BarSettings = { unlimited: boolean };
 export function cleanBars(raw: unknown): BarSettings {
   const r = isObj(raw) ? raw : {};

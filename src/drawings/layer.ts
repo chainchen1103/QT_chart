@@ -1,5 +1,6 @@
 // Drawing tools on the price pane: Fibonacci retracement; lines (trend line, ray, info line, extended line,
-// trend angle, horizontal line, horizontal ray, vertical line, cross line); rectangles; positions.
+// trend angle, horizontal line, horizontal ray, vertical line, cross line); channels (parallel channel,
+// regression trend, flat top/bottom, disjoint channel); rectangles; positions.
 //
 // This file holds the drawings and what the mouse and keys do with them. Where they are on screen is geo.ts,
 // how they look is paint.ts, position sizing is trade.ts. The layer is a lightweight-charts series primitive
@@ -25,15 +26,22 @@ import type { Candle } from "../core/api.ts";
 import { xOfLogical } from "../chart/coords.ts";
 import { chainPositions, type PositionPrices, type PositionResult } from "./trade.ts";
 import type { LiveInfo } from "../trade/sync.ts";
-import { clampTarget, indexToTime, lockAxis, posDir, positionDir, snapAngle, snapSquare, timeToIndex, type Anchor } from "./geometry.ts";
+import {
+  clampTarget, fitLine, indexToTime, lockAxis, posDir, positionDir, secondThrough, snapAngle, snapSquare, timeToIndex,
+  type Anchor, type Fit,
+} from "./geometry.ts";
 import { computeGeo, hitTest, type Geo, type Hit, type Projector } from "./geo.ts";
 import { ACCENT, paintOver, paintUnder, type HotSpot, type OrderTag, type PaintOptions } from "./paint.ts";
 import { isTyping } from "../ui/dom.ts";
 import {
   clone,
+  isChannel,
+  isChannelDrawing,
   magnetKeyLabel,
   newId,
   TOOL_INFO,
+  type ChannelDrawing,
+  type ChannelStyle,
   type DrawKind,
   type Drawing,
   type FibSettings,
@@ -78,7 +86,7 @@ export type DrawingHost = {
   /** That button was clicked, at screen point (x, y). */
   orderClicked(d: PositionDrawing, x: number, y: number): void;
   /** The style a new drawing of this kind starts with. */
-  styleFor(kind: Exclude<DrawKind, "fib" | "position">): LineStyle | RectStyle;
+  styleFor(kind: Exclude<DrawKind, "fib" | "position">): LineStyle | RectStyle | ChannelStyle;
   /** The list changed (added, moved, restyled, deleted): save it. `step`, for undo: the name of a change that
    *  goes on (a color being picked: one step), or false for a change that is no step of its own (an order's
    *  state). */
@@ -101,7 +109,7 @@ export type DrawingHost = {
   hint(text: string | null): void;
 };
 
-type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor; target: number }; moved: boolean };
+type Drag = Hit & { x0: number; y0: number; start: Anchor | null; orig: { a: Anchor; b: Anchor; c: Anchor; target: number }; moved: boolean };
 type Mouse = { x: number; y: number; inside: boolean };
 type AxisLabel = { pos: number; text: string; color: string };
 
@@ -117,8 +125,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private list: Drawing[] = [];
   private draft: Drawing | null = null;
   private placing: { x0: number; y0: number; pressed: boolean } | null = null;
-  /** Placing a position: 1 = the stop follows the mouse, 2 = the take-profit does. */
+  /** Placing a position: 1 = the stop follows the mouse, 2 = the take-profit does. Placing a channel: 1 = the
+   *  end of its first line, 2 = its second line. */
   private stage: 1 | 2 = 1;
+  /** Regression trends fitted to the bars, by drawing (fitted again when the bars or its ends change). */
+  private fits = new Map<string, { key: string; fit: Fit | null }>();
   private selected: string | null = null;
   private hovered: string | null = null;
   private tool: Tool = "cursor";
@@ -250,6 +261,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.list = list;
     this.draft = null;
     this.placing = null;
+    this.fits.clear();
     if (!(this.drag && has(this.drag.id))) this.drag = null;
     if (!has(this.selected)) this.selected = null;
     if (!has(this.hovered)) this.hovered = null;
@@ -294,11 +306,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.refreshHint();
     this.redraw();
   }
-  /** New style for a line or rectangle; saved at once. */
-  setStyle(id: string, style: LineStyle | RectStyle) {
+  /** New style for a line, channel or rectangle; saved at once. */
+  setStyle(id: string, style: LineStyle | RectStyle | ChannelStyle) {
     const d = this.find(id);
     if (!d || d.kind === "fib" || d.kind === "position") return;
-    (d as { style: LineStyle | RectStyle }).style = style;
+    (d as { style: LineStyle | RectStyle | ChannelStyle }).style = style;
     this.host.changed(this.list, `style:${id}`); // a color dragged across the picker is one step
     this.redraw();
   }
@@ -379,7 +391,35 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       fmtPrice: this.host.fmtPrice,
       trades: this.trades,
       active: (d) => d === this.draft || d.id === this.selected || d.id === this.hovered,
+      fit: (d) => this.fitOf(d),
+      firstOnly: this.draft && isChannelDrawing(this.draft) && this.draft.kind !== "regression" && this.stage === 1 ? this.draft.id : null,
     });
+  }
+
+  /** A regression trend fitted to the closes of the loaded bars from its first point to its second (null when
+   *  the bars don't reach back to its first point). */
+  private fitOf(d: ChannelDrawing): Fit | null {
+    const bars = this.host.bars();
+    const n = bars.length;
+    const key = n ? `${d.a.t}|${d.b.t}|${n}|${bars[0].time}|${bars[n - 1].time}|${bars[n - 1].close}` : "";
+    const known = this.fits.get(d.id);
+    if (known && known.key === key) return known.fit;
+    const times = this.host.times();
+    const bs = this.host.barSec();
+    const fit = n ? fitLine(n, (i) => bars[i].close, timeToIndex(times, d.a.t, bs), timeToIndex(times, d.b.t, bs)) : null;
+    this.fits.set(d.id, { key, fit });
+    return fit;
+  }
+
+  /** Keep a regression trend's fit on the bars now in it (alerts and other timeframes read it). */
+  private refit(d: Drawing) {
+    if (d.kind !== "regression") return;
+    const f = this.fitOf(d);
+    if (!f) return;
+    d.a = { t: d.a.t, p: f.p0 };
+    d.b = { t: d.b.t, p: f.p1 };
+    d.c = { ...d.a };
+    d.fit = { sd: f.sd, r: f.r };
   }
 
   private paintOptions(): PaintOptions {
@@ -410,7 +450,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         if (d.kind === "vline" || d.kind === "cross") time.push({ pos: g.ax, text: ft(d.a.t), color: d.style.color });
       }
       if (d.id !== this.selected && d !== this.draft) continue;
-      if (d.kind === "position") {
+      if (isChannelDrawing(d)) {
+        for (const k of g.ch?.marks ?? []) price.push({ pos: k.y, text: fp(k.p), color: ACCENT });
+        time.push({ pos: g.ax, text: ft(d.a.t), color: ACCENT }, { pos: g.bx, text: ft(d.b.t), color: ACCENT });
+      } else if (d.kind === "position") {
         const ps = this.host.position();
         price.push(
           { pos: g.ay, text: fp(d.a.p), color: "#787b86" },
@@ -513,7 +556,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   /** The next point of a drawing being placed: under the mouse (with the magnet), or with Shift held, kept
    *  horizontal / vertical / 45° from the first point (a square for a rectangle; price only for a position). */
   private draftPoint(d: Drawing, m: Mouse, snap: boolean, shift: boolean): Anchor | null {
-    if (!shift) return this.pointAt(m.x, m.y, snap);
+    if (!shift || (isChannelDrawing(d) && this.stage === 2)) return this.pointAt(m.x, m.y, snap);
     if (d.kind === "position") {
       const pt = this.pointAt(m.x, m.y, false);
       return pt && { t: d.b.t, p: pt.p }; // the box keeps its width
@@ -563,7 +606,25 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       return { id, kind, a, b, target: pt.p, capital: null, risk: ps.risk, riskMode: ps.riskMode, leverage: ps.leverage };
     }
     if (kind === "rect") return { id, kind, a, b, style: clone(this.host.styleFor(kind) as RectStyle) };
+    if (isChannel(kind)) return { id, kind, a, b, c: { ...pt }, style: clone(this.host.styleFor(kind) as ChannelStyle) };
     return { id, kind, a, b, style: clone(this.host.styleFor(kind) as LineStyle) };
+  }
+
+  /** Placing a channel: the end of its first line follows the point (stage 1; a regression trend's end), then
+   *  its second line goes through it (stage 2). */
+  private placeChannel(d: ChannelDrawing, pt: Anchor) {
+    if (this.stage === 2 && d.kind !== "regression") d.c = { t: d.a.t, p: secondThrough(d.kind, d.a, d.b, pt) };
+    else {
+      d.b = pt;
+      d.c = { t: d.a.t, p: d.c.p };
+    }
+  }
+
+  /** A three-point channel's first line is down (its ends at different times): on to its second line. */
+  private firstLineDone(d: ChannelDrawing): boolean {
+    if (d.b.t === d.a.t) return false; // standing straight up: keep placing its end
+    this.stage = 2;
+    return true;
   }
 
   /** The bar time `n` bars after `t`. */
@@ -627,9 +688,20 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       }
       if (!this.draft) {
         this.draft = this.make(kind, pt);
+        this.stage = 1;
         this.placing = { x0: m.x, y0: m.y, pressed: true };
         this.refreshHint();
         this.redraw();
+      } else if (isChannelDrawing(this.draft)) {
+        const d = this.draft;
+        this.placeChannel(d, pt);
+        if (TOOL_INFO[d.kind].points === 3 && this.stage === 1) {
+          if (this.firstLineDone(d)) this.placeChannel(d, pt); // the second line starts through this point
+          this.refreshHint();
+          this.redraw();
+          return;
+        }
+        this.finishDraft();
       } else {
         this.draft.b = pt;
         this.finishDraft();
@@ -658,7 +730,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!d) return;
     this.selected = h.id;
     const target = d.kind === "position" ? d.target : 0;
-    this.drag = { ...h, x0: m.x, y0: m.y, start: this.pointAt(m.x, m.y, false), orig: { a: { ...d.a }, b: { ...d.b }, target }, moved: false };
+    const c = isChannelDrawing(d) ? { ...d.c } : { ...d.a };
+    this.drag = { ...h, x0: m.x, y0: m.y, start: this.pointAt(m.x, m.y, false), orig: { a: { ...d.a }, b: { ...d.b }, c, target }, moved: false };
     this.host.el.classList.add("dragging");
     this.refreshHint();
     this.redraw();
@@ -691,6 +764,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.drag = null;
       this.host.el.classList.remove("dragging");
       if (!dr.moved) return;
+      const moved = this.find(dr.id);
+      if (moved) this.refit(moved);
       this.host.changed(this.list);
       const d = this.find(dr.id);
       if (d?.kind === "position" && (dr.part === "stop" || dr.part === "target") && this.host.isLive(d)) {
@@ -707,6 +782,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         if (this.draft.kind === "position") {
           if (pt) this.placePosition(this.draft, pt);
           if (this.draft.b.p !== this.draft.a.p) this.stage = 2;
+          this.refreshHint();
+          this.redraw();
+          return;
+        }
+        if (isChannelDrawing(this.draft) && TOOL_INFO[this.draft.kind].points === 3) {
+          // pressed, dragged, released: that's the first line; its second line follows the mouse now
+          if (pt) this.placeChannel(this.draft, pt);
+          if (this.firstLineDone(this.draft) && pt) this.placeChannel(this.draft, pt);
           this.refreshHint();
           this.redraw();
           return;
@@ -756,6 +839,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const pt = this.draftPoint(this.draft, m, snap, shift);
     if (!pt) return;
     if (this.draft.kind === "position") this.placePosition(this.draft, pt);
+    else if (isChannelDrawing(this.draft)) this.placeChannel(this.draft, pt);
     else this.draft.b = pt;
     this.redraw();
   }
@@ -783,11 +867,15 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         if (lockAxis(m.x - dr.x0, m.y - dr.y0) === "h") dp = 0;
         else di = 0;
       }
+      if (d.kind === "regression") dp = 0; // the bars it is fitted to set its prices
       const move = (a: Anchor): Anchor => ({ t: indexToTime(times, timeToIndex(times, a.t, bs) + di, bs), p: a.p + dp });
       const b0 = d.b.p;
       d.a = move(dr.orig.a);
       d.b = move(dr.orig.b);
       if (d.kind === "position") d.target += d.b.p - b0;
+      if (isChannelDrawing(d)) d.c = { t: d.a.t, p: dr.orig.c.p + dp };
+    } else if (isChannelDrawing(d)) {
+      if (!this.dragChannel(d, dr, m, snap, shift)) return;
     } else if (d.kind === "position") {
       let pt = this.pointAt(m.x, m.y, snap && !shift);
       if (!pt) return;
@@ -827,11 +915,43 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.redraw();
   }
 
+  /**
+   * Dragging a channel's handle. A regression trend's ends change only the bars it is fitted to. The second line's
+   * handles move that line up or down, through the mouse. The first line's ends move as a line's do (Shift: level,
+   * upright or 45°); a parallel channel's second line keeps its distance, a level or mirrored one its starting
+   * price. False when the mouse is off the chart.
+   */
+  private dragChannel(d: ChannelDrawing, dr: Drag, m: Mouse, snap: boolean, shift: boolean): boolean {
+    if (d.kind === "regression") {
+      const pt = this.pointAt(m.x, m.y, false);
+      if (!pt) return false;
+      if (dr.part === "a") d.a = { t: pt.t, p: d.a.p };
+      else d.b = { t: pt.t, p: d.b.p };
+      d.c = { ...d.a };
+      return true;
+    }
+    if (dr.part === "c" || dr.part === "d") {
+      const pt = this.pointAt(m.x, m.y, snap);
+      if (!pt) return false;
+      d.c = { t: d.a.t, p: secondThrough(d.kind, d.a, d.b, pt) };
+      return true;
+    }
+    const pt = shift ? this.constrained(dr.part === "a" ? d.b : d.a, m, false) : this.pointAt(m.x, m.y, snap);
+    if (!pt) return false;
+    if (dr.part === "a") d.a = pt;
+    else d.b = pt;
+    d.c = { t: d.a.t, p: d.kind === "channel" ? d.a.p + (dr.orig.c.p - dr.orig.a.p) : dr.orig.c.p };
+    return true;
+  }
+
   private finishDraft() {
     const d = this.draft;
     this.draft = null;
     this.placing = null;
-    if (d && !(d.a.t === d.b.t && d.a.p === d.b.p)) {
+    // a channel needs its ends at different times; other drawings two different points
+    const ok = d && (isChannelDrawing(d) ? d.a.t !== d.b.t : !(d.a.t === d.b.t && d.a.p === d.b.p));
+    if (d && ok) {
+      this.refit(d);
       this.list.push(d);
       this.selected = d.id;
       this.host.changed(this.list);
@@ -913,6 +1033,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (!this.draft) this.host.hint(`倉位：點進場價；${snap}；Esc 取消`);
       else if (this.stage === 1) this.host.hint(`倉位：點止損價，在進場下面是多單、上面是空單；按住 Shift 只改價格；${snap}；Esc 取消`);
       else this.host.hint(`倉位：點止盈價，畫面會顯示到止盈為止的 R 線；按住 Shift 只改價格；${snap}；Esc 取消`);
+    } else if (this.tool === "regression") {
+      const dev = this.host.styleFor("regression") as ChannelStyle;
+      if (!this.draft) this.host.hint(`迴歸趨勢：點起點的 K 線，或按住拖到終點；用收盤價算迴歸線，上下各 ${dev.dev} 個標準差；Esc 取消`);
+      else this.host.hint("迴歸趨勢：點終點的 K 線；Esc 取消");
+    } else if (isChannel(this.tool)) {
+      const name = TOOL_INFO[this.tool].name;
+      const second = this.tool === "channel" ? "平行的第二條線" : this.tool === "flat" ? "水平的第二條線" : "反方向對稱的第二條線";
+      if (!this.draft) this.host.hint(`${name}：點第一條線的起點，或按住拖到終點；${snap}；Esc 取消`);
+      else if (this.stage === 1) this.host.hint(`${name}：點第一條線的終點；按住 Shift 畫水平或 45° 線；${snap}；Esc 取消`);
+      else this.host.hint(`${name}：移動滑鼠放${second}，點一下完成；${snap}；Esc 取消`);
     } else if (this.tool !== "cursor") {
       const info = TOOL_INFO[this.tool];
       const shift = this.tool === "rect" ? "按住 Shift 畫正方形" : "按住 Shift 畫水平、垂直或 45° 線";
@@ -923,6 +1053,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.host.hint("OKX 上的倉位：進場照 OKX；拖止損、止盈放開後會問要不要一起改 OKX；雙擊或右鍵看設定");
     } else if (this.selected && this.find(this.selected)?.kind === "position") {
       this.host.hint("拖曳進場、止損、止盈或右邊的把手調整，拖曳框移動；雙擊或右鍵直接輸入價格、資金和風險；Delete 刪除");
+    } else if (this.selected && this.find(this.selected)?.kind === "regression") {
+      this.host.hint("拖曳兩端改計算的 K 線範圍，拖曳通道左右移動；雙擊或右鍵改標準差、等比線和外觀；Delete 刪除");
+    } else if (this.selected && isChannel(this.find(this.selected)?.kind ?? "")) {
+      this.host.hint("拖曳第一條線的端點調整，拖曳第二條線的端點改寬度，拖曳通道移動；雙擊或右鍵加等比線、改外觀；Delete 刪除");
     } else if (this.selected) {
       this.host.hint("拖曳端點調整、拖曳線條移動，按住 Shift 只水平或垂直；Delete 刪除；雙擊或右鍵開設定");
     } else {

@@ -3,8 +3,8 @@
 
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { Dash, FibSettings, PositionDrawing, PositionSettings } from "../settings/model.ts";
-import type { Geo } from "./geo.ts";
-import { fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
+import { extendSeg, type Geo, type Seg } from "./geo.ts";
+import { fmtLevel, fmtSpan, hexToRgba, posDir, rewardRisk, screenAngle, timeToIndex } from "./geometry.ts";
 import { fmtMoney, fmtQty, type PositionResult } from "./trade.ts";
 import { signed } from "../core/format.ts";
 import type { LiveInfo } from "../trade/sync.ts";
@@ -84,6 +84,21 @@ export function paintUnder(target: CanvasRenderingTarget2D, geo: readonly Geo[],
         const y1 = Math.round(Math.max(g.ay, g.by) * vr);
         ctx.fillStyle = hexToRgba(s.fill, 1 - s.transparency / 100);
         ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      } else if ((d.kind === "channel" || d.kind === "regression" || d.kind === "flat" || d.kind === "disjoint") && g.ch) {
+        // between the lower and the upper line, as far as they are extended
+        const s = d.style;
+        if (s.transparency >= 100) continue;
+        const w = bitmapSize.width / hr;
+        const lo = extendSeg(g.ch.lines[0], s.extendLeft, s.extendRight, w);
+        const up = extendSeg(g.ch.lines[1], s.extendLeft, s.extendRight, w);
+        ctx.fillStyle = hexToRgba(s.fill, 1 - s.transparency / 100);
+        ctx.beginPath();
+        ctx.moveTo(lo.x0 * hr, lo.y0 * vr);
+        ctx.lineTo(lo.x1 * hr, lo.y1 * vr);
+        ctx.lineTo(up.x1 * hr, up.y1 * vr);
+        ctx.lineTo(up.x0 * hr, up.y0 * vr);
+        ctx.closePath();
+        ctx.fill();
       }
     }
   });
@@ -196,6 +211,23 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
           path([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]], { color: s.border, width: s.width, dash: s.dash });
           break;
         }
+        case "channel":
+        case "regression":
+        case "flat":
+        case "disjoint": {
+          const ch = g.ch;
+          if (!ch) break;
+          const s = d.style;
+          const line = (l: Seg, st: { color: string; width: number; dash: Dash }) => {
+            const e = extendSeg(l, s.extendLeft, s.extendRight, W / hr);
+            path([[e.x0 * hr, e.y0 * vr], [e.x1 * hr, e.y1 * vr]], st);
+          };
+          for (const l of ch.levels) line(l.seg, { color: hexToRgba(s.color, 0.85), width: 1, dash: "solid" });
+          if (s.middle && ch.mid) line(ch.mid, { color: s.color, width: 1, dash: "dash" });
+          line(ch.lines[0], s);
+          line(ch.lines[1], s);
+          break;
+        }
       }
       if (g.active) {
         for (const h of g.handles) {
@@ -217,9 +249,49 @@ export function paintOver(target: CanvasRenderingTarget2D, geo: readonly Geo[], 
       else if (g.d.kind === "info") infoBox(ctx, g, mediaSize.width, mediaSize.height, o);
       else if (g.d.kind === "angle") angleLabel(ctx, g);
       else if (g.d.kind === "position") positionLabels(ctx, g, o, spots, mediaSize.width);
+      else if (g.ch) channelLabels(ctx, g, mediaSize.width, mediaSize.height);
     }
   });
   return spots;
+}
+
+/** A channel: the value of each line in proportion to its width, at the left end (outside it when there is
+ *  room, as Fib labels), and a regression trend's Pearson's R under the start of its lower line. */
+function channelLabels(ctx: CanvasRenderingContext2D, g: Geo, width: number, height: number) {
+  const d = g.d;
+  const ch = g.ch;
+  if (!ch || !(d.kind === "channel" || d.kind === "regression" || d.kind === "flat" || d.kind === "disjoint")) return;
+  const s = d.style;
+  /** The left end of a line on screen, or where it comes in from the left edge. */
+  const leftEnd = (l: Seg) => {
+    const e = extendSeg(l, s.extendLeft, s.extendRight, width);
+    const x = Math.max(e.x0, 0);
+    return { x, y: e.x1 === e.x0 ? e.y0 : e.y0 + ((e.y1 - e.y0) * (x - e.x0)) / (e.x1 - e.x0) };
+  };
+  ctx.fillStyle = s.color;
+  ctx.textBaseline = "middle";
+  for (const l of ch.levels) {
+    const { x, y } = leftEnd(l.seg);
+    if (y < -10 || y > height + 10) continue;
+    const text = fmtLevel(l.value);
+    const outside = x - 6 - ctx.measureText(text).width >= 0;
+    ctx.textAlign = outside ? "right" : "left";
+    ctx.fillText(text, outside ? x - 6 : x + 6, outside ? y : y - 8);
+  }
+  if (d.kind === "regression" && s.pearson && ch.r != null) {
+    // under the start of the lower line, on a dark backing so it reads over the candles
+    const { x, y } = leftEnd(ch.lines[0]);
+    const text = `R ${ch.r >= 0 ? "" : "−"}${Math.abs(ch.r).toFixed(3)}`;
+    const w = ctx.measureText(text).width + 8;
+    const left = Math.max(0, Math.min(x + 2, width - w - 2));
+    const top = Math.max(0, Math.min(y + 5, height - 18));
+    ctx.fillStyle = "rgba(20,20,21,0.85)";
+    ctx.fillRect(left, top, w, 16);
+    ctx.fillStyle = s.color;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, left + 4, top + 8);
+  }
 }
 
 function fibLines(ctx: CanvasRenderingContext2D, g: Geo, hr: number, vr: number) {

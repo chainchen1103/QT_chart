@@ -5,12 +5,15 @@
 // move continuously), so a level counts as touched when it lies in that range: nothing is missed between
 // updates. Drawings are read where the chart draws them: sloped lines at the start of the current bar of the
 // timeframe the alert was made on, continued past their last point (as TradingView does); rectangles and Fib
-// levels from their left edge on, whatever their width; positions from their entry time on.
+// levels from their left edge on, whatever their width; positions from their entry time on. Channels as their
+// lines (sloped ones continued, as trend lines), or as the space between their lower and upper line.
 
-import { fibPrice, fmtLevel, positionDir, rewardRisk, type Anchor } from "../drawings/geometry.ts";
-import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
+import {
+  bandLines, fibPrice, fmtLevel, lowerUpper, positionDir, priceOnLine, rewardRisk, secondLine, widthLine, type Anchor, type Line2,
+} from "../drawings/geometry.ts";
+import type { ChannelDrawing, Drawing, DrawKind, FibSettings } from "../settings/model.ts";
 import { tfSec } from "../core/timeframes.ts";
-import { oneShot, REARM_SEC, type Alert, type BoxCond, type LevelCond, type TradeStage } from "./model.ts";
+import { oneShot, REARM_SEC, type Alert, type AlertCond, type BoxCond, type LevelCond, type TradeStage } from "./model.ts";
 
 export type Snapshot = { time: number; high: number; low: number; close: number };
 /** The range the price covered since the previous snapshot; `from` is null the first time (no side known). */
@@ -47,17 +50,34 @@ export type Level = { name: string; price: number };
 /** What an alert watches at a moment: price levels, a price zone, a time, or a trade. */
 export type Shape =
   | { type: "levels"; levels: Level[] }
-  | { type: "box"; top: number; bottom: number }
+  | { type: "box"; top: number; bottom: number; name?: string }
   | { type: "time"; t: number }
   | { type: "trade"; entry: number; stop: number; target: number };
 
 const lineAt = (a: Anchor, b: Anchor, t: number) => a.p + ((b.p - a.p) * (t - a.t)) / (b.t - a.t);
 
+/** A channel's lines at time t, continued past its ends: [lower, upper] and the lines between or beyond them that
+ *  it shows (its middle line, its lines in proportion to its width), each with its name. */
+function channelAt(d: ChannelDrawing, t: number, name: string): { lo: number; up: number; lines: { name: string; price: number }[] } {
+  const pair: [Line2, Line2] = d.kind === "regression"
+    ? bandLines(d.a, d.b, (d.fit?.sd ?? 0) * d.style.dev)
+    : [[d.a, d.b], secondLine(d.kind, d.a, d.b, d.c)];
+  const [lo, up] = lowerUpper(pair[0], pair[1]);
+  const at = (l: Line2) => priceOnLine(l[0], l[1], t);
+  const lines = [{ name: `${name}下緣`, price: at(lo) }, { name: `${name}上緣`, price: at(up) }];
+  if (d.style.middle) lines.push({ name: d.kind === "regression" ? "迴歸線" : `${name}中線`, price: at(widthLine(lo, up, 0.5)) });
+  for (const l of d.style.levels) if (l.on) lines.push({ name: `${name} ${fmtLevel(l.value)}`, price: at(widthLine(lo, up, l.value)) });
+  return { lo: at(lo), up: at(up), lines };
+}
+
 /**
- * A drawing as an alert sees it at time `now` (UTC seconds), for an alert made on timeframe `tf`. null when it
- * isn't there: starts later, a ray pointing left, a line standing straight up, a Fib with every level off.
+ * A drawing as an alert sees it at time `now` (UTC seconds), for an alert made on timeframe `tf` with condition
+ * `cond` (a channel is its lines, or with 進入 / 離開 the space between them). null when it isn't there: starts
+ * later, a ray pointing left, a line standing straight up, a Fib with every level off.
  */
-export function shapeAt(d: Drawing, now: number, tf: string, fib: FibSettings, name: (k: DrawKind) => string): Shape | null {
+export function shapeAt(
+  d: Drawing, now: number, tf: string, fib: FibSettings, name: (k: DrawKind) => string, cond?: AlertCond,
+): Shape | null {
   const t = barStart(now, tfSec(tf));
   const first = Math.min(d.a.t, d.b.t);
   const one = (price: number): Shape => ({ type: "levels", levels: [{ name: name(d.kind), price }] });
@@ -88,6 +108,15 @@ export function shapeAt(d: Drawing, now: number, tf: string, fib: FibSettings, n
     }
     case "position":
       return now < d.a.t ? null : { type: "trade", entry: d.a.p, stop: d.b.p, target: d.target };
+    case "channel":
+    case "regression":
+    case "flat":
+    case "disjoint": {
+      if (d.a.t === d.b.t || now < first) return null;
+      const c = channelAt(d, t, name(d.kind));
+      if (cond === "enter" || cond === "exit") return { type: "box", top: Math.max(c.lo, c.up), bottom: Math.min(c.lo, c.up), name: name(d.kind) };
+      return { type: "levels", levels: c.lines };
+    }
   }
 }
 
@@ -97,12 +126,12 @@ export function targetShape(
 ): Shape | null | "gone" {
   if (a.target.kind === "price") return { type: "levels", levels: [{ name: "", price: a.target.price }] };
   const d = find(a.target.id);
-  return d ? shapeAt(d, now, a.tf, fib, name) : "gone";
+  return d ? shapeAt(d, now, a.tf, fib, name, a.cond) : "gone";
 }
 
 export type AlertEvent =
   | { type: "level"; cond: LevelCond; name: string; price: number }
-  | { type: "box"; cond: BoxCond; top: number; bottom: number }
+  | { type: "box"; cond: BoxCond; top: number; bottom: number; name?: string }
   | { type: "time"; t: number }
   | { type: "entry"; price: number }
   | { type: "exit"; how: "stop" | "target"; price: number; r: number };
@@ -136,7 +165,7 @@ export function evaluate(a: Alert, shape: Shape | null, m: Move, now: number): O
       if (m.from == null || (cond !== "enter" && cond !== "exit")) return NONE;
       const was = m.from >= shape.bottom && m.from <= shape.top;
       const hit = cond === "enter" ? !was && m.hi >= shape.bottom && m.lo <= shape.top : was && (m.lo < shape.bottom || m.hi > shape.top);
-      return hit ? { events: [{ type: "box", cond, top: shape.top, bottom: shape.bottom }] } : NONE;
+      return hit ? { events: [{ type: "box", cond, top: shape.top, bottom: shape.bottom, ...(shape.name ? { name: shape.name } : {}) }] } : NONE;
     }
     case "time":
       // only a time still ahead when the alert was made
@@ -179,7 +208,7 @@ export function describe(e: AlertEvent, fmt: (p: number) => string, fmtTime: (t:
       return e.name ? `${verb}${e.name}（${fmt(e.price)}）` : `${verb} ${fmt(e.price)}`;
     }
     case "box":
-      return `${e.cond === "enter" ? "進入" : "離開"}矩形（${fmt(e.bottom)}～${fmt(e.top)}）`;
+      return `${e.cond === "enter" ? "進入" : "離開"}${e.name ?? "矩形"}（${fmt(e.bottom)}～${fmt(e.top)}）`;
     case "time":
       return `到了垂直線的時間（${fmtTime(e.t)}）`;
     case "entry":

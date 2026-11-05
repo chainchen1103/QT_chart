@@ -181,7 +181,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .pop-row select.warn { border-color: var(--down); color: var(--down); }
 .pop-card { margin: 8px 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); }
 .pop-card .pop-row input[type=number] { width: 56px; }
-.pop-body > .pop-note:first-child { max-width: 440px; }
+.pop-body > .pop-note { max-width: 440px; }
 input[type=checkbox] { accent-color: var(--text); width: 16px; height: 16px; margin: 0; cursor: pointer; }
 input[type=color] { width: 32px; height: 24px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-key);
   background: var(--bg); cursor: pointer; }
@@ -216,6 +216,9 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .tool-row-icon { display: grid; place-items: center; width: 24px; flex: none; color: var(--text-2); }
 .tool-row-icon svg { width: 20px; height: 20px; }
 .tool-row-name { flex: 1; }
+/* a section of a tool menu: 線條, 通道 */
+.tool-group { padding: 12px 8px 4px; color: var(--muted); font-size: 12px; line-height: 16px; }
+.tool-group:first-child { padding-top: 0; }
 /* keyboard shortcuts as small keycaps */
 .keys { display: inline-flex; gap: 4px; }
 .kbd { min-width: 20px; height: 20px; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--r-key); background: var(--bg);

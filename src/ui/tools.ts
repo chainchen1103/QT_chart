@@ -1,10 +1,12 @@
-// The left bar: cursor, lines (with a menu of kinds), Fib, rectangle, position (with its settings), magnet
+// The left bar: cursor, lines and channels (with a menu of kinds), Fib, rectangle, position (with its settings), magnet
 // (with its settings), Fib levels, and "delete all drawings" (press twice), for the chart in use. Also the
 // settings window a drawing opens on double-click or right-click.
 
 import type { DrawingLayer, Tool } from "../drawings/layer.ts";
 import { readRaw, writeRaw } from "../core/storage.ts";
-import { LINE_KINDS, magnetKeyLabel, TOOL_INFO, type Drawing, type LineKind, type LineStyle, type RectStyle } from "../settings/model.ts";
+import {
+  CHANNEL_KINDS, LINE_KINDS, magnetKeyLabel, TOOL_INFO, type ChannelKind, type Drawing, type DrawStyles, type LineKind,
+} from "../settings/model.ts";
 import type { Settings } from "../settings/store.ts";
 import { ICONS } from "./icons.ts";
 import { openDrawingStyle, toggleToolMenu } from "./panels/drawing.ts";
@@ -26,15 +28,19 @@ export type ToolsDeps = {
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
+/** What the line button can hold: a line or a channel. */
+type LineTool = LineKind | ChannelKind;
+const LINE_TOOLS: string[] = [...LINE_KINDS, ...CHANNEL_KINDS];
+
 export class Tools {
   private readonly d: ToolsDeps;
-  private lastLine: LineKind;
+  private lastLine: LineTool;
   private clearArmedUntil = 0;
 
   constructor(d: ToolsDeps) {
     this.d = d;
     const saved = readRaw("lineTool") ?? "";
-    this.lastLine = (LINE_KINDS as string[]).includes(saved) ? (saved as LineKind) : "trend";
+    this.lastLine = LINE_TOOLS.includes(saved) ? (saved as LineTool) : "trend";
     this.setup();
   }
 
@@ -44,16 +50,16 @@ export class Tools {
     $("tool-fib").classList.toggle("active", tool === "fib");
     $("tool-rect").classList.toggle("active", tool === "rect");
     $("tool-position").classList.toggle("active", tool === "position");
-    const isLine = (LINE_KINDS as string[]).includes(tool);
+    const isLine = LINE_TOOLS.includes(tool);
     if (isLine && tool !== this.lastLine) {
-      this.lastLine = tool as LineKind;
+      this.lastLine = tool as LineTool;
       writeRaw("lineTool", this.lastLine);
     }
     const lb = $("tool-line");
     lb.innerHTML = ICONS[this.lastLine]; // our own fixed SVG
     lb.classList.toggle("active", isLine);
     const info = TOOL_INFO[this.lastLine];
-    lb.title = `${info.name}${info.key ? "（" + info.key + "）" : ""}；右下角小三角或按右鍵選其他線`;
+    lb.title = `${info.name}${info.key ? "（" + info.key + "）" : ""}；右下角小三角或按右鍵選其他線、通道`;
   }
 
   /** The magnet is in effect (always on, or its key is held). */
@@ -88,8 +94,7 @@ export class Tools {
     openDrawingStyle(x, y, d, {
       set: (s) => {
         drawings.setStyle(d.id, s);
-        const styles = settings.drawStyles.get();
-        settings.drawStyles.set(d.kind === "rect" ? { ...styles, rect: s as RectStyle } : { ...styles, [d.kind]: s as LineStyle });
+        settings.drawStyles.set({ ...settings.drawStyles.get(), [d.kind]: s } as DrawStyles); // new ones of this kind start from it
       },
       remove: () => drawings.remove(d.id),
     }, alert);
@@ -118,7 +123,8 @@ export class Tools {
     $("tool-position-menu").onclick = positionMenu;
     onRight($("tool-position"), positionMenu);
     $("tool-line").onclick = () => drawings.setTool(drawings.getTool() === this.lastLine ? "cursor" : this.lastLine);
-    const lineMenu = () => toggleToolMenu($("tool-line-menu"), "線", LINE_KINDS, this.lastLine, (k) => drawings.setTool(k));
+    const groups = [{ title: "線條", kinds: LINE_KINDS }, { title: "通道", kinds: CHANNEL_KINDS }];
+    const lineMenu = () => toggleToolMenu($("tool-line-menu"), "線", groups, this.lastLine, (k) => drawings.setTool(k));
     $("tool-line-menu").onclick = lineMenu;
     onRight($("tool-line"), lineMenu);
     const magnetMenu = () => toggleMagnetPanel($("tool-magnet-menu"), settings.magnet);

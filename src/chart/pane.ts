@@ -15,7 +15,7 @@ import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
 import { PineHost } from "../indicators/pine/host.ts";
 import type { Cell } from "../layout/model.ts";
-import { DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, type Drawing } from "../settings/model.ts";
+import { DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, defaultChannelStyle, isChannel, type Drawing } from "../settings/model.ts";
 import { loadDrawings, saveDrawings, type Settings } from "../settings/store.ts";
 import { el } from "../ui/dom.ts";
 import { PaneMenus } from "../ui/menus.ts";
@@ -215,7 +215,12 @@ export class ChartPane {
       // no orders from a replay: its newest bar is in the past
       orderTag: (d) => (feed.replaying ? null : shared.trading.tag(d, feed.bars[feed.bars.length - 1]?.time ?? null, feed.fmtPrice)),
       orderClicked: (d, x, y) => shared.trading.click(this.orders, d, x, y),
-      styleFor: (k) => (k === "rect" ? settings.drawStyles.get().rect ?? DEFAULT_RECT_STYLE : settings.drawStyles.get()[k] ?? DEFAULT_LINE_STYLE),
+      styleFor: (k) => {
+        const styles = settings.drawStyles.get();
+        if (k === "rect") return styles.rect ?? DEFAULT_RECT_STYLE;
+        if (isChannel(k)) return styles[k] ?? defaultChannelStyle(k);
+        return styles[k] ?? DEFAULT_LINE_STYLE;
+      },
       changed: (list, step) => {
         if (!this.drawingsFor) return;
         saveDrawings(this.drawingsFor, list);
