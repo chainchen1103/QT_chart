@@ -198,3 +198,25 @@ test("our order filling: the position OKX reports first is not drawn a second ti
   applySync(other, state([opened], []), [], NOW);
   assert.equal(other.length, 1);
 });
+
+test("filled: the entry moves to where the order filled, as OKX has it", () => {
+  // a market order planned at 78000 filled at 78040
+  const d = drawn("p1", order({ ordType: "market", px: null, state: "filled", fillSz: 3, avgPx: 78040, fillT: NOW * 1000 - 1_000 }));
+  const list: Drawing[] = [d];
+  const opened = pos({ avgPx: 78040, cTime: NOW * 1000 - 1_000 });
+  assert.equal(applySync(list, state([opened], []), [], NOW).changed, true);
+  assert.deepEqual([d.a.p, d.b.p, d.target, d.order!.posKey], [78040, 77000, 80000, posKeyOf(opened)]);
+  assert.equal(applySync(list, state([opened], []), [], NOW).changed, false); // once
+  // a report of the fill does the same
+  const e = drawn("p2", order());
+  applySync([e], state([opened], []), [upd({ avgPx: 78040, fillTime: NOW * 1000 - 1_000 })], NOW);
+  assert.equal(e.a.p, 78040);
+  // part filled: the rest still waits at its price, the entry stays
+  const f = drawn("p3", order({ state: "partially_filled", fillSz: 1, avgPx: 77990 }));
+  applySync([f], state([opened], []), [], NOW);
+  assert.equal(f.a.p, 78000);
+  // closed before (a record): left as it was
+  const g = drawn("p4", order({ state: "filled", fillSz: 3, avgPx: 78040, closed: { t: NOW, px: 78500, pnl: 13.8 } }));
+  applySync([g], state([], []), [], NOW);
+  assert.equal(g.a.p, 78000);
+});

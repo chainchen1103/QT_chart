@@ -113,6 +113,9 @@ export type DrawingHost = {
   stopsEdited(d: PositionDrawing, before: { stop: number; target: number }, x: number, y: number): void;
   /** An order of ours still waiting on OKX, nothing filled: its entry, stops and size can be changed there. */
   waiting(d: PositionDrawing): boolean;
+  /** Coins of an order of ours that filled (null: none, or the contract size isn't known yet): the position's
+   *  size is that, whatever its risk setting would make of it. */
+  filledCoins(d: PositionDrawing): number | null;
   /** Such a position was changed on the chart (`before`: as it was): ask whether to change the order. */
   waitingEdited(d: PositionDrawing, before: PositionBefore, x: number, y: number): void;
   toolChanged(tool: Tool): void;
@@ -157,6 +160,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private hovered: string | null = null;
   private tool: Tool = "cursor";
   private drag: Drag | null = null;
+  /** Pressed inside a shape that doesn't take the press (the chart pans): a click there selects it. */
+  private clickSelect: { id: string; x0: number; y0: number } | null = null;
   private geo: Geo[] = [];
   private mouse: Mouse | null = null;
   private holdDown = false;
@@ -294,10 +299,12 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const inputs = [];
     for (const d of items) {
       if (d.kind !== "position" || d.okx) continue;
+      const qty = this.host.filledCoins(d);
       inputs.push({
         id: d.id, entryT: d.a.t, endT: d.order?.closed?.t || d.b.t, entry: d.a.p, stop: d.b.p, target: d.target, dir: d.dir,
         capital: d.capital, risk: d.risk, riskMode: d.riskMode, leverage: d.leverage,
         fresh: cap.live && d.b.t >= newest, // a position still running sizes from the real account
+        ...(qty != null ? { qty } : {}),
       });
     }
     return chainPositions(inputs, bars, this.host.barSec(), cap.amount, ps.chain);
@@ -748,7 +755,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
 
   private hit(x: number, y: number): Hit | null {
-    return hitTest(this.geo, x, y, this.host.chart.timeScale().width(), this.draft);
+    return hitTest(this.geo, x, y, this.host.chart.timeScale().width(), this.draft, (d) => this.grabsInside(d));
+  }
+
+  /** Does a press inside this shape take it, to move it? Only once it is selected, and not a position on OKX or
+   *  closed there (it can't be moved): elsewhere the chart pans, so a shape filling the screen doesn't stop that. */
+  private grabsInside(d: Drawing): boolean {
+    if (d.id !== this.selected) return false;
+    if (d.kind !== "position") return true;
+    if (d.okx?.closed || d.order?.closed) return false;
+    return this.host.waiting(d) || !(d.okx || this.host.isLive(d));
   }
 
   private make(kind: DrawKind, pt: Anchor): Drawing {
@@ -807,6 +823,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private onDown(e: MouseEvent) {
     if (e.button !== 0) return;
+    this.clickSelect = null;
     const m = this.local(e);
     this.mouse = m;
     if (!m.inside) return;
@@ -873,12 +890,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       return;
     }
     const h = this.hit(m.x, m.y);
-    if (!h || this.host.locked()) {
-      if (this.selected) {
+    const locked = this.host.locked();
+    if (!h || h.inside || locked) {
+      // inside a shape: it stays selected if it was, and is selected by a click (letting go without moving)
+      const inside = h?.inside && !locked ? h : null;
+      if (this.selected && this.selected !== inside?.id) {
         this.selected = null;
         this.refreshHint();
         this.redraw();
       }
+      if (inside) this.clickSelect = { id: inside.id, x0: m.x, y0: m.y };
       return; // the chart pans as usual (locked: as if the drawings weren't there)
     }
     e.preventDefault();
@@ -914,7 +935,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       this.refreshHint();
       this.redraw();
     }
-    const start = this.tool === "measure" || (this.tool === "cursor" && e.shiftKey && !this.spotAt(m.x, m.y) && (this.host.locked() || !this.hit(m.x, m.y)));
+    const free = () => {
+      const h = this.hit(m.x, m.y);
+      return !h || !!h.inside; // no drawing there to take the press
+    };
+    const start = this.tool === "measure" || (this.tool === "cursor" && e.shiftKey && !this.spotAt(m.x, m.y) && (this.host.locked() || free()));
     if (!start) return false;
     e.preventDefault();
     e.stopPropagation();
@@ -956,7 +981,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
     const h = m.inside ? this.hit(m.x, m.y) : null;
     const id = h ? h.id : null;
-    this.host.el.classList.toggle("over-drawing", (!!h && !this.host.locked()) || (m.inside && !!this.spotAt(m.x, m.y)));
+    // the pointer where a press takes the drawing (inside a shape that doesn't, the chart's own cursor: it pans)
+    this.host.el.classList.toggle("over-drawing", (!!h && !h.inside && !this.host.locked()) || (m.inside && !!this.spotAt(m.x, m.y)));
     if (id !== this.hovered) {
       this.hovered = id;
       if (this.host.locked()) this.refreshHint();
@@ -966,6 +992,17 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private onUp(e: MouseEvent) {
     if (e.button !== 0) return;
+    const cs = this.clickSelect;
+    if (cs) {
+      this.clickSelect = null;
+      const m = this.local(e);
+      if (Math.hypot(m.x - cs.x0, m.y - cs.y0) < 4 && this.find(cs.id) && this.selected !== cs.id) {
+        this.selected = cs.id; // a click inside a shape (a drag there panned the chart)
+        this.refreshHint();
+        this.redraw();
+      }
+      return;
+    }
     const ms = this.measure;
     if (ms && !ms.done && ms.pressed) {
       const m = this.local(e);

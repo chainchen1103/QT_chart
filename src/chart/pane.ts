@@ -247,6 +247,13 @@ export class ChartPane {
         shared.sync.confirmEdit(feed.instId, d, before, x, y, feed.fmtPrice, () => this.drawings.setStops(d.id, before));
       },
       waiting: (d) => !feed.replaying && shared.trading.waiting(d),
+      filledCoins: (d) => {
+        const o = d.order;
+        const ct = catalog.get(feed.instId)?.ctVal ?? 0;
+        if (!o || !(ct > 0) || !(o.state === "filled" || o.state === "partially_filled")) return null;
+        // all of it filled: its size as filled; part of it: the whole order (the rest still waits at its price)
+        return (o.state === "filled" && o.fillSz > 0 ? o.fillSz : o.sz) * ct;
+      },
       waitingEdited: (d, before, x, y) => {
         shared.trading.amendWaiting(this.orders, d, this.drawings.tradeNow(d.id), x, y, () => this.drawings.restore(d.id, before));
       },

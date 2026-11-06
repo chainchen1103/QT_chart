@@ -247,3 +247,17 @@ test("scaling in: an add waiting to fill is sized on the position open now; leve
   close(tight.get("b")!.plan.qty, 0);
   assert.equal(tight.get("b")!.plan.capped, true);
 });
+
+test("an order of ours that filled: its real size, and what that risks and makes at the prices now", () => {
+  const s = 60;
+  const bars = [bar(0, 99, 101), bar(60, 100, 103), bar(120, 101, 104)];
+  const base = { risk: 1, riskMode: "pct" as const, leverage: 10 };
+  // planned at 100 with the stop at 98: 1% of 1000 makes 5 coins; it filled at 101 with those 5 coins
+  const r = chainPositions([{ id: "f", entryT: 0, endT: 600, entry: 101, stop: 98, target: 107, capital: null, ...base, qty: 5 }], bars, s, 1000, true);
+  const p = r.get("f")!.plan;
+  assert.deepEqual([p.qty, p.riskAmount, p.reward, p.margin, p.capped], [5, 15, 30, 50.5, false]);
+  assert.equal(p.rr, 2);
+  // not filled: sized from the risk setting at its own prices
+  const q = chainPositions([{ id: "w", entryT: 0, endT: 600, entry: 101, stop: 98, target: 107, capital: null, ...base }], bars, s, 1000, true);
+  assert.equal(q.get("w")!.plan.riskAmount, 10);
+});

@@ -47,7 +47,9 @@ export type Geo = {
     closed?: { y: number; profit: boolean };
   };
 };
-export type Hit = { id: string; part: Part };
+/** `inside`: in a shape (a rectangle, a position's box, a channel's fill) that doesn't take the press there, so
+ *  the chart pans as usual and a click selects the shape. */
+export type Hit = { id: string; part: Part; inside?: true };
 
 /** Bar time (UTC seconds) → x, price → y, in the price pane; null when it can't be placed. */
 export type Projector = {
@@ -174,9 +176,11 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
       case "position": {
         const targetY = pr.y(d.target);
         if (targetY == null) continue;
-        // a stop past the entry (a profit locked in, on OKX) leaves no R to count in
+        // R multiples: of the plan, or of a position drawn from OKX with a stop-loss there while it is open; a stop
+        // past the entry (a profit locked in, on OKX) leaves no R to count in
         const lossSide = d.dir == null || (d.a.p - d.b.p) * d.dir > 0;
-        const levels = (lossSide && !d.okx ? rLevels(d.a.p, d.b.p, d.target, o.rLevels) : []).flatMap((l) => {
+        const withR = lossSide && (!d.okx || (!d.okx.noSl && !d.okx.closed));
+        const levels = (withR ? rLevels(d.a.p, d.b.p, d.target, o.rLevels) : []).flatMap((l) => {
           const y = pr.y(l.price);
           return y == null ? [] : [{ ...l, y }];
         });
@@ -232,75 +236,100 @@ export function computeGeo(items: readonly Drawing[], pr: Projector, o: GeoOptio
   return out;
 }
 
-/** Is (x, y) on the drawing itself (not a handle)? `paneWidth` is where rectangles extended to the right end. */
-export function onBody(g: Geo, x: number, y: number, paneWidth: number): boolean {
+/** Where (x, y) is on the drawing itself (not a handle): on one of its lines (a border, a level, the entry), inside
+ *  a shape it fills, or off it. `paneWidth` is where rectangles extended to the right end. */
+export function bodyPart(g: Geo, x: number, y: number, paneWidth: number): "line" | "inside" | null {
   const d = g.d;
   const { ax, ay, bx, by } = g;
+  const line = (on: boolean) => (on ? "line" : null);
   switch (d.kind) {
     case "fib": {
       const f = g.fib;
       const onLevel = !!f && x >= f.xl - LINE_HIT && x <= f.xr + LINE_HIT && f.levels.some((l) => Math.abs(l.y - y) <= LINE_HIT);
-      return onLevel || distToSegment(x, y, ax, ay, bx, by) <= LINE_HIT;
+      return line(onLevel || distToSegment(x, y, ax, ay, bx, by) <= LINE_HIT);
     }
     case "trend":
     case "info":
     case "angle":
-      return distToSegment(x, y, ax, ay, bx, by) <= LINE_HIT;
+      return line(distToSegment(x, y, ax, ay, bx, by) <= LINE_HIT);
     case "ray":
-      return distToRay(x, y, ax, ay, bx, by) <= LINE_HIT;
+      return line(distToRay(x, y, ax, ay, bx, by) <= LINE_HIT);
     case "extended":
-      return distToLine(x, y, ax, ay, bx, by) <= LINE_HIT;
+      return line(distToLine(x, y, ax, ay, bx, by) <= LINE_HIT);
     case "hline":
-      return Math.abs(y - ay) <= LINE_HIT;
+      return line(Math.abs(y - ay) <= LINE_HIT);
     case "hray":
-      return Math.abs(y - ay) <= LINE_HIT && x >= ax - LINE_HIT;
+      return line(Math.abs(y - ay) <= LINE_HIT && x >= ax - LINE_HIT);
     case "vline":
-      return Math.abs(x - ax) <= LINE_HIT;
+      return line(Math.abs(x - ax) <= LINE_HIT);
     case "cross":
-      return Math.abs(y - ay) <= LINE_HIT || Math.abs(x - ax) <= LINE_HIT;
+      return line(Math.abs(y - ay) <= LINE_HIT || Math.abs(x - ax) <= LINE_HIT);
     case "position": {
       const p = g.pos;
-      if (!p) return false;
+      if (!p) return null;
       // closed on OKX: only what is drawn, entry to close
-      const top = p.closed ? Math.min(p.entryY, p.closed.y) : Math.min(p.stopY, p.targetY);
-      const bottom = p.closed ? Math.max(p.entryY, p.closed.y) : Math.max(p.stopY, p.targetY);
-      return x >= p.x0 - LINE_HIT && x <= p.x1 + LINE_HIT && y >= top - LINE_HIT && y <= bottom + LINE_HIT;
+      const ys = p.closed ? [p.entryY, p.closed.y] : [p.stopY, p.targetY, p.entryY];
+      const top = Math.min(...ys);
+      const bottom = Math.max(...ys);
+      if (x < p.x0 - LINE_HIT || x > p.x1 + LINE_HIT || y < top - LINE_HIT || y > bottom + LINE_HIT) return null;
+      const near = Math.abs(x - p.x0) <= LINE_HIT || Math.abs(x - p.x1) <= LINE_HIT || ys.some((v) => Math.abs(y - v) <= LINE_HIT);
+      return near ? "line" : "inside";
     }
     case "rect": {
+      const x0 = Math.min(ax, bx);
       const x1 = d.style.extend ? paneWidth : Math.max(ax, bx);
-      return x >= Math.min(ax, bx) - LINE_HIT && x <= x1 + LINE_HIT && y >= Math.min(ay, by) - LINE_HIT && y <= Math.max(ay, by) + LINE_HIT;
+      const y0 = Math.min(ay, by);
+      const y1 = Math.max(ay, by);
+      if (x < x0 - LINE_HIT || x > x1 + LINE_HIT || y < y0 - LINE_HIT || y > y1 + LINE_HIT) return null;
+      return x <= x0 + LINE_HIT || x >= x1 - LINE_HIT || y <= y0 + LINE_HIT || y >= y1 - LINE_HIT ? "line" : "inside";
     }
     case "channel":
     case "regression":
     case "flat":
     case "disjoint": {
       const ch = g.ch;
-      if (!ch) return false;
+      if (!ch) return null;
       const s = d.style;
       const ext = (l: Seg) => extendSeg(l, s.extendLeft, s.extendRight, paneWidth);
       const near = (l: Seg) => {
         const e = ext(l);
         return distToSegment(x, y, e.x0, e.y0, e.x1, e.y1) <= LINE_HIT;
       };
-      if (near(ch.lines[0]) || near(ch.lines[1]) || (s.middle && ch.mid && near(ch.mid)) || ch.levels.some((l) => near(l.seg))) return true;
-      if (s.transparency >= 100) return false; // no fill: only the lines
+      if (near(ch.lines[0]) || near(ch.lines[1]) || (s.middle && ch.mid && near(ch.mid)) || ch.levels.some((l) => near(l.seg))) return "line";
+      if (s.transparency >= 100) return null; // no fill: only the lines
       const lo = ext(ch.lines[0]);
       const up = ext(ch.lines[1]);
-      if (lo.x1 === lo.x0 || x < lo.x0 || x > lo.x1) return false;
+      if (lo.x1 === lo.x0 || x < lo.x0 || x > lo.x1) return null;
       const at = (e: Seg) => e.y0 + ((e.y1 - e.y0) * (x - e.x0)) / (e.x1 - e.x0);
       const y0 = at(lo);
       const y1 = at(up);
-      return y >= Math.min(y0, y1) && y <= Math.max(y0, y1);
+      return y >= Math.min(y0, y1) && y <= Math.max(y0, y1) ? "inside" : null;
     }
   }
 }
 
-/** The handle or drawing under (x, y), the topmost (last drawn) first; handles before bodies. */
-export function hitTest(geo: readonly Geo[], x: number, y: number, paneWidth: number, skip: Drawing | null): Hit | null {
+/** Is (x, y) on the drawing itself (not a handle)? */
+export const onBody = (g: Geo, x: number, y: number, paneWidth: number): boolean => bodyPart(g, x, y, paneWidth) != null;
+
+/**
+ * What is at (x, y): a handle of any drawing, else the topmost drawing there. With `grabsInside`, the inside of
+ * a shape that doesn't take presses there gives way to a line or the inside of another drawing under it, and is
+ * the hit (marked `inside`) only when there is nothing else.
+ */
+export function hitTest(geo: readonly Geo[], x: number, y: number, paneWidth: number, skip: Drawing | null, grabsInside?: (d: Drawing) => boolean): Hit | null {
   const items = geo.filter((g) => g.d !== skip);
   for (let k = items.length - 1; k >= 0; k--) {
     for (const h of items[k].handles) if (Math.hypot(x - h.x, y - h.y) <= HANDLE_R) return { id: items[k].d.id, part: h.part };
   }
-  for (let k = items.length - 1; k >= 0; k--) if (onBody(items[k], x, y, paneWidth)) return { id: items[k].d.id, part: "body" };
-  return null;
+  let inside: Hit | null = null;
+  for (let k = items.length - 1; k >= 0; k--) {
+    const at = bodyPart(items[k], x, y, paneWidth);
+    if (!at) continue;
+    if (at === "inside" && grabsInside && !grabsInside(items[k].d)) {
+      inside ??= { id: items[k].d.id, part: "body", inside: true };
+      continue;
+    }
+    return { id: items[k].d.id, part: "body" };
+  }
+  return inside;
 }

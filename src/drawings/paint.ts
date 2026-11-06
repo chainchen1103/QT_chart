@@ -583,8 +583,28 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
   const money = (v: number) => `${v >= 0 ? "+" : "−"}${fmtMoney(Math.abs(v))} U`;
   const live = o.live(d);
   const gray = "rgba(45,45,48,0.95)";
+  // R lines' names over the right end of each line on screen, or under it, else further left along it, inside the
+  // box; left out when there is no room (the line still shows); none on a closed record
+  const rNames = () => {
+    if (!p.closed) p.levels.forEach((l, k) => {
+      const text = `${l.k}R${show ? "  " + fp(l.price) : ""}`;
+      const w = T.tw(text);
+      const x = right - 4 - w;
+      out.push({
+        ask: {
+          key: `${d.id}:R${k}`, w, h: T.th, prio: PRIO.minor,
+          at: [{ x, y: l.y - 2 - T.th }, { x, y: l.y + 2 }],
+          slide: "left",
+          range: { min: left + 4, max: x },
+          optional: true,
+        },
+        paint: bare(text, ps.profit),
+      });
+    });
+  };
   if (d.okx) {
-    // drawn from OKX: its stops when set (what they make or lose now), size, average, and the PnL now or at the end
+    // drawn from OKX: its stops when set (what they make or lose now, in R too while there is a stop-loss on the
+    // loss side), size, average, and the PnL now or at the end
     const k = d.okx;
     const v = live ?? { coins: k.coins, avg: d.a.p, lever: k.lever, upl: null, closed: k.closed ?? null, demo: k.demo };
     const vs = (x: number) => {
@@ -592,8 +612,11 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
       return `${r >= 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}%`;
     };
     const open = !v.closed;
-    if (!k.noTp && !p.closed) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
-    const sl = k.noSl || p.closed ? null : lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss, true);
+    const oneR = !k.noSl && (v.avg - d.b.p) * dir > 0 ? (v.avg - d.b.p) * dir : 0;
+    const tpR = open && oneR ? `  ${signed(((d.target - v.avg) * dir) / oneR)}R` : "";
+    const slR = open && oneR ? "  −1.00R" : "";
+    if (!k.noTp && !p.closed) lineTag("tp", `止盈 ${fp(d.target)} (${vs(d.target)})${tpR}${open ? "  " + money(v.coins * (d.target - v.avg) * dir) : ""}`, p.targetY, up, ps.profit);
+    const sl = k.noSl || p.closed ? null : lineTag("sl", `止損 ${fp(d.b.p)} (${vs(d.b.p)})${slR}${open ? "  " + money(v.coins * (d.b.p - v.avg) * dir) : ""}`, p.stopY, -up, ps.loss, true);
     infoBox(
       [
         `OKX 持倉${v.demo ? "（模擬）" : ""}  ${dir === 1 ? "多單" : "空單"}  ${fmtQty(v.coins)} ${o.base}  ${Math.round(v.lever)}x`,
@@ -605,6 +628,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
       ? [`已平倉${v.closed.px ? ` @ ${fp(v.closed.px)}  ${money(v.closed.pnl)}` : ""}`, v.closed.px ? (v.closed.pnl >= 0 ? ps.profit : ps.loss) : gray]
       : [v.upl != null ? `持倉中 ${money(v.upl)}` : "持倉中", gray];
     resultRow(text, bg, p.entryY, null);
+    rNames();
     return;
   }
   const sc = t?.scale ?? null;
@@ -665,23 +689,7 @@ function positionPlans(out: LabelPlan[], g: Geo, T: Type, o: PaintOptions, width
     const [text, bg] = earlier ? [`已加倉，結果看第 ${sc.count} 筆`, gray] : real ?? result[t.outcome.status];
     resultRow(text, bg, rowY, o.orderTag(d));
   }
-  // R lines' names over the right end of each line on screen, or under it, else further left along it, inside the
-  // box; left out when there is no room (the line still shows); none on a closed record
-  if (!p.closed) p.levels.forEach((l, k) => {
-    const text = `${l.k}R${show ? "  " + fp(l.price) : ""}`;
-    const w = T.tw(text);
-    const x = right - 4 - w;
-    out.push({
-      ask: {
-        key: `${d.id}:R${k}`, w, h: T.th, prio: PRIO.minor,
-        at: [{ x, y: l.y - 2 - T.th }, { x, y: l.y + 2 }],
-        slide: "left",
-        range: { min: left + 4, max: x },
-        optional: true,
-      },
-      paint: bare(text, ps.profit),
-    });
-  });
+  rNames();
 }
 
 // ----------------------------------------------------------------------------- measuring

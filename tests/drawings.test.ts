@@ -111,3 +111,41 @@ test("closed on OKX: the box ends at the close, the exit is OKX's, no handles", 
   assert.equal(hitTest([p], 120, 115, 800, null), null); // in the stop zone, no longer drawn
   assert.equal(hitTest([p], 120, 80, 800, null), null); // in the take-profit zone past the close
 });
+
+test("inside a shape: the chart pans unless it is selected; its lines, handles and lines under it take the press", () => {
+  const rectStyle = { border: "#000000", width: 1, dash: "solid" as const, fill: "#000000", transparency: 80, extend: false };
+  const list: Drawing[] = [
+    { id: "t", kind: "trend", a: { t: 6600, p: 140 }, b: { t: 11400, p: 140 }, style }, // under the rectangle: y 60
+    { id: "r", kind: "rect", a: { t: 6000, p: 150 }, b: { t: 12000, p: 120 }, style: rectStyle }, // x 100 to 200, y 50 to 80
+    { id: "p", kind: "position", a: { t: 24000, p: 100 }, b: { t: 36000, p: 90 }, target: 130, capital: null, risk: 1, riskMode: "pct", leverage: 10 },
+  ];
+  const geo = computeGeo(list, pr, opts);
+  const none = () => false;
+  assert.deepEqual(hitTest(geo, 150, 70, 800, null, none), { id: "r", part: "body", inside: true }); // pans, a click selects it
+  assert.deepEqual(hitTest(geo, 150, 60, 800, null, none), { id: "t", part: "body" }); // the line under it
+  assert.deepEqual(hitTest(geo, 150, 52, 800, null, none), { id: "r", part: "body" }); // its border
+  assert.deepEqual(hitTest(geo, 100, 50, 800, null, none), { id: "r", part: "a" }); // a corner
+  assert.deepEqual(hitTest(geo, 150, 70, 800, null, (d) => d.id === "r"), { id: "r", part: "body" }); // selected: moved from inside
+  // a position: entry 100 at y 100, stop 90 at y 110, take-profit 130 at y 70, x 400 to 600
+  assert.deepEqual(hitTest(geo, 500, 85, 800, null, none), { id: "p", part: "body", inside: true });
+  assert.deepEqual(hitTest(geo, 500, 72, 800, null, none), { id: "p", part: "body" }); // on the take-profit line
+  assert.deepEqual(hitTest(geo, 500, 101, 800, null, none), { id: "p", part: "body" }); // on the entry line
+  assert.equal(hitTest(geo, 500, 140, 800, null, none), null);
+});
+
+test("R lines on a position drawn from OKX: while it is open, with a stop-loss there", () => {
+  const okx = { posId: "1", cTime: 0, side: "long" as const, demo: true, coins: 1, lever: 10, noSl: false, noTp: false };
+  const at = { a: { t: 6000, p: 100 }, b: { t: 12000, p: 98 }, target: 105, capital: null, risk: 1, riskMode: "pct" as const, leverage: 10, dir: 1 as const };
+  const [open, noSl, closed] = computeGeo(
+    [
+      { id: "o", kind: "position", ...at, okx },
+      { id: "n", kind: "position", ...at, okx: { ...okx, noSl: true } },
+      { id: "c", kind: "position", ...at, okx: { ...okx, closed: { t: 9000, px: 104, pnl: 4 } } },
+    ],
+    pr,
+    opts,
+  );
+  assert.deepEqual(open.pos?.levels.map((l) => l.price), [102, 104]);
+  assert.deepEqual(noSl.pos?.levels, []); // its stop is a stand-in next to the entry
+  assert.deepEqual(closed.pos?.levels, []);
+});

@@ -1,9 +1,10 @@
 // Matching the OKX account (src-tauri/src/sync.rs) to the positions drawn on the charts. Pure (no DOM, no
 // calls), unit-tested in tests/sync.test.ts.
 //
-// - An order placed from a position belongs to the OKX position of its side once it has filled (posKey). Its
-//   stop-loss / take-profit order is found by the id it was given (algoClOrdId), by the id found before
-//   (algoId), or, for an order from before ids were given, by its stop price (the only one there).
+// - An order placed from a position belongs to the OKX position of its side once it has filled (posKey), and
+//   the drawing's entry moves to where it filled. Its stop-loss / take-profit order is found by the id it was
+//   given (algoClOrdId), by the id found before (algoId), or, for an order from before ids were given, by its
+//   stop price (the only one there).
 // - When OKX moves a stop-loss or take-profit, the drawing follows.
 // - A position on OKX with no order of ours in it is drawn on its own (OkxPos) and kept up to date. One that
 //   opens while an order of ours on its side is being sent or still waiting is most likely that order filling
@@ -213,6 +214,11 @@ export function applySync(list: Drawing[], s: SymbolState, orders: readonly Sync
   for (const d of byId) {
     let o = d.order;
     if (!o || o.demo !== s.demo || o.closed || !isFilled(o)) continue;
+    // all of it filled: the entry is where it filled (a market order's can be off the price planned)
+    if (o.state === "filled" && o.avgPx && !samePrice(d.a.p, o.avgPx, s.tick)) {
+      d.a = { ...d.a, p: o.avgPx };
+      changed = true;
+    }
     if (o.posKey && !s.positions.some((p) => posKeyOf(p) === o!.posKey)) {
       const [posId, cTime] = o.posKey.split(":");
       gone.set(o.posKey, { posId, cTime: Number(cTime) });

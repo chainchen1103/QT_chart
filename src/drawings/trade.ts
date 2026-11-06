@@ -26,6 +26,23 @@ export type TradePlan = {
   rr: number;
 };
 
+/** A size already set (an order of ours that filled): what it risks and makes at its prices. */
+export function sizedPlan(p: Pick<PositionInput, "entry" | "stop" | "target" | "leverage" | "dir">, qty: number): TradePlan {
+  const dir: 1 | -1 = p.dir ?? (p.stop <= p.entry ? 1 : -1);
+  const dist = Math.abs(p.entry - p.stop);
+  const notional = qty * p.entry;
+  return {
+    dir,
+    riskAmount: qty * dist,
+    qty,
+    notional,
+    margin: notional / Math.max(1, p.leverage),
+    capped: false,
+    reward: qty * Math.abs(p.target - p.entry),
+    rr: dist > 0 ? Math.abs(p.target - p.entry) / dist : 0,
+  };
+}
+
 export function planTrade(
   entry: number, stop: number, target: number, capital: number, risk: number, mode: RiskMode, leverage: number, side?: 1 | -1,
 ): TradePlan {
@@ -121,6 +138,9 @@ export type PositionInput = {
   fresh?: boolean;
   /** Its own direction (see posDir); else from where the stop is. */
   dir?: 1 | -1;
+  /** Coins of an order of ours that filled: its size is OKX's, and what it risks and makes follows from it
+   *  (not from the risk setting, which sized it at the price planned). */
+  qty?: number;
 };
 /**
  * A position built up by adds (scaling in): same direction, each add filled while the whole position was
@@ -345,7 +365,7 @@ export function chainPositions(
     if (u.p) {
       const p = u.p;
       const { auto, chained, capital } = startCapital(p);
-      const plan = planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir);
+      const plan = p.qty != null ? sizedPlan(p, p.qty) : planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir);
       const outcome = settleTrade(bars, barSec, p.entryT, p.endT, p.entry, p.stop, p.target, p.dir);
       out.set(p.id, { capital, auto, chained, plan, outcome, pnl: 0, endCapital: capital, scale: null });
       prevEnd = capital;
@@ -358,7 +378,11 @@ export function chainPositions(
     const parts = g.members.map(({ p }, j) => {
       const own = p.capital ?? capital;
       const { plan, full } =
-        j === 0 ? { plan: planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir), full: false } : addPlan(w, p, own);
+        p.qty != null
+          ? { plan: sizedPlan(p, p.qty), full: false }
+          : j === 0
+            ? { plan: planTrade(p.entry, p.stop, p.target, capital, p.risk, p.riskMode, p.leverage, p.dir), full: false }
+            : addPlan(w, p, own);
       w = grow(w, plan.qty, p.entry);
       return { p, own, plan, full };
     });
