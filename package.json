@@ -1,7 +1,7 @@
 {
   "name": "qtchart",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.15+2",
   "type": "module",
   "scripts": {
     "dev": "vite",

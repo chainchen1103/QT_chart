@@ -3015,7 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "qtchart"
-version = "0.1.15"
+version = "0.1.15+2"
 dependencies = [
  "argon2",
  "base64 0.22.1",
