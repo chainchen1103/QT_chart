@@ -265,7 +265,7 @@ export function indicatorStep(
   if (!a.on || (cond !== "touch" && cond !== "up" && cond !== "down")) return { hit: false, next: to };
   if (a.repeat === "every" && a.fired != null && now - a.fired < REARM_SEC) return { hit: false, next: to };
   if (a.close) return { hit: newBar && n >= 3 && crossed(cond, sig[n - 3], sig[n - 2]), next: to };
-  if (onPrices(t.spec.type)) {
+  if (onPrices(t.spec)) {
     const v = n ? line[n - 1] : null;
     return { hit: v != null && m != null && levelHit(v, cond, m), next: to };
   }

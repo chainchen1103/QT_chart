@@ -7,13 +7,14 @@
 import type { Candle, Pair } from "../core/api.ts";
 import { fmtChartTime, fmtClock, fromChartTime, toChartTime } from "../core/format.ts";
 import { AlertLayer } from "../alerts/layer.ts";
+import { pineLines } from "../alerts/pine.ts";
 import type { TradeStage } from "../alerts/model.ts";
 import { drawingAlertSection, indicatorAlertDialog, roundValue, type AlertUi, type IndPreset, type IndSource } from "../alerts/panel.ts";
 import type { AlertService } from "../alerts/service.ts";
 import type { DrawingHistory } from "../drawings/history.ts";
 import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
-import { maSpec, specFor } from "../indicators/specs.ts";
+import { fmtSig, maSpec, specFor } from "../indicators/specs.ts";
 import { legendButton, Studies } from "../indicators/studies.ts";
 import type { IndKind } from "../settings/indicators.ts";
 import { openIndicatorSettings, type IndicatorDeps } from "../ui/indicators.ts";
@@ -49,6 +50,8 @@ export type PaneShared = {
   sync: AccountSync;
   /** Open the appearance window at a screen point. */
   appearanceAt(x: number, y: number): void;
+  /** Open a Pine script's settings window (its inputs and alerts). */
+  pineSettings(id: string): void;
 };
 
 export type PaneEvents = {
@@ -208,6 +211,15 @@ export class ChartPane {
       changed: () => {
         if (!this.hovering) this.legend.render();
       },
+      // a script's legend: a new alert on its plots (when it draws any), its settings
+      legendButtons: (id) => [
+        ...(this.pineSources(id).length ? [legendButton("bell", "新增提醒", (b) => indicatorAlertDialog(b, this.alertUi, this.pineSources(id), this.pinePreset(id)))] : []),
+        legendButton("gear", "腳本設定", () => shared.pineSettings(id)),
+      ],
+      alertLevels: (id) => {
+        const [src] = this.pineSources(id);
+        return src ? shared.alerts.indicatorLevels(feed.instId, src.spec, src.tf) : [];
+      },
     });
 
     this.scaleLabels = new ScaleLabelLayer({
@@ -366,8 +378,7 @@ export class ChartPane {
       alerts: this.alertUi,
       appearanceAt: shared.appearanceAt,
       resetView: () => this.resetView(),
-      studyAt: (clientY) => this.studies.paneAt(clientY),
-      indicatorAlertAt: (kind, value, x, y) => indicatorAlertDialog({ x, y }, this.alertUi, this.indicatorSources(kind), { value: roundValue(kind, value) }),
+      studyAt: (clientY) => this.paneHit(clientY),
     });
 
     chart.subscribeCrosshairMove((p) => {
@@ -453,6 +464,7 @@ export class ChartPane {
   redrawAlerts() {
     this.alertLayer.redraw();
     this.studies.alertsChanged();
+    this.pine.alertsChanged();
   }
   /** The window shows again: catch up on what came while it was hidden. */
   shown() {
@@ -537,6 +549,40 @@ export class ChartPane {
     const inds = s.inds.get();
     return [{ spec: specFor(kind, inds), tf: inds[kind].tf || this.feed.bar }];
   }
+  /** A Pine script as an alert can watch it: its plots as this chart last drew them, on this chart's timeframe
+   *  (none before it has run here). */
+  pineSources(id: string): IndSource[] {
+    const spec = this.pine.specOf(id);
+    return spec ? [{ spec, tf: this.feed.bar }] : [];
+  }
+
+  /** Where a new alert on a Pine script starts: its first line's value now. */
+  pinePreset(id: string): IndPreset {
+    const r = this.pine.view(id)?.result;
+    const first = r?.ok ? pineLines(r.out.plots)[0] : undefined;
+    const vals = first?.plot.values ?? [];
+    for (let i = vals.length - 1; i >= 0; i--) if (vals[i] === vals[i]) return { value: roundValue("pine", vals[i]) };
+    return {};
+  }
+
+  /** The indicator pane at this height of the screen (a built-in one, or a Pine script's), with a new alert on
+   *  it at the value there. */
+  private paneHit(clientY: number): { text: string; alert(x: number, y: number): void } | null {
+    const st = this.studies.paneAt(clientY);
+    if (st) {
+      const v = st.kind === "rsi" || st.kind === "kd" ? st.value.toFixed(1) : fmtSig(st.value);
+      return {
+        text: `${st.kind.toUpperCase()} ${v}`,
+        alert: (x, y) => indicatorAlertDialog({ x, y }, this.alertUi, this.indicatorSources(st.kind), { value: roundValue(st.kind, st.value) }),
+      };
+    }
+    const pn = this.pine.paneAt(clientY);
+    if (!pn) return null;
+    const sources = this.pineSources(pn.id);
+    if (!sources.length) return null;
+    return { text: `${pn.name} ${fmtSig(pn.value)}`, alert: (x, y) => indicatorAlertDialog({ x, y }, this.alertUi, sources, { value: roundValue("pine", pn.value) }) };
+  }
+
   /** Where a new alert starts: RSI and KD at their upper line, MACD at 0, ATR at its value now. */
   indicatorPreset(kind: "ma" | IndKind): IndPreset {
     const inds = this.s.settings.inds.get();

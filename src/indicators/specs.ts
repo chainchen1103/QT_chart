@@ -1,5 +1,7 @@
 // An indicator as an alert or an AI app names it: its kind and numbers ("RSI 14", "MACD 12 26 9"), its lines,
-// their values on a list of bars, and how many bars before those it needs. Pure (no DOM, no chart).
+// their values on a list of bars, and how many bars before those it needs. A Pine script is one too: named by
+// its id, with its title and plots as they were when the alert was made (it runs as the script is now). Pure
+// (no DOM, no chart).
 
 import type { Candle } from "../core/api.ts";
 import { MA_KINDS, MA_LEN, type MaConf, type MaKind } from "../settings/model.ts";
@@ -7,18 +9,27 @@ import { IND_LIMITS, type IndKind, type IndSettings } from "../settings/indicato
 import { movingAverage, warmupBars } from "./ma.ts";
 import { atr, bollinger, kd, macd, rsi, warmup, type Num } from "./osc.ts";
 
+/** A line of an indicator: its key, and its name in sentences. */
+export type IndLine = { key: string; name: string };
+/** A Pine script: `overlay` when it draws on the prices (then alerts compare the price with its plots). */
+export type PineSpec = { type: "pine"; id: string; name: string; overlay: boolean; lines: IndLine[] };
 export type IndSpec =
   | { type: "rsi"; length: number }
   | { type: "macd"; fast: number; slow: number; signal: number }
   | { type: "kd"; length: number; smoothK: number; smoothD: number }
   | { type: "atr"; length: number }
   | { type: "boll"; length: number; mult: number }
-  | { type: "ma"; kind: MaKind; length: number };
+  | { type: "ma"; kind: MaKind; length: number }
+  | PineSpec;
 export type IndType = IndSpec["type"];
-export const IND_TYPES: IndType[] = ["rsi", "macd", "kd", "atr", "boll", "ma"];
+export type BuiltinType = Exclude<IndType, "pine">;
+export const IND_TYPES: BuiltinType[] = ["rsi", "macd", "kd", "atr", "boll", "ma"];
+/** Bars a Pine script runs on for an alert (it may need any number: enough for the usual ones). */
+export const PINE_BARS = 600;
+const MAX_PINE_LINES = 64;
 
-/** Each kind's lines (key, name); the first is the main one. */
-export const LINES: Record<IndType, { key: string; name: string }[]> = {
+/** Each built-in kind's lines (key, name); the first is the main one. */
+export const LINES: Record<BuiltinType, IndLine[]> = {
   rsi: [{ key: "rsi", name: "RSI" }],
   macd: [{ key: "macd", name: "MACD" }, { key: "signal", name: "訊號線" }, { key: "hist", name: "柱狀體" }],
   kd: [{ key: "k", name: "K" }, { key: "d", name: "D" }],
@@ -27,10 +38,12 @@ export const LINES: Record<IndType, { key: string; name: string }[]> = {
   ma: [{ key: "ma", name: "均線" }],
 };
 
+/** An indicator's lines: a Pine script's plots, as they were when the alert was made. */
+export const linesOf = (s: IndSpec): IndLine[] => (s.type === "pine" ? s.lines : LINES[s.type]);
 /** Drawn on the prices: an alert compares the price with its lines. The others are compared with a number or
  *  with another of their own lines. */
-export const onPrices = (t: IndType) => t === "boll" || t === "ma";
-export const hasLine = (t: IndType, key: string) => LINES[t].some((l) => l.key === key);
+export const onPrices = (s: IndSpec) => (s.type === "pine" ? s.overlay : s.type === "boll" || s.type === "ma");
+export const hasLine = (s: IndSpec, key: string) => linesOf(s).some((l) => l.key === key);
 
 /** "RSI 14", "MACD 12 26 9", "KD 9 3 3", "ATR 14", "布林 20 2", "EMA20". */
 export function specName(s: IndSpec): string {
@@ -47,17 +60,19 @@ export function specName(s: IndSpec): string {
       return `布林 ${s.length} ${s.mult}`;
     case "ma":
       return `${s.kind}${s.length}`;
+    case "pine":
+      return s.name;
   }
 }
 
 /** A line as a sentence names it: "RSI", "MACD", "訊號線", "K", "布林上軌", "EMA20". */
 export function lineName(s: IndSpec, key: string): string {
   if (s.type === "ma") return `${s.kind}${s.length}`;
-  const name = LINES[s.type].find((l) => l.key === key)?.name ?? key;
+  const name = linesOf(s).find((l) => l.key === key)?.name ?? key;
   return s.type === "boll" ? `布林${name}` : name;
 }
 
-/** Every line's values on `bars`, one per bar. */
+/** Every line's values on `bars`, one per bar (a Pine script's come from running it: none here). */
 export function computeLines(s: IndSpec, bars: readonly Candle[]): Record<string, Num[]> {
   const closes = bars.map((b) => b.close);
   switch (s.type) {
@@ -73,6 +88,8 @@ export function computeLines(s: IndSpec, bars: readonly Candle[]): Record<string
       return bollinger(closes, s.length, s.mult);
     case "ma":
       return { ma: movingAverage(s.kind, s.length, closes) };
+    case "pine":
+      return {};
   }
 }
 
@@ -91,6 +108,8 @@ export function warmupOf(s: IndSpec): number {
       return warmup.boll(s.length);
     case "ma":
       return warmupBars(s.kind, s.length);
+    case "pine":
+      return PINE_BARS;
   }
 }
 
@@ -110,8 +129,12 @@ export function specFor(kind: IndKind, set: IndSettings): IndSpec {
   }
 }
 export const maSpec = (m: MaConf): IndSpec => ({ type: "ma", kind: m.kind, length: m.length });
-/** The same indicator with the same numbers (specs are always built with their fields in one order). */
-export const sameSpec = (a: IndSpec, b: IndSpec) => JSON.stringify(a) === JSON.stringify(b);
+/** The same indicator with the same numbers (specs are always built with their fields in one order); the same
+ *  Pine script, whatever its plots were called then. */
+export function sameSpec(a: IndSpec, b: IndSpec): boolean {
+  if (a.type === "pine" || b.type === "pine") return a.type === "pine" && b.type === "pine" && a.id === b.id;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const int = (v: unknown, r: { min: number; max: number }): number | null =>
@@ -150,6 +173,20 @@ export function cleanSpec(raw: unknown): IndSpec | null {
       const length = int(raw.length, MA_LEN);
       return !kind || length == null ? null : { type: "ma", kind, length };
     }
+    case "pine": {
+      const text = (v: unknown, max: number) => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
+      const id = text(raw.id, 80);
+      const name = text(raw.name, 80);
+      if (!id || !name || typeof raw.overlay !== "boolean" || !Array.isArray(raw.lines)) return null;
+      const lines: IndLine[] = [];
+      for (const l of raw.lines.slice(0, MAX_PINE_LINES)) {
+        const key = isObj(l) ? text(l.key, 120) : null;
+        const lname = isObj(l) ? text(l.name, 120) : null;
+        if (!key || !lname || lines.some((x) => x.key === key)) return null;
+        lines.push({ key, name: lname });
+      }
+      return lines.length ? { type: "pine", id, name, overlay: raw.overlay, lines } : null;
+    }
   }
   return null;
 }
@@ -158,7 +195,7 @@ export function cleanSpec(raw: unknown): IndSpec | null {
  *  coin worth cents is tiny), or as a price when it is one (`fmtPrice`). */
 export function fmtValue(s: IndSpec, v: number, fmtPrice: (p: number) => string): string {
   if (s.type === "rsi" || s.type === "kd") return v.toFixed(2);
-  if (onPrices(s.type)) return fmtPrice(v);
+  if (onPrices(s)) return fmtPrice(v);
   return fmtSig(v);
 }
 export function fmtSig(v: number): string {

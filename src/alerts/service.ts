@@ -6,10 +6,12 @@
 import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
 import type { Candle } from "../core/api.ts";
 import { shortName } from "../core/format.ts";
-import { tfLabel } from "../core/timeframes.ts";
+import { tfLabel, tfSec } from "../core/timeframes.ts";
 import type { Num } from "../indicators/osc.ts";
-import { computeLines, fmtValue, lineName, LINES, onPrices, sameSpec, specName, warmupOf, type IndSpec } from "../indicators/specs.ts";
+import { computeLines, fmtValue, lineName, linesOf, onPrices, PINE_BARS, sameSpec, specName, warmupOf, type IndSpec } from "../indicators/specs.ts";
+import type { SecRequest } from "../pine/index.ts";
 import { AlertBars } from "./bars.ts";
+import { runForAlert, type PineRun } from "./pine.ts";
 import { describe, evaluate, indicatorStep, moveSince, signalOf, targetShape, tradeSig, type AlertEvent, type Move, type Snapshot } from "./engine.ts";
 import {
   cleanAlerts,
@@ -49,7 +51,15 @@ export type AlertDeps = {
   now(): number;
   /** The newest `count` bars of a symbol and timeframe (indicator alerts need their history). */
   candles(instId: string, bar: string, count: number): Promise<Candle[]>;
+  /** A Pine script as it is now (alerts on it run it), or null when it was deleted. */
+  pine?(id: string): { source: string; inputs: Record<string, unknown> } | null;
+  /** A symbol's price step (Pine's syminfo.mintick). */
+  mintick?(instId: string): number;
 };
+
+/** A Pine script's last run for alerts on a symbol and timeframe: scripts run at most about once a second (less
+ *  often when slow), and again at once when a bar closes or the script or its inputs change. */
+type PineCache = { at: number; ms: number; n: number; last: number; source: string; inputs: object; run: PineRun | null };
 
 export type NewAlert = {
   instId: string; target: AlertTarget; cond: AlertCond; repeat: Repeat; tf: string; note: string; stage?: TradeStage; close?: boolean;
@@ -85,6 +95,10 @@ export class AlertService {
   /** Bars of the timeframes indicator alerts run on, and the value each of them saw last. */
   private readonly indBars: AlertBars;
   private readonly indPrev = new Map<string, Num>();
+  /** Pine alerts' runs, and the request.security() timeframes each script asked for, by symbol, timeframe and
+   *  script. */
+  private readonly pineRuns = new Map<string, PineCache>();
+  private readonly pineNeeds = new Map<string, SecRequest[]>();
 
   constructor(deps: AlertDeps) {
     this.deps = deps;
@@ -133,12 +147,13 @@ export class AlertService {
   /** "向上突破 80", "MACD 向上突破訊號線", "價格向上突破 EMA20", "價格觸及布林上軌". */
   private indWhat(a: Alert, t: IndTarget): string {
     const cond = COND_TEXT[a.cond];
-    const own = LINES[t.spec.type].length > 1 ? lineName(t.spec, t.line) : "";
-    if (onPrices(t.spec.type)) return phrase("價格", cond, lineName(t.spec, t.line));
+    const own = linesOf(t.spec).length > 1 ? lineName(t.spec, t.line) : "";
+    if (onPrices(t.spec)) return phrase("價格", cond, lineName(t.spec, t.line));
     if (t.other) return phrase(own || lineName(t.spec, t.line), cond, lineName(t.spec, t.other));
     const level = t.value ?? 0;
     // a level the user typed: as typed (80, not 80.00)
-    const v = t.spec.type === "rsi" || t.spec.type === "kd" ? String(Number(level.toFixed(2))) : fmtValue(t.spec, level, (p) => this.deps.fmtPrice(a.instId, p));
+    const typed = t.spec.type === "rsi" || t.spec.type === "kd" || t.spec.type === "pine";
+    const v = typed ? String(Number(level.toPrecision(10))) : fmtValue(t.spec, level, (p) => this.deps.fmtPrice(a.instId, p));
     return `${own ? own + " " : ""}${cond} ${v}`;
   }
   options(): AlertOptions {
@@ -212,6 +227,15 @@ export class AlertService {
     this.changed();
   }
 
+  /** The Pine scripts changed: alerts on deleted scripts go too. */
+  pineScriptsChanged(ids: readonly string[]) {
+    const keep = this.alerts.filter((a) => a.target.kind !== "indicator" || a.target.spec.type !== "pine" || ids.includes(a.target.spec.id));
+    if (keep.length !== this.alerts.length) {
+      this.alerts = keep;
+      this.changed();
+    }
+  }
+
   /** A symbol's drawings changed: alerts on deleted drawings go too. */
   drawingsChanged(instId: string, list: Drawing[]) {
     this.drawings.set(instId, list);
@@ -248,7 +272,7 @@ export class AlertService {
     const fib = this.deps.fib();
     let dirty = false;
     const closed = this.indBars.fold(instId, c);
-    const computed = new Map<string, { lines: Record<string, Num[]>; closes: number[] }>();
+    const computed = new Map<string, { lines: Record<string, Num[]>; closes: number[] } | null>();
     for (const a of this.alerts) {
       if (!a.on || a.instId !== instId) continue;
       if (a.target.kind === "indicator") {
@@ -281,16 +305,19 @@ export class AlertService {
   /** One indicator alert on a price update: true when it went off. */
   private checkIndicator(
     a: Alert, t: IndTarget, m: Move, newBar: boolean,
-    computed: Map<string, { lines: Record<string, Num[]>; closes: number[] }>, now: number,
+    computed: Map<string, { lines: Record<string, Num[]>; closes: number[] } | null>, now: number,
   ): boolean {
     const bars = this.indBars.get(a.instId, a.tf, warmupOf(t.spec) + 50);
     if (!bars || bars.length < 3) return false;
-    const key = `${a.tf} ${JSON.stringify(t.spec)}`;
+    const spec = t.spec;
+    const key = spec.type === "pine" ? `${a.tf} pine ${spec.id}` : `${a.tf} ${JSON.stringify(spec)}`;
     let c = computed.get(key);
-    if (!c) {
-      c = { lines: computeLines(t.spec, bars), closes: bars.map((b) => b.close) };
+    if (c === undefined) {
+      const lines = spec.type === "pine" ? this.pineLines(a.instId, a.tf, spec.id, bars, newBar) : computeLines(spec, bars);
+      c = lines ? { lines, closes: bars.map((b) => b.close) } : null;
       computed.set(key, c);
     }
+    if (!c) return false; // the script can't run (yet)
     const sig = signalOf(t, c.lines, c.closes);
     const out = indicatorStep(a, t, sig, c.lines[t.line] ?? [], newBar, this.indPrev.get(a.id), m, now);
     this.indPrev.set(a.id, out.next);
@@ -299,11 +326,31 @@ export class AlertService {
     const at = a.close ? line.length - 2 : line.length - 1; // the bar that closed, or the one moving
     const value = line[at];
     const fmt = (v: number) => fmtValue(t.spec, v, (p) => this.deps.fmtPrice(a.instId, p));
-    const now2 = onPrices(t.spec.type) ? "" : value == null ? "" : t.other ? `（${fmt(value)}，${fmt(c.lines[t.other]?.[at] ?? 0)}）` : `（現值 ${fmt(value)}）`;
-    const where = onPrices(t.spec.type) && value != null ? `（${fmt(value)}）` : "";
+    const now2 = onPrices(t.spec) ? "" : value == null ? "" : t.other ? `（${fmt(value)}，${fmt(c.lines[t.other]?.[at] ?? 0)}）` : `（現值 ${fmt(value)}）`;
+    const where = onPrices(t.spec) && value != null ? `（${fmt(value)}）` : "";
     const text = `${specName(t.spec)} ${tfLabel(a.tf)}：${this.indWhat(a, t)}${where}${now2}${a.close ? "，K 線收盤" : ""}`;
     this.fire(a, [{ type: "ind", text }], c.closes[c.closes.length - 1], now);
     return true;
+  }
+
+  /** A Pine script's lines on an alert's bars: its last run while that is fresh, else a new run. Null when the
+   *  script is gone, doesn't run, or waits for other timeframes' bars. */
+  private pineLines(instId: string, tf: string, id: string, bars: Candle[], newBar: boolean): Record<string, Num[]> | null {
+    const script = this.deps.pine?.(id);
+    if (!script) return null;
+    const key = `${instId} ${tf} ${id}`;
+    const nowMs = this.deps.now() * 1000;
+    const last = bars[bars.length - 1].time;
+    const old = this.pineRuns.get(key);
+    const fresh = old && !newBar && old.n === bars.length && old.last === last && old.source === script.source && old.inputs === script.inputs
+      && nowMs - old.at < Math.max(1000, old.ms * 5);
+    if (fresh) return old.run && !old.run.missing ? old.run.lines : null;
+    const t0 = performance.now();
+    const data = { bars, sec: tfSec(tf), instId, mintick: this.deps.mintick?.(instId) ?? 0.01, now: nowMs };
+    const run = runForAlert(script, data, (req) => this.indBars.get(instId, req.tf.okx!, PINE_BARS + 50), this.pineNeeds.get(key) ?? []);
+    if (run) this.pineNeeds.set(key, run.needs);
+    this.pineRuns.set(key, { at: nowMs, ms: performance.now() - t0, n: bars.length, last, source: script.source, inputs: script.inputs, run });
+    return run && !run.missing ? run.lines : null;
   }
 
   private fire(a: Alert, events: AlertEvent[], price: number, now: number) {
@@ -341,7 +388,20 @@ export class AlertService {
   /** Stream exactly the symbols with an alert on; forget prices and drawings of the others. */
   private syncWatch() {
     const on = this.alerts.filter((a) => a.on);
-    this.indBars.keep(new Set(on.filter((a) => a.target.kind === "indicator").map((a) => AlertBars.key(a.instId, a.tf))));
+    const bars = new Set<string>();
+    const pine = new Set<string>();
+    for (const a of on) {
+      if (a.target.kind !== "indicator") continue;
+      bars.add(AlertBars.key(a.instId, a.tf));
+      if (a.target.spec.type !== "pine") continue;
+      // a Pine script's own timeframe, and the others its request.security() asks for
+      const key = `${a.instId} ${a.tf} ${a.target.spec.id}`;
+      pine.add(key);
+      for (const r of this.pineNeeds.get(key) ?? []) if (r.tf.okx) bars.add(AlertBars.key(a.instId, r.tf.okx));
+    }
+    this.indBars.keep(bars);
+    for (const k of [...this.pineRuns.keys()]) if (!pine.has(k)) this.pineRuns.delete(k);
+    for (const k of [...this.pineNeeds.keys()]) if (!pine.has(k)) this.pineNeeds.delete(k);
     for (const id of [...this.indPrev.keys()]) if (!on.some((a) => a.id === id)) this.indPrev.delete(id);
     const ids = [...new Set(on.map((a) => a.instId))].sort();
     const key = ids.join(",");

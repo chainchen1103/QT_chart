@@ -289,6 +289,7 @@ args = ["--mcp-stdio"]
   - `symbol` · string · 選填：只列這個幣種
   - `log` · boolean · 選填：附上最近響過的紀錄
   - 每個提醒有 `label`，例如 `RSI 14 1時 · 向上突破 70`。指標提醒的 `target` 是 `indicator` 參數和 `line`，加上 `value` 或 `otherLine`，均線和布林通道是 `comparedWith: "price"`。收盤才判斷的有 `onBarClose: true`
+  - Pine 腳本的提醒，`indicator` 是 `{"type": "pine", "id", "name", "overlay", "lines"}`，`lines` 是建立時腳本畫的線
 
 - **get_account**：OKX 帳戶
   - 唯讀，沒有參數
@@ -388,10 +389,11 @@ args = ["--mcp-stdio"]
 - **save_alert**：新增或修改提醒
   - `price` · number · 選填：價格提醒的價位
   - `drawing_id` · string · 選填：畫線提醒。一個畫線只有一個提醒，新的取代舊的
-  - `indicator` · string · 選填：指標提醒，`rsi`、`macd`、`kd`、`atr`、`boll`、`ma`，用指標現在的參數，指標不用開著
+  - `indicator` · string · 選填：指標提醒，`rsi`、`macd`、`kd`、`atr`、`boll`、`ma`，用指標現在的參數，指標不用開著。`pine` 是 Pine 腳本畫的線
   - `ma_id` · string · 選填：`ma` 用哪一條均線，預設第一條開著的
-  - `line` · string · 選填：指標的哪條線，預設主線。RSI 是 `rsi`，MACD 是 `macd`、`signal`、`hist`，KD 是 `k`、`d`，ATR 是 `atr`，布林通道是 `upper`、`basis`、`lower`，均線是 `ma`
-  - `value` · number · 選填：RSI、MACD、KD、ATR 的線要穿過的數值，例如 80。修改時也能改
+  - `pine_id` · string · 選填：`pine` 用哪個腳本，id 見 `list_pine_scripts`。腳本要開著，並且已經在圖表上算過
+  - `line` · string · 選填：指標的哪條線，預設主線。RSI 是 `rsi`，MACD 是 `macd`、`signal`、`hist`，KD 是 `k`、`d`，ATR 是 `atr`，布林通道是 `upper`、`basis`、`lower`，均線是 `ma`，Pine 腳本是 `plot` 的標題，給錯會列出可用的線
+  - `value` · number · 選填：RSI、MACD、KD、ATR 或副圖的 Pine 腳本，線要穿過的數值，例如 80。修改時也能改
   - `other_line` · string · 選填：改成穿過同一個指標的另一條線，例如 `signal`、`d`
   - `on_bar_close` · boolean · 選填：指標提醒只在 K 線收盤時判斷
   - `id` · string · 選填：修改這個提醒
@@ -411,7 +413,7 @@ args = ["--mcp-stdio"]
   | 倉位 | `trade`：進場時響，之後止盈或止損再響 |
   | 指標 | `touch` 觸及、`up` 向上突破、`down` 向下跌破，預設 `up` |
 
-  RSI、MACD、KD、ATR 要給 `value` 或 `other_line` 其中一個。均線和布林通道比的是價格，兩個都不能給。指標提醒只看建立之後的變化，建立前已經發生的交叉不會響。
+  RSI、MACD、KD、ATR 和副圖的 Pine 腳本要給 `value` 或 `other_line` 其中一個。均線、布林通道和畫在 K 線上的 Pine 腳本比的是價格，兩個都不能給。指標提醒只看建立之後的變化，建立前已經發生的交叉不會響。Pine 提醒照腳本現在的原始碼和參數計算，週期預設用圖表的，刪掉腳本時提醒也會刪掉。
 
 - **delete_alert**：刪提醒
   - `id` · string · 必填
@@ -553,6 +555,7 @@ AI 下單時一定要遵守：
 ```json
 {"name": "save_alert", "arguments": {"symbol": "ETH", "indicator": "rsi", "value": 80, "condition": "up", "timeframe": "1H"}}
 {"name": "save_alert", "arguments": {"symbol": "ETH", "indicator": "macd", "other_line": "signal", "condition": "up", "on_bar_close": true}}
+{"name": "save_alert", "arguments": {"symbol": "ETH", "indicator": "pine", "pine_id": "pine-…", "line": "RSI", "value": 80}}
 ```
 
 **K 線重播**

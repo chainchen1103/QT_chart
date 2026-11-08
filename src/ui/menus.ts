@@ -9,8 +9,6 @@ import type { MarketFeed } from "../chart/feed.ts";
 import type { ChartView } from "../chart/view.ts";
 import type { Setting } from "../core/setting.ts";
 import type { ScaleLabels } from "../settings/model.ts";
-import type { PaneKind } from "../settings/indicators.ts";
-import { fmtSig } from "../indicators/specs.ts";
 import { isTyping, menuItem } from "./dom.ts";
 import { openScaleMenu } from "./panels/scale.ts";
 import { closePopover, popoverAt } from "./popover.ts";
@@ -25,11 +23,11 @@ export type PaneMenuDeps = {
   appearanceAt(x: number, y: number): void;
   /** Back to the default view: the newest bars at the default zoom, prices fitted; the timeframe stays. */
   resetView(): void;
-  /** The indicator pane at this height of the screen, and its value there. */
-  studyAt(clientY: number): { kind: PaneKind; value: number } | null;
-  /** A new alert on that indicator, at that value, with its window at a screen point. */
-  indicatorAlertAt(kind: PaneKind, value: number, x: number, y: number): void;
+  /** The indicator pane at this height of the screen: its name and value there ("RSI 78.3"), and a new alert on
+   *  it at that value, with its window at a screen point. */
+  studyAt(clientY: number): PaneHit | null;
 };
+export type PaneHit = { text: string; alert(x: number, y: number): void };
 
 /** The menus of one chart. */
 export class PaneMenus {
@@ -37,7 +35,7 @@ export class PaneMenus {
   /** The crosshair's y in the price pane, while the mouse is over this chart. */
   private crossY: number | null = null;
   /** The indicator pane the mouse is over, with its value there. */
-  private overStudy: { kind: PaneKind; value: number } | null = null;
+  private overStudy: PaneHit | null = null;
   private mouse = { x: 0, y: 0 };
 
   constructor(d: PaneMenuDeps) {
@@ -55,8 +53,7 @@ export class PaneMenus {
       if (study) {
         // an indicator's pane: an alert on it, at the value there
         popoverAt(cx, cy, "圖表", (body) => {
-          const v = study.kind === "rsi" || study.kind === "kd" ? study.value.toFixed(1) : fmtSig(study.value);
-          body.append(menuItem(`在 ${study.kind.toUpperCase()} ${v} 新增提醒`, () => d.indicatorAlertAt(study.kind, study.value, cx, cy), "Alt+A"));
+          body.append(menuItem(`在 ${study.text} 新增提醒`, () => study.alert(cx, cy), "Alt+A"));
           const reset = () => {
             closePopover();
             d.resetView();
@@ -97,7 +94,7 @@ export class PaneMenus {
   alertAtCrosshair(): boolean {
     const st = this.overStudy;
     if (st) {
-      this.d.indicatorAlertAt(st.kind, st.value, this.mouse.x, this.mouse.y);
+      st.alert(this.mouse.x, this.mouse.y);
       return true;
     }
     if (this.crossY == null) return false;

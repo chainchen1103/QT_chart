@@ -97,6 +97,6 @@ export function toggleIndPanel(kind: IndKind, anchor: HTMLElement, d: IndPanelDe
       rerender();
     }));
     body.append(foot);
-    indicatorAlertSection(d.alerts(), kind, () => (d.inds.get()[kind].on ? d.sources(kind) : []), () => d.preset(kind))(body, rerender);
+    indicatorAlertSection(d.alerts(), (s) => s.type === kind, () => (d.inds.get()[kind].on ? d.sources(kind) : []), () => d.preset(kind))(body, rerender);
   });
 }

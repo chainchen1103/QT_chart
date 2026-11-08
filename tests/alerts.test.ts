@@ -279,3 +279,114 @@ test("indicator alert texts: a space where Latin meets Chinese", () => {
   assert.equal(s.label(add({ kind: "indicator", spec: { type: "ma", kind: "EMA", length: 20 }, line: "ma" }, "touch")), "EMA20 1時 · 價格觸及 EMA20");
   assert.equal(s.label(add({ kind: "indicator", spec: { type: "boll", length: 20, mult: 2 }, line: "upper" }, "touch")), "布林 20 2 1時 · 價格觸及布林上軌");
 });
+
+// ----------------------------------------------------------------------------- Pine scripts
+import { pineLines, runForAlert } from "../src/alerts/pine.ts";
+import { cleanIndTarget } from "../src/alerts/model.ts";
+import { load as loadPine } from "../src/pine/index.ts";
+import { rsi as rsiOf } from "../src/indicators/osc.ts";
+import { cleanSpec as cleanIndSpec, onPrices as onPricesOf, sameSpec as sameIndSpec, type PineSpec } from "../src/indicators/specs.ts";
+
+const RSI_PINE = `//@version=6
+indicator(title="Relative Strength Index", shorttitle="RSI", format=format.price, precision=2)
+len = input.int(14, "RSI Length")
+r = ta.rsi(close, len)
+plot(r, "RSI", color=#7E57C2)
+plot(ta.sma(r, 14), "RSI-based MA", color=color.yellow)
+plot(50, display = display.none)
+hline(70)
+`;
+const pineRsi = (lines = [{ key: "RSI", name: "RSI" }, { key: "RSI-based MA", name: "RSI-based MA" }]): PineSpec => ({ type: "pine", id: "p1", name: "RSI", overlay: false, lines });
+const wave = (n: number) => Array.from({ length: n }, (_, i) => bar1m(i * 60, 100 + 3 * Math.sin(i / 3) + (i % 4) * 0.4, true));
+
+test("a Pine script's plots as alert lines: by title, the hidden ones left out, a shared title by its place", () => {
+  const bars = wave(80);
+  const run = (src: string) => {
+    const l = loadPine(src);
+    assert.ok(l.ok);
+    return l.program.run({ bars, sec: 60, instId: "ETH-USDT-SWAP", mintick: 0.01 }, { inputs: {} });
+  };
+  assert.deepEqual(pineLines(run(RSI_PINE).out.plots).map((x) => [x.key, x.name]), [["RSI", "RSI"], ["RSI-based MA", "RSI-based MA"]]);
+  const same = pineLines(run(`//@version=5\nindicator("t")\nplot(close, "A")\nplot(open, "A")\nplot(high)`).out.plots);
+  assert.deepEqual(same.map((x) => x.name), ["A 1", "A 2", "線 3"]);
+  assert.ok(same.every((x) => x.key.startsWith("#")));
+});
+
+test("a Pine script runs for an alert with its inputs as set: TradingView's RSI", () => {
+  const bars = wave(120);
+  const closes = bars.map((b) => b.close);
+  const data = { bars, sec: 60, instId: "ETH-USDT-SWAP", mintick: 0.01, now: 0 };
+  const near = (a: (number | null)[], b: (number | null)[]) => a.every((x, i) => (x == null ? b[i] == null : Math.abs(x - b[i]!) < 1e-9));
+  const r14 = runForAlert({ source: RSI_PINE, inputs: {} }, data, () => null, [])!;
+  assert.ok(near(r14.lines.RSI, rsiOf(closes, 14)));
+  assert.equal(r14.missing, false);
+  const r5 = runForAlert({ source: RSI_PINE, inputs: { "RSI Length": 5 } }, data, () => null, [])!;
+  assert.ok(near(r5.lines.RSI, rsiOf(closes, 5)));
+  assert.equal(runForAlert({ source: "plot(", inputs: {} }, data, () => null, []), null); // doesn't compile
+  // another timeframe through request.security: missing until its bars come
+  const sec = `//@version=5\nindicator("t")\nplot(request.security(syminfo.tickerid, "5", close), "H")`;
+  const waiting = runForAlert({ source: sec, inputs: {} }, data, () => null, [])!;
+  assert.equal(waiting.missing, true);
+  assert.equal(waiting.needs.length, 1);
+  const five = Array.from({ length: 30 }, (_, i) => bar1m(i * 300, 200 + i, true));
+  const got = runForAlert({ source: sec, inputs: {} }, data, () => five, waiting.needs)!;
+  assert.equal(got.missing, false);
+  assert.ok(got.lines.H.some((v) => v != null && v >= 200));
+});
+
+test("Pine specs and targets: kept as saved, the same script by its id, drawn on the prices or in a pane", () => {
+  const spec = pineRsi();
+  assert.deepEqual(cleanIndSpec(JSON.parse(JSON.stringify(spec))), spec);
+  assert.equal(cleanIndSpec({ ...spec, lines: [] }), null);
+  assert.equal(cleanIndSpec({ ...spec, lines: [{ key: "a", name: "a" }, { key: "a", name: "b" }] }), null);
+  assert.equal(cleanIndSpec({ ...spec, id: "" }), null);
+  assert.ok(sameIndSpec(spec, pineRsi([{ key: "RSI", name: "RSI" }]))); // its plots then don't matter
+  assert.ok(!sameIndSpec(spec, { ...spec, id: "p2" }));
+  assert.ok(!sameIndSpec(spec, { type: "rsi", length: 14 }));
+  assert.equal(onPricesOf(spec), false);
+  assert.equal(onPricesOf({ ...spec, overlay: true }), true);
+  assert.ok(cleanIndTarget({ kind: "indicator", spec, line: "RSI", value: 70 }));
+  assert.ok(cleanIndTarget({ kind: "indicator", spec, line: "RSI", other: "RSI-based MA" }));
+  assert.equal(cleanIndTarget({ kind: "indicator", spec, line: "Nope", value: 70 }), null);
+  const over = { ...spec, overlay: true };
+  assert.ok(cleanIndTarget({ kind: "indicator", spec: over, line: "RSI" })); // the price against it
+  assert.equal(cleanIndTarget({ kind: "indicator", spec: over, line: "RSI", value: 70 }), null);
+});
+
+test("a Pine alert goes off in the service as the price climbs, and goes with its script", async () => {
+  const hist: Candle[] = Array.from({ length: 60 }, (_, i) => bar1m(i * 60, 100 + (i % 2 ? 0.5 : -0.5), true));
+  hist.push(bar1m(3600, 100));
+  const notes: string[] = [];
+  const store: Record<string, unknown> = {};
+  let now = 3600;
+  let script: { source: string; inputs: Record<string, unknown> } | null = { source: RSI_PINE, inputs: {} };
+  const s = new AlertService({
+    watch: () => {}, loadDrawings: () => [], fib: () => fib, kindName: (k) => k, fmtPrice: (_i, p) => p.toFixed(1), fmtTime: String,
+    notify: (n) => notes.push(n.title), isTf: () => true, read: (k) => store[k], write: (k, v) => (store[k] = v), now: () => now,
+    candles: async () => hist, pine: () => script, mintick: () => 0.01,
+  });
+  s.start();
+  const target: IndTarget = { kind: "indicator", spec: pineRsi(), line: "RSI", value: 70 };
+  const r = s.add({ instId: "ETH-USDT-SWAP", target, cond: "up", repeat: "once", tf: "1m", note: "" });
+  assert.equal(typeof r, "object");
+  assert.equal(s.label(r as Alert), "RSI 1分 · RSI 向上突破 70");
+  assert.deepEqual(s.indicatorLevels("ETH-USDT-SWAP", pineRsi([]), "1m"), [70]);
+  s.onCandle("ETH-USDT-SWAP", bar1m(3600, 100)); // the bars are asked for
+  await Promise.resolve();
+  await Promise.resolve();
+  let p = 100;
+  for (let k = 0; k < 6 && !notes.length; k++) {
+    now += 60;
+    p += 1.5;
+    s.onCandle("ETH-USDT-SWAP", bar1m(3600 + (k + 1) * 60, p));
+  }
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /^ETHUSDT\.P RSI 1分：RSI 向上突破 70（現值 7\d\.\d\d）$/);
+  // a script that can't be found any more: nothing runs; deleted: its alerts go
+  s.update((r as Alert).id, { on: true });
+  script = null;
+  s.onCandle("ETH-USDT-SWAP", bar1m(3600 + 9 * 60, p + 5));
+  assert.equal(notes.length, 1);
+  s.pineScriptsChanged(["other"]);
+  assert.equal(s.all().length, 0);
+});

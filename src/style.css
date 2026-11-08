@@ -337,7 +337,8 @@ input[type=range] { width: 120px; accent-color: var(--text); cursor: pointer; }
 .alert-label:hover { text-decoration: underline; }
 .alert-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .alert-edit { margin: 0 0 4px 24px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); }
-.alert-edit .pop-row { flex-wrap: wrap; }
+.alert-edit .pop-row, .pop-row.wrap { flex-wrap: wrap; row-gap: 6px; }
+.pop-row.wrap select { max-width: 180px; }
 .alert-log { max-height: 160px; overflow-y: auto; font-size: 12px; }
 .alert-log-row { display: flex; gap: 8px; padding: 2px 0; }
 .alert-time { color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }

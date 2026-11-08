@@ -40,7 +40,7 @@ import { loadBgImage, loadDrawings, loadSettings, saveBgImage, saveDrawings } fr
 import type { Drawing } from "./settings/model.ts";
 import { AccountSync } from "./trade/sync.ts";
 import { setupMenus } from "./ui/menus.ts";
-import { togglePineManager, type PineUi } from "./ui/panels/pine.ts";
+import { openPineInputs, togglePineManager, type PineUi } from "./ui/panels/pine.ts";
 import { renderAppearance, type AppearanceIo } from "./ui/panels/appearance.ts";
 import { performanceSection } from "./ui/panels/performance.ts";
 import { renderPosition } from "./ui/panels/position.ts";
@@ -91,7 +91,11 @@ const alerts = new AlertService({
   write: writeJson,
   now: () => Date.now() / 1000,
   candles: (instId, bar, count) => getCandles(instId, bar, null, count),
+  pine: (id) => settings.pine.get().find((s) => s.id === id) ?? null,
+  mintick: (instId) => Number(catalog.get(instId)?.tickSz) || 0.01,
 });
+// alerts on a deleted Pine script go with it
+settings.pine.watch(() => alerts.pineScriptsChanged(settings.pine.get().map((s) => s.id)));
 /** The alert list (bell button) works on the chart in use. */
 const alertUi: AlertUi = {
   service: alerts,
@@ -267,7 +271,11 @@ const tabBar = new TabBar({
 const workspace: Workspace = new Workspace(
   {
     grid: $("grid"),
-    shared: { catalog, settings, alerts, status, tools, trading, history: drawingHistory, sync, appearanceAt: () => openSettingsAt("appearance") },
+    shared: {
+      catalog, settings, alerts, status, tools, trading, history: drawingHistory, sync,
+      appearanceAt: () => openSettingsAt("appearance"),
+      pineSettings: (id) => openPineInputs(pineUi, id),
+    },
     hub,
     inUseChanged: (p) => {
       toolbar.paintTimeframes();
@@ -297,6 +305,9 @@ const pineUi: PineUi = {
     return `${shortName(f.instId)} · ${f.tf.label}`;
   },
   note: (text) => status.note(text),
+  alerts: () => workspace.inUse().alertUi,
+  sources: (id) => workspace.inUse().pineSources(id),
+  preset: (id) => workspace.inUse().pinePreset(id),
 };
 /** 還原 / 重做 follow the drawings of the chart in use (off while the drawings are locked). */
 function paintUndoButtons() {

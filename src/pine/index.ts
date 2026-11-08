@@ -30,6 +30,18 @@ export function load(source: string): Loaded {
   }
 }
 
+/** Compiled scripts by source: every chart, and the alerts, run the same ones. */
+const compiled = new Map<string, Loaded>();
+export function loadCached(source: string): Loaded {
+  let l = compiled.get(source);
+  if (!l) {
+    if (compiled.size > 40) compiled.clear();
+    l = load(source);
+    compiled.set(source, l);
+  }
+  return l;
+}
+
 function errorOf(e: unknown): { line: number; col: number; message: string } {
   if (e instanceof PineSyntaxError) return { line: e.line, col: e.col, message: e.message };
   return { line: 0, col: 0, message: String((e as Error)?.message ?? e) };

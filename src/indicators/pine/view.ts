@@ -6,8 +6,10 @@ import {
   AreaSeries,
   HistogramSeries,
   LineSeries,
+  LineStyle,
   LineType,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type PriceFormat,
   type SeriesType,
@@ -21,6 +23,7 @@ import { DISPLAY, type PlotOut } from "../../pine/outputs.ts";
 import type { RunResult, ScriptInfo } from "../../pine/index.ts";
 import { emptyScene, PineLayer, type PineScene } from "./layer.ts";
 import { THEME } from "../../ui/theme.ts";
+import { ALERT_LINE } from "../studies.ts";
 
 export type ViewHost = {
   chart: IChartApi;
@@ -35,6 +38,10 @@ export type ViewHost = {
   tick(): number;
   /** Text grows or shrinks with the chart's label size (1 at the default). */
   textScale(): number;
+  /** Buttons after a script's legend values (a new alert, its settings). */
+  legendButtons?(id: string): HTMLElement[];
+  /** Values that alerts on a script compare its plots with, drawn across its own pane. */
+  alertLevels?(id: string): number[];
 };
 
 type Kind = "line" | "hist" | "area";
@@ -66,6 +73,10 @@ export class ScriptView {
   private paneHost: ISeriesApi<SeriesType> | null = null;
   private anchor: ISeriesApi<"Line"> | null = null;
   private legendEl: HTMLElement | null = null;
+  /** Alert levels across its own pane, as price lines on the series they were made on. */
+  private levels: IPriceLine[] = [];
+  private levelKey = "";
+  private levelOn: ISeriesApi<SeriesType> | null = null;
   private fmt: (v: number) => string;
   private readonly h: ViewHost;
 
@@ -95,6 +106,38 @@ export class ScriptView {
     this.fmt = formatterOf(result, this.h);
     this.syncPlots(result);
     this.syncLayers(result);
+    this.syncLevels();
+  }
+
+  /** Its name in the legend and in alerts: the short title, else the title. */
+  title(): string {
+    const r = this.result;
+    return r?.decl.shorttitle || r?.decl.title || this.info?.title || this.name || "Pine";
+  }
+
+  /** Alert levels across its own pane (none for scripts on the prices: they are crossed by the price). */
+  syncLevels() {
+    const host = this.inOwnPane ? (this.plots[0]?.series ?? null) : null;
+    const want = host ? (this.h.alertLevels?.(this.id) ?? []) : [];
+    const key = JSON.stringify(want);
+    if (host === this.levelOn && key === this.levelKey) return;
+    // lines on a series that is still there come off it (a removed series took its own with it)
+    if (this.levelOn && this.plots.some((p) => p.series === this.levelOn)) for (const l of this.levels) this.levelOn.removePriceLine(l);
+    this.levels = [];
+    this.levelOn = host;
+    this.levelKey = key;
+    if (!host) return;
+    for (const price of want) this.levels.push(host.createPriceLine({ price, color: ALERT_LINE, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: true, title: "" }));
+  }
+
+  /** The value at this height of the screen, when it is over the script's own pane. */
+  valueAt(clientY: number): number | null {
+    const s = this.inOwnPane ? (this.plots[0]?.series ?? null) : null;
+    const el = s?.getPane().getHTMLElement();
+    if (!s || !el) return null;
+    const r = el.getBoundingClientRect();
+    if (clientY < r.top || clientY > r.bottom) return null;
+    return s.coordinateToPrice(clientY - r.top);
   }
 
   /** Remove everything from the chart. */
@@ -115,6 +158,10 @@ export class ScriptView {
     this.plots = [];
     if (this.anchor) chart.removeSeries(this.anchor);
     this.anchor = null;
+    // the series took their alert levels with them
+    this.levels = [];
+    this.levelOn = null;
+    this.levelKey = "";
   }
 
   // ------------------------------------------------------------------- plots
@@ -313,7 +360,7 @@ export class ScriptView {
   legend(i: number): LegendItem[] {
     const items: LegendItem[] = [];
     const r = this.result;
-    const title = r?.decl.shorttitle || r?.decl.title || this.info?.title || this.name || "Pine";
+    const title = this.title();
     const args = r ? legendInputs(r) : "";
     items.push({ text: args ? `${title} ${args}` : title, color: null });
     if (this.error) {
@@ -355,6 +402,7 @@ export class ScriptView {
     const top = paneEl ? paneEl.getBoundingClientRect().top - box.getBoundingClientRect().top : 0;
     this.legendEl.style.top = `${Math.round(top + 4)}px`;
     fillLegend(this.legendEl, this.legend(i));
+    this.legendEl.append(...(this.h.legendButtons?.(this.id) ?? []));
   }
 }
 

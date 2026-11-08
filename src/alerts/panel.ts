@@ -4,7 +4,7 @@
 import { isChannel, type Drawing } from "../settings/model.ts";
 import { shortName } from "../core/format.ts";
 import { tfLabel } from "../core/timeframes.ts";
-import { fmtSig, lineName, LINES, onPrices, specName, type IndSpec, type IndType } from "../indicators/specs.ts";
+import { fmtSig, hasLine, lineName, linesOf, onPrices, specName, type IndSpec, type IndType } from "../indicators/specs.ts";
 import { checkbox, el, flagBad, isTextEntry, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
 import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type IndTarget, type Repeat, type TradeStage } from "./model.ts";
@@ -420,7 +420,7 @@ const sourceName = (c: IndSource, bar: string) => specName(c.spec) + (c.tf !== b
  */
 function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], preset: IndPreset, made: () => void, focus: boolean) {
   let pick = 0;
-  let line = preset.line && LINES[choices[0].spec.type].some((l) => l.key === preset.line) ? preset.line : LINES[choices[0].spec.type][0].key;
+  let line = preset.line && hasLine(choices[0].spec, preset.line) ? preset.line : linesOf(choices[0].spec)[0].key;
   let cond: AlertCond = "up";
   let other = ""; // "": a number
   let close = false;
@@ -432,10 +432,9 @@ function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], pre
   const draw = () => {
     box.replaceChildren();
     const src = choices[pick];
-    const type = src.spec.type;
-    const lines = LINES[type];
+    const lines = linesOf(src.spec);
     if (choices.length > 1) {
-      const r = el("div", "pop-row");
+      const r = el("div", "pop-row wrap");
       const sel = el("select");
       choices.forEach((c, k) => sel.append(new Option(sourceName(c, ui.bar()), String(k), false, k === pick)));
       sel.onchange = () => {
@@ -455,10 +454,10 @@ function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], pre
       };
       return sel;
     };
-    const r1 = el("div", "pop-row");
+    const r1 = el("div", "pop-row wrap");
     const conds = condSelect(condsFor("indicator"), cond, (v) => (cond = v));
     let level: { box: HTMLInputElement; get: () => number | null } | null = null;
-    if (onPrices(type)) {
+    if (onPrices(src.spec)) {
       // the price against one of its lines
       r1.append(lbl("價格"), conds, lines.length > 1 ? lineSelect() : lbl(lineName(src.spec, line)));
     } else {
@@ -483,13 +482,13 @@ function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], pre
         r1.append(level.box);
       }
     }
-    const r2 = el("div", "pop-row");
+    const r2 = el("div", "pop-row wrap");
     r2.append(triggerSelect(close, (v) => (close = v)), repeatSelect(repeat, (v) => (repeat = v)));
     box.append(r1, r2);
     if (level && focus) requestAnimationFrame(() => level!.box.focus());
     make = () => {
       const target: IndTarget = { kind: "indicator", spec: src.spec, line };
-      if (!onPrices(type)) {
+      if (!onPrices(src.spec)) {
         if (other) target.other = other;
         else {
           const v = level?.get() ?? null;
@@ -504,7 +503,7 @@ function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], pre
   };
   let make = () => {};
   draw();
-  const r3 = el("div", "pop-row");
+  const r3 = el("div", "pop-row wrap");
   r3.append(note, textButton("建立", "text-btn", () => make()));
   body.append(box, r3, msg);
 }
@@ -522,14 +521,17 @@ export function indicatorAlertDialog(at: HTMLElement | { x: number; y: number },
   else popoverAt(at.x, at.y, title, render);
 }
 
-/** The 提醒 section of an indicator's settings: its alerts on the symbol on screen, and a new one. */
-export function indicatorAlertSection(ui: AlertUi, type: IndType, choices: () => IndSource[], preset: () => IndPreset): Render {
+/** The 提醒 section of an indicator's settings: its alerts on the symbol on screen (those whose indicator
+ *  `mine` picks), and a new one. `none`: what it says when there is nothing to make one on. */
+export function indicatorAlertSection(
+  ui: AlertUi, mine: (s: IndSpec) => boolean, choices: () => IndSource[], preset: () => IndPreset, none = "先打開這個指標，才能設提醒",
+): Render {
   return (body, rerender) => {
     const s = ui.service;
     const inst = ui.instId();
     body.append(el("div", "pop-section", `提醒：${shortName(inst)}`));
-    const mine = s.forSymbol(inst).filter((a) => a.target.kind === "indicator" && a.target.spec.type === type);
-    for (const a of mine) {
+    const list = s.forSymbol(inst).filter((a) => a.target.kind === "indicator" && mine(a.target.spec));
+    for (const a of list) {
       const row = el("div", "alert-row" + (a.on ? "" : " off"));
       row.append(
         checkbox(a.on, a.on ? "開著：按一下暫停" : "關著：按一下重新開啟", (v) => {
@@ -545,11 +547,11 @@ export function indicatorAlertSection(ui: AlertUi, type: IndType, choices: () =>
       );
       body.append(row);
     }
-    const list = choices();
-    if (!list.length) {
-      body.append(el("div", "pop-note", "先打開這個指標，才能設提醒"));
+    const from = choices();
+    if (!from.length) {
+      body.append(el("div", "pop-note", none));
       return;
     }
-    indicatorForm(body, ui, list, preset(), rerender, false);
+    indicatorForm(body, ui, from, preset(), rerender, false);
   };
 }

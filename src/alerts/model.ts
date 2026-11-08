@@ -128,11 +128,11 @@ export function cleanAlerts(raw: unknown, isTf: (bar: string) => boolean): Alert
 /** A valid indicator target, or null: a known line of a valid spec, compared with what that kind of line can be. */
 export function cleanIndTarget(t: Record<string, unknown>): IndTarget | null {
   const spec = cleanSpec(t.spec);
-  if (!spec || typeof t.line !== "string" || !hasLine(spec.type, t.line)) return null;
+  if (!spec || typeof t.line !== "string" || !hasLine(spec, t.line)) return null;
   const out: IndTarget = { kind: "indicator", spec, line: t.line };
-  if (onPrices(spec.type)) return t.value == null && t.other == null ? out : null; // compared with the price
+  if (onPrices(spec)) return t.value == null && t.other == null ? out : null; // compared with the price
   if (isNum(t.value) && t.other == null) return { ...out, value: t.value };
-  if (typeof t.other === "string" && t.other !== t.line && hasLine(spec.type, t.other) && t.value == null) return { ...out, other: t.other };
+  if (typeof t.other === "string" && t.other !== t.line && hasLine(spec, t.other) && t.value == null) return { ...out, other: t.other };
   return null;
 }
 

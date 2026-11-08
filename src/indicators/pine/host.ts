@@ -5,24 +5,16 @@
 import type { Candle } from "../../core/api.ts";
 import type { Setting } from "../../core/setting.ts";
 import { tfSec } from "../../core/timeframes.ts";
-import { load, runWithSecurity, type Loaded, type SecRequest } from "../../pine/index.ts";
+import { loadCached, runWithSecurity, type SecRequest } from "../../pine/index.ts";
 import type { PineScript } from "../../settings/model.ts";
 import { SourceStore } from "../sources.ts";
 import { fillLegend, ScriptView, type LegendItem, type ViewHost } from "./view.ts";
 import { cssColor } from "../../pine/runtime.ts";
 import { DISPLAY } from "../../pine/outputs.ts";
+import { pineLines } from "../../alerts/pine.ts";
+import type { PineSpec } from "../specs.ts";
 
-/** Compiled scripts by source (every chart runs the same ones). */
-const compiled = new Map<string, Loaded>();
-export function loadCached(source: string): Loaded {
-  let l = compiled.get(source);
-  if (!l) {
-    if (compiled.size > 40) compiled.clear();
-    l = load(source);
-    compiled.set(source, l);
-  }
-  return l;
-}
+export { loadCached };
 
 /** Bars of the other timeframe loaded before the chart's first bar, so its indicators have warmed up. */
 const WARMUP = 300;
@@ -125,8 +117,35 @@ export class PineHost {
       line.className = "ma pine-line";
       fillLegend(line, v.legend(i));
       line.style.fontSize = "";
+      line.append(...(this.d.legendButtons?.(v.id) ?? []));
       box.append(line);
     }
+  }
+
+  // ------------------------------------------------------------------- alerts
+  /** A script as alerts name it, from its last result on this chart: null before it ran, or when it draws no
+   *  plot an alert could watch. */
+  specOf(id: string): PineSpec | null {
+    const v = this.views.get(id);
+    const r = v?.result;
+    if (!v || !r || !r.ok) return null;
+    const lines = pineLines(r.out.plots).slice(0, 64).map(({ key, name }) => ({ key, name: name.slice(0, 120) }));
+    if (!lines.length) return null;
+    return { type: "pine", id, name: v.title().slice(0, 80), overlay: r.decl.overlay, lines };
+  }
+
+  /** The script whose own pane is at this height of the screen, and its value there. */
+  paneAt(clientY: number): { id: string; name: string; value: number } | null {
+    for (const v of this.ordered()) {
+      const value = v.valueAt(clientY);
+      if (value != null) return { id: v.id, name: v.title(), value };
+    }
+    return null;
+  }
+
+  /** Alerts changed: their levels across the scripts' panes again. */
+  alertsChanged() {
+    for (const v of this.views.values()) v.syncLevels();
   }
 
   private ordered(): ScriptView[] {

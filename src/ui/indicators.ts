@@ -92,7 +92,7 @@ export function openIndicatorSettings(kind: MenuKind, anchor: HTMLElement, d: In
   const s = d.settings;
   switch (kind) {
     case "ma":
-      toggleMaPanel(anchor, s.mas, s.maOptions, d.bar, indicatorAlertSection(d.alerts(), "ma", () => d.sources("ma"), () => d.preset("ma")));
+      toggleMaPanel(anchor, s.mas, s.maOptions, d.bar, indicatorAlertSection(d.alerts(), (s) => s.type === "ma", () => d.sources("ma"), () => d.preset("ma")));
       return;
     case "fvg":
       toggleFvgPanel(anchor, s.fvgs, d.bar);

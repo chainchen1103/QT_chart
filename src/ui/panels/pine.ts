@@ -15,6 +15,8 @@ import { checkbox, colorInput, el, flagBad, textButton } from "../dom.ts";
 import { openModal, type Modal } from "../modal.ts";
 import { POPOVER_CLOSED, togglePopover } from "../popover.ts";
 import { MONO_FONT, THEME } from "../theme.ts";
+import type { IndSpec } from "../../indicators/specs.ts";
+import { indicatorAlertSection, type AlertUi, type IndPreset, type IndSource } from "../../alerts/panel.ts";
 
 export type PineUi = {
   scripts: Setting<PineScript[]>;
@@ -23,6 +25,10 @@ export type PineUi = {
   /** The chart in use, for titles: "BTC-USDT-SWAP · 15分". */
   chartName(): string;
   note(text: string): void;
+  /** Alerts on a script, made from its settings window: on the chart in use. */
+  alerts?(): AlertUi;
+  sources?(id: string): IndSource[];
+  preset?(id: string): IndPreset;
 };
 
 const TEMPLATE = `//@version=5
@@ -396,6 +402,12 @@ export function openPineInputs(ui: PineUi, id: string) {
         body.append(row);
         inlineRow = d.inline ? row : null;
         inlineKey = d.inline;
+      }
+      // alerts on its plots, on the chart in use
+      if (ui.alerts && ui.sources) {
+        const { alerts, sources, preset } = ui;
+        const mine = (x: IndSpec) => x.type === "pine" && x.id === id;
+        indicatorAlertSection(alerts(), mine, () => sources(id), () => preset?.(id) ?? {}, "這個腳本還沒畫出線，開啟後才能設提醒")(body, () => m.rerender());
       }
       foot.append(
         textButton("恢復預設", "text-btn", () => {

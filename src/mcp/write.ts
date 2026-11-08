@@ -4,7 +4,7 @@
 import { shortName } from "../core/format.ts";
 import { checkPrices } from "../drawings/trade.ts";
 import { condsFor, type AlertCond, type IndTarget, type Repeat } from "../alerts/model.ts";
-import { LINES, maSpec, onPrices, specFor, specName, type IndSpec } from "../indicators/specs.ts";
+import { linesOf, maSpec, onPrices, specFor, specName, type IndSpec } from "../indicators/specs.ts";
 import { cleanInds } from "../settings/indicators.ts";
 import { LAYOUT_IDS, LAYOUTS, MAX_TABS, type LayoutId } from "../layout/model.ts";
 import { load } from "../pine/index.ts";
@@ -344,7 +344,7 @@ export function writeTools(app: McpApp): Tool[] {
       name: "save_alert",
       title: "Add or change an alert",
       description:
-        "A new alert (with price, drawing_id, or indicator: a drawing has at most one alert, a new one replaces it), or changes to one (with id). Conditions: a price or a line: touch, up (crosses up), down (crosses down); rectangles: enter, exit; channels: exit, enter, touch, up, down; vertical lines: time; positions: trade (entry, then stop-loss or take-profit); indicators: touch, up, down. An indicator alert uses the indicator as set now (get_settings indicators, movingAverages) on its own timeframe: RSI, MACD, KD and ATR lines cross a value (RSI 80) or another of their lines (MACD and its signal line, K and D); a moving average or Bollinger band is crossed by the price. Only crossings after the alert is made count. Alerts sound in QT Chart and show a Windows notification.",
+        "A new alert (with price, drawing_id, or indicator: a drawing has at most one alert, a new one replaces it), or changes to one (with id). Conditions: a price or a line: touch, up (crosses up), down (crosses down); rectangles: enter, exit; channels: exit, enter, touch, up, down; vertical lines: time; positions: trade (entry, then stop-loss or take-profit); indicators: touch, up, down. An indicator alert uses the indicator as set now (get_settings indicators, movingAverages) on its own timeframe: RSI, MACD, KD and ATR lines cross a value (RSI 80) or another of their lines (MACD and its signal line, K and D); a moving average or Bollinger band is crossed by the price. A Pine script (pine_id) works the same way with its plots: in a pane of its own against a value or another plot, on the prices crossed by the price; it runs as the script is set at the time. Only crossings after the alert is made count. Alerts sound in QT Chart and show a Windows notification.",
       level: "write",
       input: {
         type: "object",
@@ -353,11 +353,12 @@ export function writeTools(app: McpApp): Tool[] {
           symbol: SYMBOL,
           price: S.num("A price alert at this price."),
           drawing_id: S.str("An alert on this drawing (list_drawings)."),
-          indicator: S.oneOf(["rsi", "macd", "kd", "atr", "boll", "ma"], "An alert on this indicator's line, with its numbers as set now (it doesn't have to be on)."),
+          indicator: S.oneOf(["rsi", "macd", "kd", "atr", "boll", "ma", "pine"], "An alert on this indicator's line, with its numbers as set now (it doesn't have to be on). pine: a Pine script's plot (give pine_id)."),
           ma_id: S.str("indicator ma: which moving average (get_settings movingAverages; default: the first one on)."),
-          line: S.str("The indicator's line (default its main one): rsi; macd, signal, hist; k, d; atr; upper, basis, lower; ma."),
-          value: S.num("RSI, MACD, KD, ATR: the value its line crosses, such as 80. Changes it on an existing indicator alert."),
-          other_line: S.str("RSI, MACD, KD, ATR: another of its lines to cross instead of a value, such as signal or d."),
+          pine_id: S.str("indicator pine: the script (list_pine_scripts). It must be on and have run on a chart, which tells its plots."),
+          line: S.str("The indicator's line (default its main one): rsi; macd, signal, hist; k, d; atr; upper, basis, lower; ma; a Pine script's plot by its title (a wrong one lists them)."),
+          value: S.num("RSI, MACD, KD, ATR or a Pine script in a pane of its own: the value its line crosses, such as 80. Changes it on an existing indicator alert."),
+          other_line: S.str("RSI, MACD, KD, ATR or a Pine script in a pane of its own: another of its lines to cross instead of a value, such as signal or d."),
           on_bar_close: S.bool("Indicator alerts: only when a bar of its timeframe closes, not while it is still moving."),
           condition: S.oneOf(["touch", "up", "down", "enter", "exit", "time", "trade"], "When it goes off (default: the first that fits)."),
           repeat: S.oneOf(["once", "every"], "once: switch off after going off; every: stay on, at most once a minute."),
@@ -686,11 +687,19 @@ function saveAlert(app: McpApp, a: Args, c: CallCtx): ToolResult {
 function saveIndicatorAlert(
   app: McpApp, a: Args, c: CallCtx, instId: string, cond: AlertCond | undefined, repeat: string | undefined, note: string | undefined, on: boolean | undefined,
 ): ToolResult {
-  const type = oneOf(a, "indicator", ["rsi", "macd", "kd", "atr", "boll", "ma"] as const);
+  const type = oneOf(a, "indicator", ["rsi", "macd", "kd", "atr", "boll", "ma", "pine"] as const);
   const chartBar = chartsOf(app, instId)[0]?.feed.bar ?? app.workspace.inUse().feed.bar;
   let spec: IndSpec;
   let ownTf: string;
-  if (type === "ma") {
+  if (type === "pine") {
+    const pid = str(a, "pine_id", { max: 80 });
+    if (!app.settings.pine.get().some((x) => x.id === pid)) throw new ArgError(`No Pine script ${pid} (list_pine_scripts)`);
+    // its plots, from a chart it ran on (the symbol's charts first)
+    const src = [...chartsOf(app, instId), ...app.workspace.charts()].map((p) => p.pineSources(pid)[0]).find((x) => x != null);
+    if (!src) throw new ArgError("That script hasn't drawn anything on a chart yet: switch it on (save_pine_script on: true) and try again in a moment");
+    spec = src.spec;
+    ownTf = "";
+  } else if (type === "ma") {
     const mas = app.settings.mas.get();
     const maId = str(a, "ma_id", { optional: true, max: 80 });
     const m = maId ? mas.find((x) => x.id === maId) : mas.find((x) => x.on);
@@ -702,14 +711,14 @@ function saveIndicatorAlert(
     spec = specFor(type, inds);
     ownTf = inds[type].tf;
   }
-  const lines = LINES[spec.type].map((l) => l.key);
-  const line = str(a, "line", { optional: true, max: 20 }) ?? lines[0];
+  const lines = linesOf(spec).map((l) => l.key);
+  const line = str(a, "line", { optional: true, max: 120 }) ?? lines[0];
   if (!lines.includes(line)) throw new ArgError(`${type} lines: ${lines.join(", ")}`);
   const value = num(a, "value", { optional: true });
-  const other = str(a, "other_line", { optional: true, max: 20 });
+  const other = str(a, "other_line", { optional: true, max: 120 });
   const target: IndTarget = { kind: "indicator", spec, line };
-  if (onPrices(spec.type)) {
-    if (value != null || other != null) throw new ArgError("A moving average or a Bollinger band is crossed by the price: no value or other_line");
+  if (onPrices(spec)) {
+    if (value != null || other != null) throw new ArgError("A line on the prices (a moving average, a Bollinger band, a Pine script drawn on the prices) is crossed by the price: no value or other_line");
   } else if ((value == null) === (other == null)) {
     throw new ArgError("Give value (the value its line crosses) or other_line (another of its lines)");
   } else if (value != null) target.value = value;
