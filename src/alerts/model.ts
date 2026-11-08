@@ -1,6 +1,7 @@
 // Price alerts: what is stored, and the checks that make stored data safe to use. Pure (no DOM, no Tauri).
 
 import type { DrawKind } from "../settings/model.ts";
+import { cleanSpec, hasLine, onPrices, type IndSpec } from "../indicators/specs.ts";
 
 /** touch: the price reaches the level from either side; up / down: it crosses it in that direction. */
 export type LevelCond = "touch" | "up" | "down";
@@ -12,7 +13,13 @@ export type AlertCond = LevelCond | BoxCond | "time" | "trade";
 export type Repeat = "once" | "every";
 export type TradeStage = "wait" | "open" | "done";
 
-export type AlertTarget = { kind: "price"; price: number } | { kind: "drawing"; id: string };
+/**
+ * A line of an indicator (RSI, MACD's signal line, a moving average...), with the numbers it was made with. A
+ * line in a pane of its own is compared with `value` (RSI 80) or with `other`, another of its lines (MACD with
+ * its signal line); a line on the prices (moving average, Bollinger band) with the price.
+ */
+export type IndTarget = { kind: "indicator"; spec: IndSpec; line: string; value?: number; other?: string };
+export type AlertTarget = { kind: "price"; price: number } | { kind: "drawing"; id: string } | IndTarget;
 
 export type Alert = {
   id: string;
@@ -32,6 +39,8 @@ export type Alert = {
   /** Position alerts: where the trade is, and the entry/stop/target that stage belongs to. */
   stage?: TradeStage;
   sig?: string;
+  /** Indicator alerts: only when a bar of `tf` closes, not while it is still moving. */
+  close?: boolean;
 };
 
 export type LogEntry = { t: number; instId: string; text: string; note: string; alertId: string };
@@ -55,8 +64,8 @@ export const COND_TEXT: Record<AlertCond, string> = {
 };
 export const REPEAT_TEXT: Record<Repeat, string> = { once: "只提醒一次", every: "每次（最多每分鐘一次）" };
 
-/** The conditions that make sense for a price or a kind of drawing. */
-export function condsFor(kind: "price" | DrawKind): AlertCond[] {
+/** The conditions that make sense for a price, a kind of drawing or an indicator line. */
+export function condsFor(kind: "price" | "indicator" | DrawKind): AlertCond[] {
   if (kind === "rect") return ["enter", "exit"];
   if (kind === "channel" || kind === "regression" || kind === "flat" || kind === "disjoint") return ["exit", "enter", "touch", "up", "down"];
   if (kind === "vline") return ["time"];
@@ -85,9 +94,13 @@ export function cleanAlerts(raw: unknown, isTf: (bar: string) => boolean): Alert
     let target: AlertTarget;
     if (isObj(t) && t.kind === "price" && isNum(t.price) && t.price > 0) target = { kind: "price", price: t.price };
     else if (isObj(t) && t.kind === "drawing" && typeof t.id === "string" && t.id) target = { kind: "drawing", id: t.id };
-    else continue;
+    else if (isObj(t) && t.kind === "indicator") {
+      const ind = cleanIndTarget(t);
+      if (!ind) continue;
+      target = ind;
+    } else continue;
     const cond = CONDS.find((c) => c === r.cond);
-    if (!cond || (target.kind === "price" && !condsFor("price").includes(cond))) continue;
+    if (!cond || (target.kind !== "drawing" && !condsFor(target.kind).includes(cond))) continue;
     const a: Alert = {
       id: r.id,
       instId: r.instId,
@@ -105,10 +118,22 @@ export function cleanAlerts(raw: unknown, isTf: (bar: string) => boolean): Alert
       a.stage = r.stage === "open" || r.stage === "done" ? r.stage : "wait";
       if (typeof r.sig === "string") a.sig = r.sig;
     }
+    if (target.kind === "indicator" && r.close === true) a.close = true;
     ids.add(a.id);
     out.push(a);
   }
   return out;
+}
+
+/** A valid indicator target, or null: a known line of a valid spec, compared with what that kind of line can be. */
+export function cleanIndTarget(t: Record<string, unknown>): IndTarget | null {
+  const spec = cleanSpec(t.spec);
+  if (!spec || typeof t.line !== "string" || !hasLine(spec.type, t.line)) return null;
+  const out: IndTarget = { kind: "indicator", spec, line: t.line };
+  if (onPrices(spec.type)) return t.value == null && t.other == null ? out : null; // compared with the price
+  if (isNum(t.value) && t.other == null) return { ...out, value: t.value };
+  if (typeof t.other === "string" && t.other !== t.line && hasLine(spec.type, t.other) && t.value == null) return { ...out, other: t.other };
+  return null;
 }
 
 export function cleanLog(raw: unknown): LogEntry[] {

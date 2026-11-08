@@ -18,14 +18,19 @@ export class Legend {
   private readonly feed: MarketFeed;
   private readonly overlays: Overlays;
   private readonly box: HTMLElement;
-  /** More lines (Pine scripts) for bar i. */
+  /** More lines (Bollinger Bands, Pine scripts) for bar i. */
   private readonly extra: (i: number, box: HTMLElement) => void;
+  /** Buttons at the end of the moving averages' line. */
+  private readonly maButtons: (line: HTMLElement) => void;
 
-  constructor(feed: MarketFeed, overlays: Overlays, box: HTMLElement, extra: (i: number, box: HTMLElement) => void = () => {}) {
+  constructor(
+    feed: MarketFeed, overlays: Overlays, box: HTMLElement, extra: (i: number, box: HTMLElement) => void = () => {}, maButtons: (line: HTMLElement) => void = () => {},
+  ) {
     this.feed = feed;
     this.overlays = overlays;
     this.box = box;
     this.extra = extra;
+    this.maButtons = maButtons;
   }
 
   /** The bar at time t (UTC seconds), or the newest bar. */
@@ -57,6 +62,7 @@ export class Legend {
         if (m.state === "ok") s.style.color = m.color;
         line.append(s);
       }
+      this.maButtons(line);
       box.append(line);
     }
     const zones = this.overlays.zonesLegend();

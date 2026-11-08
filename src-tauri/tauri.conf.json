@@ -17,6 +17,7 @@
         "title": "QT Chart",
         "width": 1400,
         "height": 860,
+        "maximized": true,
         "minWidth": 720,
         "minHeight": 480
       }

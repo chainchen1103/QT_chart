@@ -1,16 +1,13 @@
 // The top bar: symbol search and timeframe buttons for the chart in use (the ones the user starred, and a menu
-// with all of them), and the indicator switches (均線, FVG, OB, 支撐阻力) with their settings windows (shared by
-// every chart).
+// with all of them), and the 指標 menu: every indicator's switch and settings (shared by every chart).
 
 import type { Catalog } from "../chart/catalog.ts";
 import type { Instrument } from "../core/api.ts";
 import { fmtChange, shortName } from "../core/format.ts";
 import { findTf, tfSec } from "../core/timeframes.ts";
-import { clone, DEFAULT_FVG, DEFAULT_OB, DEFAULT_SR, type Groups } from "../settings/model.ts";
 import type { Settings } from "../settings/store.ts";
 import { el } from "./dom.ts";
-import { toggleMaPanel } from "./panels/ma.ts";
-import { toggleFvgPanel, toggleObPanel, toggleSrPanel } from "./panels/zones.ts";
+import { countOn, toggleIndicatorMenu, type IndicatorDeps } from "./indicators.ts";
 import { closePopover, togglePopover } from "./popover.ts";
 import { renderTimeframes, toolbarBars } from "./panels/timeframes.ts";
 
@@ -20,6 +17,8 @@ export type ToolbarDeps = {
   /** Symbol and timeframe of the chart in use. */
   current(): { instId: string; bar: string };
   switchTo(instId: string, bar: string): void;
+  /** The 指標 menu works on the chart in use. */
+  indicators: IndicatorDeps;
 };
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -35,7 +34,8 @@ export class Toolbar {
     this.d = d;
     this.setupSymbolBox();
     this.setupIndicators();
-    d.settings.groups.watch(() => this.paintGroups());
+    d.settings.groups.watch(() => this.paintIndicators());
+    d.settings.inds.watch(() => this.paintIndicators());
     d.settings.timeframes.watch(() => this.paintTimeframes());
   }
 
@@ -145,36 +145,15 @@ export class Toolbar {
     });
   }
 
-  // ------------------------------------------------------------------- indicator switches
-  private setGroups(v: Groups) {
-    const s = this.d.settings;
-    // switching a group on with nothing in it brings back its default set
-    if (v.fvg && !s.fvgs.get().length) s.fvgs.set([clone(DEFAULT_FVG)]);
-    if (v.ob && !s.obs.get().length) s.obs.set([clone(DEFAULT_OB)]);
-    if (v.sr && !s.srs.get().length) s.srs.set([clone(DEFAULT_SR)]);
-    s.groups.set(v);
-  }
-
-  private paintGroups() {
-    const g = this.d.settings.groups.get();
-    $("ma-toggle").classList.toggle("on", g.ma);
-    $("fvg-toggle").classList.toggle("on", g.fvg);
-    $("ob-toggle").classList.toggle("on", g.ob);
-    $("sr-toggle").classList.toggle("on", g.sr);
+  // ------------------------------------------------------------------- indicators
+  private paintIndicators() {
+    const n = countOn(this.d.settings);
+    $("ind-count").textContent = n ? String(n) : "";
+    $("ind-btn").classList.toggle("on", n > 0);
   }
 
   private setupIndicators() {
-    const s = this.d.settings;
-    const bar = () => this.d.current().bar;
-    const flip = (k: keyof Groups) => () => this.setGroups({ ...s.groups.get(), [k]: !s.groups.get()[k] });
-    $("ma-toggle").onclick = flip("ma");
-    $("fvg-toggle").onclick = flip("fvg");
-    $("ob-toggle").onclick = flip("ob");
-    $("sr-toggle").onclick = flip("sr");
-    $("ma-btn").onclick = () => toggleMaPanel($("ma-btn"), s.mas, s.maOptions, bar);
-    $("fvg-btn").onclick = () => toggleFvgPanel($("fvg-btn"), s.fvgs, bar);
-    $("ob-btn").onclick = () => toggleObPanel($("ob-btn"), s.obs, bar);
-    $("sr-btn").onclick = () => toggleSrPanel($("sr-btn"), s.srs, bar);
-    this.paintGroups();
+    $("ind-btn").onclick = () => toggleIndicatorMenu($("ind-btn"), this.d.indicators);
+    this.paintIndicators();
   }
 }

@@ -8,11 +8,15 @@ import type { Candle, Pair } from "../core/api.ts";
 import { fmtChartTime, fmtClock, fromChartTime, toChartTime } from "../core/format.ts";
 import { AlertLayer } from "../alerts/layer.ts";
 import type { TradeStage } from "../alerts/model.ts";
-import { drawingAlertSection, type AlertUi } from "../alerts/panel.ts";
+import { drawingAlertSection, indicatorAlertDialog, roundValue, type AlertUi, type IndPreset, type IndSource } from "../alerts/panel.ts";
 import type { AlertService } from "../alerts/service.ts";
 import type { DrawingHistory } from "../drawings/history.ts";
 import { DrawingLayer } from "../drawings/layer.ts";
 import { Overlays } from "../indicators/overlays.ts";
+import { maSpec, specFor } from "../indicators/specs.ts";
+import { legendButton, Studies } from "../indicators/studies.ts";
+import type { IndKind } from "../settings/indicators.ts";
+import { openIndicatorSettings, type IndicatorDeps } from "../ui/indicators.ts";
 import { PineHost } from "../indicators/pine/host.ts";
 import type { Cell } from "../layout/model.ts";
 import { DEFAULT_APPEARANCE, DEFAULT_LINE_STYLE, DEFAULT_RECT_STYLE, defaultChannelStyle, isChannel, type Drawing } from "../settings/model.ts";
@@ -79,6 +83,8 @@ export class ChartPane {
   /** Bar replay on this chart. */
   readonly replay: Replay;
   private readonly overlays: Overlays;
+  /** Bollinger Bands, and RSI, MACD, KD, ATR in their panes. */
+  private readonly studies: Studies;
   private readonly scaleLabels: ScaleLabelLayer;
   private readonly alertLayer: AlertLayer;
   private readonly legend: Legend;
@@ -150,8 +156,38 @@ export class ChartPane {
       changed: () => {
         if (!this.hovering) this.legend.render();
       },
+      refreshed: (full) => this.studies.refresh(full),
       space,
       textSize,
+    });
+
+    // the settings windows and alerts opened from this chart's legends work on it
+    const indDeps: IndicatorDeps = {
+      settings,
+      bar: () => feed.bar,
+      alerts: () => this.alertUi,
+      sources: (k) => this.indicatorSources(k),
+      preset: (k) => this.indicatorPreset(k),
+    };
+    this.studies = new Studies({
+      chart,
+      candles,
+      sources: this.overlays.sources,
+      paneBox: this.el,
+      settings: () => settings.inds.get(),
+      waitClose: () => settings.maOptions.get().waitClose,
+      valuesOnScale: () => settings.labels.get().maValues,
+      bar: () => feed.bar,
+      times: () => feed.times,
+      toChartTime,
+      fmtPrice: feed.fmtPrice,
+      alertLevels: (kind) => {
+        const [src] = this.indicatorSources(kind);
+        return src ? shared.alerts.indicatorLevels(feed.instId, src.spec, src.tf) : [];
+      },
+      bell: (kind, at) => indicatorAlertDialog(at, this.alertUi, this.indicatorSources(kind), this.indicatorPreset(kind)),
+      gear: (kind, at) => openIndicatorSettings(kind, at, indDeps),
+      moved: () => this.legend.render(),
     });
 
     this.pine = new PineHost({
@@ -308,7 +344,20 @@ export class ChartPane {
     candles.attachPrimitive(this.alertLayer);
 
     // ------------------------------------------------------------------- text and menus
-    this.legend = new Legend(feed, this.overlays, legendBox, (i, box) => this.pine.legend(i, box));
+    this.legend = new Legend(
+      feed,
+      this.overlays,
+      legendBox,
+      (i, box) => {
+        this.studies.legend(i, box);
+        this.pine.legend(i, box);
+      },
+      // the moving averages' line: a new alert on one of them, their settings
+      (line) => line.append(
+        legendButton("bell", "新增均線提醒", (b) => indicatorAlertDialog(b, this.alertUi, this.indicatorSources("ma"))),
+        legendButton("gear", "均線設定", (b) => openIndicatorSettings("ma", b, indDeps)),
+      ),
+    );
     this.menus = new PaneMenus({
       el: chartEl,
       view: this.view,
@@ -317,6 +366,8 @@ export class ChartPane {
       alerts: this.alertUi,
       appearanceAt: shared.appearanceAt,
       resetView: () => this.resetView(),
+      studyAt: (clientY) => this.studies.paneAt(clientY),
+      indicatorAlertAt: (kind, value, x, y) => indicatorAlertDialog({ x, y }, this.alertUi, this.indicatorSources(kind), { value: roundValue(kind, value) }),
     });
 
     chart.subscribeCrosshairMove((p) => {
@@ -336,6 +387,7 @@ export class ChartPane {
       settings.fvgs.watch(() => this.overlays.refresh(true)),
       settings.obs.watch(() => this.overlays.refresh(true)),
       settings.srs.watch(() => this.overlays.refresh(true)),
+      settings.inds.watch(() => this.overlays.refresh(true)),
       settings.labels.watch(() => this.applyLabels()),
       settings.appearance.watch(() => this.applyAppearance()),
       settings.fib.watch(() => this.drawings.refresh()),
@@ -400,6 +452,7 @@ export class ChartPane {
   }
   redrawAlerts() {
     this.alertLayer.redraw();
+    this.studies.alertsChanged();
   }
   /** The window shows again: catch up on what came while it was hidden. */
   shown() {
@@ -414,6 +467,7 @@ export class ChartPane {
     this.feed.dispose();
     this.replay.destroy();
     this.overlays.destroy();
+    this.studies.destroy();
     this.pine.destroy();
     this.drawings.destroy();
     const { candles } = this.view;
@@ -467,7 +521,30 @@ export class ChartPane {
 
   /** What the indicators show now (AI apps). */
   indicators() {
-    return this.overlays.snapshot();
+    const inds = this.s.settings.inds.get();
+    const studies = (["boll", "rsi", "macd", "kd", "atr"] as IndKind[]).flatMap((kind) => {
+      const v = this.studies.valuesAt(kind);
+      return v ? [{ kind, spec: v.spec, timeframe: inds[kind].tf || this.feed.bar, state: v.state, values: v.values }] : [];
+    });
+    return { ...this.overlays.snapshot(), studies };
+  }
+
+  /** What an alert can be made on for this kind of indicator: as set now on this chart, and the timeframe it runs
+   *  on (moving averages: each one switched on). */
+  indicatorSources(kind: "ma" | IndKind): IndSource[] {
+    const s = this.s.settings;
+    if (kind === "ma") return s.groups.get().ma ? s.mas.get().filter((m) => m.on).map((m) => ({ spec: maSpec(m), tf: m.tf || this.feed.bar })) : [];
+    const inds = s.inds.get();
+    return [{ spec: specFor(kind, inds), tf: inds[kind].tf || this.feed.bar }];
+  }
+  /** Where a new alert starts: RSI and KD at their upper line, MACD at 0, ATR at its value now. */
+  indicatorPreset(kind: "ma" | IndKind): IndPreset {
+    const inds = this.s.settings.inds.get();
+    if (kind === "rsi") return { value: inds.rsi.upper };
+    if (kind === "kd") return { value: inds.kd.upper };
+    if (kind === "macd") return { value: 0 };
+    const atr = kind === "atr" ? this.studies.valuesAt("atr")?.values.atr : null;
+    return atr != null ? { value: roundValue("atr", atr) } : {};
   }
   /** The chart as a PNG (base64, no data: prefix): prices, volume and every pane, with the axes and everything
    *  drawn on them; bars that came while the window was hidden are drawn first. */

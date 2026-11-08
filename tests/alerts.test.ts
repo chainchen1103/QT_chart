@@ -150,3 +150,132 @@ test("alert options: on unless turned off, the in-window message too", () => {
   assert.deepEqual(cleanOptions({ sound: false, system: true }), { sound: false, system: true, popup: true }); // saved before it existed
   assert.deepEqual(cleanOptions({ popup: false, system: false }), { sound: true, system: false, popup: false });
 });
+
+// ----------------------------------------------------------------------------- indicator alerts
+import { crossed, indicatorStep, signalOf } from "../src/alerts/engine.ts";
+import { AlertBars } from "../src/alerts/bars.ts";
+import { AlertService } from "../src/alerts/service.ts";
+import type { Candle } from "../src/core/api.ts";
+import type { IndTarget } from "../src/alerts/model.ts";
+
+const rsiAt = (value: number): IndTarget => ({ kind: "indicator", spec: { type: "rsi", length: 14 }, line: "rsi", value });
+
+test("indicator alerts are checked when read back", () => {
+  const ok = (target: unknown, cond = "up") => cleanAlerts([{ id: "x", instId: "ETH-USDT-SWAP", target, cond }], () => true).length === 1;
+  assert.ok(ok(rsiAt(80)));
+  assert.ok(ok({ kind: "indicator", spec: { type: "macd", fast: 12, slow: 26, signal: 9 }, line: "macd", other: "signal" }));
+  assert.ok(ok({ kind: "indicator", spec: { type: "ma", kind: "EMA", length: 20 }, line: "ma" })); // with the price
+  assert.ok(!ok({ kind: "indicator", spec: { type: "ma", kind: "EMA", length: 20 }, line: "ma", value: 5 })); // a price line takes no number
+  assert.ok(!ok({ kind: "indicator", spec: { type: "rsi", length: 14 }, line: "rsi" })); // nothing to compare with
+  assert.ok(!ok({ kind: "indicator", spec: { type: "rsi", length: 0 }, line: "rsi", value: 80 }));
+  assert.ok(!ok({ kind: "indicator", spec: { type: "kd", length: 9, smoothK: 3, smoothD: 3 }, line: "k", other: "k" }));
+  assert.ok(!ok(rsiAt(80), "enter"));
+  const [a] = cleanAlerts([{ id: "x", instId: "ETH-USDT-SWAP", target: rsiAt(80), cond: "up", close: true, tf: "1H" }], () => true);
+  assert.equal(a.close, true);
+  assert.equal(cleanAlerts([{ id: "x", instId: "ETH-USDT-SWAP", target: { kind: "price", price: 1 }, cond: "up", close: true }], () => true)[0].close, undefined);
+  assert.deepEqual(condsFor("indicator"), ["touch", "up", "down"]);
+});
+
+test("indicator lines: crossing a number, another line, or the price", () => {
+  const lines = { rsi: [60, 75, 82], k: [10, 30, 50], d: [20, 25, 55] };
+  assert.deepEqual(signalOf(rsiAt(80), lines, []), [-20, -5, 2]);
+  assert.deepEqual(signalOf({ kind: "indicator", spec: { type: "kd", length: 9, smoothK: 3, smoothD: 3 }, line: "k", other: "d" }, lines, []), [-10, 5, -5]);
+  assert.deepEqual(signalOf({ kind: "indicator", spec: { type: "ma", kind: "SMA", length: 2 }, line: "ma" }, { ma: [null, 100] }, [99, 101]), [null, 1]);
+  assert.ok(crossed("up", -1, 0) && crossed("up", -1, 3) && !crossed("up", 1, 3) && !crossed("up", null, 3));
+  assert.ok(crossed("down", 1, -1) && crossed("touch", 1, -1) && crossed("touch", -1, 1) && !crossed("touch", 1, 2));
+});
+
+test("an indicator alert goes off as its line crosses, on the bar still moving or only once a bar closes", () => {
+  const t = rsiAt(80);
+  const a = alert({ target: t, cond: "up" });
+  const sig = [-20, -5, 2]; // RSI 60, 75, 82: the bar still moving went over 80
+  assert.equal(indicatorStep(a, t, sig, [], false, undefined, null, 100).hit, false); // the first time it only looks: that cross came before
+  assert.equal(indicatorStep(a, t, sig, [], false, undefined, null, 100).next, 2);
+  assert.equal(indicatorStep(a, t, sig, [], false, -1, null, 100).hit, true); // under 80 at the last update, over now
+  assert.equal(indicatorStep(a, t, sig, [], false, 1, null, 100).hit, false); // it was over 80 at the last update already
+  assert.equal(indicatorStep(a, t, sig, [], false, -1, null, 100).next, 2);
+  // only at the close: the bar that closed (index 1) against the one before (index 0); none while a bar moves
+  const c = alert({ target: t, cond: "up", close: true });
+  assert.equal(indicatorStep(c, t, [-5, 2, 3], [], false, undefined, null, 100).hit, false);
+  assert.equal(indicatorStep(c, t, [-5, 2, 3], [], true, undefined, null, 100).hit, true);
+  assert.equal(indicatorStep(c, t, [2, 3, -1], [], true, undefined, null, 100).hit, false);
+  // at most once a minute when it stays on
+  assert.equal(indicatorStep(alert({ target: t, cond: "up", repeat: "every", fired: 60 }), t, sig, [], false, -1, null, 100).hit, false);
+  // a moving average: the price moving through it, highs and lows in between too
+  const ma: IndTarget = { kind: "indicator", spec: { type: "ma", kind: "EMA", length: 20 }, line: "ma" };
+  const p = alert({ target: ma, cond: "touch" });
+  assert.equal(indicatorStep(p, ma, [-1], [100], false, undefined, mv(99, 98.5, 100.2), 100).hit, true);
+  assert.equal(indicatorStep(p, ma, [-1], [100], false, undefined, mv(99, 98.5, 99.9), 100).hit, false);
+});
+
+const bar1m = (time: number, close: number, confirmed = false): Candle => ({ time, open: close, high: close, low: close, close, volume: 1, confirmed });
+
+test("alert bars: fetched once, kept current from 1-minute bars, fetched again after a gap", async () => {
+  const asked: string[] = [];
+  const hist = (bar: string) => [0, 3600, 7200].map((t) => ({ ...bar1m(t, 100 + t / 3600, t < 7200), high: 105, low: 95 }));
+  const b = new AlertBars(async (id, bar, n) => {
+    asked.push(`${id} ${bar} ${n}`);
+    return hist(bar);
+  });
+  assert.equal(b.get("ETH-USDT-SWAP", "1H", 40), null);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(asked, ["ETH-USDT-SWAP 1H 45"]);
+  const got = b.get("ETH-USDT-SWAP", "1H", 40)!;
+  assert.equal(got.length, 3);
+  assert.equal(b.fold("ETH-USDT-SWAP", bar1m(7260, 110)).size, 0); // into the bar still moving
+  assert.equal(got[2].close, 110);
+  assert.equal(got[2].high, 110);
+  assert.deepEqual([...b.fold("ETH-USDT-SWAP", bar1m(10800, 111))], ["1H"]); // the next hour: one closed
+  assert.equal(got.length, 4);
+  assert.equal(b.fold("BTC-USDT-SWAP", bar1m(10860, 1)).size, 0); // another symbol's
+  b.fold("ETH-USDT-SWAP", bar1m(10800 + 3 * 3600, 112)); // hours later: asleep, so again
+  assert.equal(b.get("ETH-USDT-SWAP", "1H", 40), null);
+  b.keep(new Set());
+  assert.equal(b.get("ETH-USDT-SWAP", "1H", 40), null);
+});
+
+test("an RSI alert goes off in the service as the price climbs", async () => {
+  // 60 minutes up and down around 100 (RSI near 50), then a run up: RSI goes over 70
+  const hist: Candle[] = Array.from({ length: 60 }, (_, i) => bar1m(i * 60, 100 + (i % 2 ? 0.5 : -0.5), true));
+  hist.push(bar1m(3600, 100));
+  const notes: string[] = [];
+  const store: Record<string, unknown> = {};
+  let now = 3600;
+  const s = new AlertService({
+    watch: () => {}, loadDrawings: () => [], fib: () => fib, kindName: (k) => k, fmtPrice: (_i, p) => p.toFixed(1), fmtTime: String,
+    notify: (n) => notes.push(n.title), isTf: () => true, read: (k) => store[k], write: (k, v) => (store[k] = v), now: () => now,
+    candles: async () => hist,
+  });
+  s.start();
+  const r = s.add({ instId: "ETH-USDT-SWAP", target: rsiAt(70), cond: "up", repeat: "once", tf: "1m", note: "" });
+  assert.equal(typeof r, "object");
+  assert.equal(s.label(r as Alert), "RSI 14 1分 · 向上突破 70");
+  assert.deepEqual(s.indicatorLevels("ETH-USDT-SWAP", { type: "rsi", length: 14 }, "1m"), [70]);
+  assert.deepEqual(s.indicatorLevels("ETH-USDT-SWAP", { type: "rsi", length: 14 }, "1H"), []); // another timeframe's pane
+  assert.deepEqual(s.indicatorLevels("ETH-USDT-SWAP", { type: "rsi", length: 21 }, "1m"), []); // other numbers
+  s.onCandle("ETH-USDT-SWAP", bar1m(3600, 100)); // the bars are asked for
+  await Promise.resolve();
+  await Promise.resolve();
+  let p = 100;
+  for (let k = 0; k < 6 && !notes.length; k++) {
+    now += 60;
+    p += 1.5;
+    s.onCandle("ETH-USDT-SWAP", bar1m(3600 + (k + 1) * 60, p));
+  }
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /^ETHUSDT\.P RSI 14 1分：向上突破 70（現值 7\d\.\d\d）$/);
+  assert.equal(s.all()[0].on, false); // once: off now
+});
+
+test("indicator alert texts: a space where Latin meets Chinese", () => {
+  const s = new AlertService({
+    watch: () => {}, loadDrawings: () => [], fib: () => fib, kindName: (k) => k, fmtPrice: (_i, p) => p.toFixed(1), fmtTime: String,
+    notify: () => {}, isTf: () => true, read: () => undefined, write: () => {}, now: () => 0, candles: async () => [],
+  });
+  const add = (target: IndTarget, cond: "up" | "touch") => s.add({ instId: "ETH-USDT-SWAP", target, cond, repeat: "once", tf: "1H", note: "" }) as Alert;
+  assert.equal(s.label(add({ kind: "indicator", spec: { type: "macd", fast: 12, slow: 26, signal: 9 }, line: "macd", other: "signal" }, "up")), "MACD 12 26 9 1時 · MACD 向上突破訊號線");
+  assert.equal(s.label(add({ kind: "indicator", spec: { type: "kd", length: 9, smoothK: 3, smoothD: 3 }, line: "k", other: "d" }, "up")), "KD 9 3 3 1時 · K 向上突破 D");
+  assert.equal(s.label(add({ kind: "indicator", spec: { type: "ma", kind: "EMA", length: 20 }, line: "ma" }, "touch")), "EMA20 1時 · 價格觸及 EMA20");
+  assert.equal(s.label(add({ kind: "indicator", spec: { type: "boll", length: 20, mult: 2 }, line: "upper" }, "touch")), "布林 20 2 1時 · 價格觸及布林上軌");
+});

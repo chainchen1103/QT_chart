@@ -15,22 +15,13 @@
       </div>
       <nav id="timeframes" class="timeframes"></nav>
       <span class="toolbar-sep"></span>
-      <span class="split">
-        <button id="ma-toggle" class="tool-btn split-main" title="顯示／隱藏全部均線">均線</button>
-        <button id="ma-btn" class="tool-btn split-caret" title="均線設定：新增、刪除、週期、顏色、用哪個週期算"><svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.75 6 7.25l2.5-2.5" /></svg></button>
-      </span>
-      <span class="split">
-        <button id="fvg-toggle" class="tool-btn split-main" title="顯示／隱藏 FVG">FVG</button>
-        <button id="fvg-btn" class="tool-btn split-caret" title="FVG 設定：用哪個週期、影線或實體、顏色、數量"><svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.75 6 7.25l2.5-2.5" /></svg></button>
-      </span>
-      <span class="split">
-        <button id="ob-toggle" class="tool-btn split-main" title="顯示／隱藏 Order Block">OB</button>
-        <button id="ob-btn" class="tool-btn split-caret" title="Order Block 設定：用哪個週期、波段、顏色、數量"><svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.75 6 7.25l2.5-2.5" /></svg></button>
-      </span>
-      <span class="split">
-        <button id="sr-toggle" class="tool-btn split-main" title="顯示／隱藏支撐阻力">支撐阻力</button>
-        <button id="sr-btn" class="tool-btn split-caret" title="支撐阻力設定：用哪個週期、波段、顏色、數量"><svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.75 6 7.25l2.5-2.5" /></svg></button>
-      </span>
+      <button id="ind-btn" class="tool-btn ind-btn" title="指標：均線、布林通道、FVG、OB、支撐阻力、RSI、MACD、KD、ATR">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 14.5l4-5 3.5 3 4.5-6.5 3 3" /><path d="M2.5 17.5h15" />
+        </svg>
+        指標
+        <span id="ind-count" class="ind-count"></span>
+      </button>
       <span class="toolbar-sep"></span>
       <button id="pine-btn" class="tool-btn pine-btn" title="Pine 腳本：匯入指標和策略、回測">Pine</button>
       <button id="replay-btn" class="tool-btn replay-tool" title="K 線重播：選起點逐根播放，Shift+→ 下一根">

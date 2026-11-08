@@ -3,9 +3,11 @@
 
 import { isChannel, type Drawing } from "../settings/model.ts";
 import { shortName } from "../core/format.ts";
+import { tfLabel } from "../core/timeframes.ts";
+import { fmtSig, lineName, LINES, onPrices, specName, type IndSpec, type IndType } from "../indicators/specs.ts";
 import { checkbox, el, flagBad, isTextEntry, labelled, lbl, textButton } from "../ui/dom.ts";
 import { closePopover, popoverAt, POPOVER_CLOSED, togglePopover, type Render } from "../ui/popover.ts";
-import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type Repeat, type TradeStage } from "./model.ts";
+import { COND_TEXT, condsFor, MAX_NOTE, oneShot, REPEAT_TEXT, type Alert, type AlertCond, type IndTarget, type Repeat, type TradeStage } from "./model.ts";
 import { STAGE_TEXT, type AlertService } from "./service.ts";
 
 export type AlertUi = {
@@ -200,13 +202,26 @@ function editor(a: Alert, ui: AlertUi, done: () => void): HTMLElement {
     price.box.onchange = save;
     row.append(lbl("價格"), price.box);
   }
+  const t = a.target;
+  if (t.kind === "indicator" && t.value != null) {
+    const level = valueInput(t.value, () => save());
+    const save = () => {
+      const v = level.get();
+      if (v != null) s.update(a.id, { target: { ...t, value: v } });
+    };
+    level.box.onchange = save;
+    row.append(lbl(lineName(t.spec, t.line)), level.box);
+  }
   const d = s.drawingOf(a);
-  const conds = condsFor(a.target.kind === "price" ? "price" : d?.kind ?? "hline");
+  const conds = condsFor(t.kind === "drawing" ? d?.kind ?? "hline" : t.kind);
   if (conds.length > 1) row.append(condSelect(conds, a.cond, (v) => s.update(a.id, { cond: v })));
-  if (!oneShot(a.cond)) row.append(repeatSelect(a.repeat, (v) => s.update(a.id, { repeat: v })));
+  // an indicator alert's when and how often get a row of their own: one row would not fit the panel
+  const when = t.kind === "indicator" ? el("div", "pop-row") : row;
+  if (t.kind === "indicator") when.append(triggerSelect(!!a.close, (v) => s.update(a.id, { close: v })));
+  if (!oneShot(a.cond)) when.append(repeatSelect(a.repeat, (v) => s.update(a.id, { repeat: v })));
   const row2 = el("div", "pop-row");
   row2.append(noteInput(a.note, (v) => s.update(a.id, { note: v })), textButton("完成", "text-btn", done));
-  box.append(row, row2);
+  box.append(...(when === row ? [row, row2] : [row, when, row2]));
   return box;
 }
 
@@ -357,3 +372,184 @@ export function renderAlertOptions(service: AlertService): Render {
   };
 }
 
+
+// ----------------------------------------------------------------------------- indicator alerts
+/** An indicator an alert can be made on, as set on the chart now, and the timeframe it runs on. */
+export type IndSource = { spec: IndSpec; tf: string };
+/** Where a new indicator alert starts: which line, and the number it is compared with. */
+export type IndPreset = { line?: string; value?: number };
+
+const triggerSelect = (close: boolean, onChange: (close: boolean) => void) =>
+  select<"live" | "close">(["live", "close"], { live: "即時", close: "K 線收盤" }, close ? "close" : "live", (v) => onChange(v === "close"),
+    "即時：K 線走動中就判斷。收盤：等 K 線收完才算");
+
+/** A number box for an indicator's value (any sign: MACD goes below 0). */
+function valueInput(value: number | null, onEnter?: () => void): { box: HTMLInputElement; get: () => number | null } {
+  const box = el("input");
+  box.type = "number";
+  box.step = "any";
+  box.className = "alert-price";
+  if (value != null) box.value = String(value);
+  box.onkeydown = (e) => {
+    if (e.key === "Enter") onEnter?.();
+  };
+  return {
+    box,
+    get: () => {
+      const v = Number(box.value);
+      if (box.value.trim() === "" || !Number.isFinite(v)) {
+        flagBad(box);
+        return null;
+      }
+      return v;
+    },
+  };
+}
+
+/** A value picked on the chart, as a number someone would type: RSI and KD to 0.1, others to 4 digits. */
+export function roundValue(type: IndType, v: number): number {
+  return type === "rsi" || type === "kd" ? Math.round(v * 10) / 10 : Number(fmtSig(v).replace(/,/g, ""));
+}
+
+const sourceName = (c: IndSource, bar: string) => specName(c.spec) + (c.tf !== bar ? ` ${tfLabel(c.tf)}` : "");
+
+/**
+ * The rows of a new indicator alert, filled into `body`: which indicator (when there are several, like moving
+ * averages), which line, the condition, what it is compared with (a number or another of its lines; lines on the
+ * prices with the price), when it counts, repeat and note. `made` runs once it is made.
+ */
+function indicatorForm(body: HTMLElement, ui: AlertUi, choices: IndSource[], preset: IndPreset, made: () => void, focus: boolean) {
+  let pick = 0;
+  let line = preset.line && LINES[choices[0].spec.type].some((l) => l.key === preset.line) ? preset.line : LINES[choices[0].spec.type][0].key;
+  let cond: AlertCond = "up";
+  let other = ""; // "": a number
+  let close = false;
+  let repeat: Repeat = "once";
+  let value: number | null = preset.value ?? null;
+  const note = noteInput("", () => {});
+  const msg = el("div", "pop-msg");
+  const box = el("div");
+  const draw = () => {
+    box.replaceChildren();
+    const src = choices[pick];
+    const type = src.spec.type;
+    const lines = LINES[type];
+    if (choices.length > 1) {
+      const r = el("div", "pop-row");
+      const sel = el("select");
+      choices.forEach((c, k) => sel.append(new Option(sourceName(c, ui.bar()), String(k), false, k === pick)));
+      sel.onchange = () => {
+        pick = Number(sel.value);
+        draw();
+      };
+      r.append(lbl("指標"), sel);
+      box.append(r);
+    }
+    const lineSelect = () => {
+      const sel = el("select");
+      for (const l of lines) sel.append(new Option(lineName(src.spec, l.key), l.key, false, l.key === line));
+      sel.onchange = () => {
+        line = sel.value;
+        if (other === line) other = "";
+        draw();
+      };
+      return sel;
+    };
+    const r1 = el("div", "pop-row");
+    const conds = condSelect(condsFor("indicator"), cond, (v) => (cond = v));
+    let level: { box: HTMLInputElement; get: () => number | null } | null = null;
+    if (onPrices(type)) {
+      // the price against one of its lines
+      r1.append(lbl("價格"), conds, lines.length > 1 ? lineSelect() : lbl(lineName(src.spec, line)));
+    } else {
+      if (lines.length > 1) r1.append(lineSelect());
+      else r1.append(lbl(lineName(src.spec, line)));
+      r1.append(conds);
+      const others = lines.filter((l) => l.key !== line);
+      if (others.length) {
+        const vs = el("select");
+        vs.title = "比一個數值，或比它的另一條線，例如 MACD 和訊號線";
+        vs.append(new Option("數值", "", false, other === ""));
+        for (const l of others) vs.append(new Option(lineName(src.spec, l.key), l.key, false, l.key === other));
+        vs.onchange = () => {
+          other = vs.value;
+          draw();
+        };
+        r1.append(vs);
+      }
+      if (!other) {
+        level = valueInput(value, () => make());
+        level.box.oninput = () => (value = Number(level!.box.value));
+        r1.append(level.box);
+      }
+    }
+    const r2 = el("div", "pop-row");
+    r2.append(triggerSelect(close, (v) => (close = v)), repeatSelect(repeat, (v) => (repeat = v)));
+    box.append(r1, r2);
+    if (level && focus) requestAnimationFrame(() => level!.box.focus());
+    make = () => {
+      const target: IndTarget = { kind: "indicator", spec: src.spec, line };
+      if (!onPrices(type)) {
+        if (other) target.other = other;
+        else {
+          const v = level?.get() ?? null;
+          if (v == null) return;
+          target.value = v;
+        }
+      }
+      const r = ui.service.add({ instId: ui.instId(), target, cond, repeat, tf: src.tf, note: note.value.trim(), close });
+      if (typeof r === "string") msg.textContent = r;
+      else made();
+    };
+  };
+  let make = () => {};
+  draw();
+  const r3 = el("div", "pop-row");
+  r3.append(note, textButton("建立", "text-btn", () => make()));
+  body.append(box, r3, msg);
+}
+
+/** A new indicator alert for the symbol on screen, next to `anchor` (a legend's bell) or at a point (a right-click
+ *  in the indicator's pane, Alt+A over it). */
+export function indicatorAlertDialog(at: HTMLElement | { x: number; y: number }, ui: AlertUi, choices: IndSource[], preset: IndPreset = {}) {
+  if (!choices.length) return;
+  const title = `新增指標提醒：${shortName(ui.instId())}`;
+  const render: Render = (body) => {
+    body.classList.add("alert-pop");
+    indicatorForm(body, ui, choices, preset, () => closePopover(), true);
+  };
+  if (at instanceof HTMLElement) togglePopover(at, "below", title, render);
+  else popoverAt(at.x, at.y, title, render);
+}
+
+/** The 提醒 section of an indicator's settings: its alerts on the symbol on screen, and a new one. */
+export function indicatorAlertSection(ui: AlertUi, type: IndType, choices: () => IndSource[], preset: () => IndPreset): Render {
+  return (body, rerender) => {
+    const s = ui.service;
+    const inst = ui.instId();
+    body.append(el("div", "pop-section", `提醒：${shortName(inst)}`));
+    const mine = s.forSymbol(inst).filter((a) => a.target.kind === "indicator" && a.target.spec.type === type);
+    for (const a of mine) {
+      const row = el("div", "alert-row" + (a.on ? "" : " off"));
+      row.append(
+        checkbox(a.on, a.on ? "開著：按一下暫停" : "關著：按一下重新開啟", (v) => {
+          s.update(a.id, { on: v });
+          rerender();
+        }),
+        el("span", "alert-label", s.label(a) + (a.note ? `　${a.note}` : "")),
+        el("span", "alert-status", status(a, ui.fmtClock)),
+        textButton("×", "pop-del", () => {
+          s.remove(a.id);
+          rerender();
+        }, "刪除這個提醒"),
+      );
+      body.append(row);
+    }
+    const list = choices();
+    if (!list.length) {
+      body.append(el("div", "pop-note", "先打開這個指標，才能設提醒"));
+      return;
+    }
+    indicatorForm(body, ui, list, preset(), rerender, false);
+  };
+}

@@ -43,6 +43,8 @@ export type OverlayHost = {
   settings: () => OverlaySettings;
   /** Values changed outside a live tick (bars arrived, settings changed): refresh the legend. */
   changed: () => void;
+  /** After every refresh (`full`: not just a live tick): the other indicators, on the same bars. */
+  refreshed?: (full: boolean) => void;
   /** Room for the labels on the chart, and their size in px. */
   space: LabelSpace;
   textSize: () => number;
@@ -150,6 +152,7 @@ export class Overlays {
     if (this.dead) return;
     this.refreshLines(full);
     this.refreshZones();
+    this.h.refreshed?.(full);
     if (full) this.h.changed();
   }
 

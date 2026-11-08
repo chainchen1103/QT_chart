@@ -13,7 +13,9 @@ import {
 } from "../drawings/geometry.ts";
 import type { ChannelDrawing, Drawing, DrawKind, FibSettings } from "../settings/model.ts";
 import { tfSec } from "../core/timeframes.ts";
-import { oneShot, REARM_SEC, type Alert, type AlertCond, type BoxCond, type LevelCond, type TradeStage } from "./model.ts";
+import { oneShot, REARM_SEC, type Alert, type AlertCond, type BoxCond, type IndTarget, type LevelCond, type TradeStage } from "./model.ts";
+import { onPrices } from "../indicators/specs.ts";
+import type { Num } from "../indicators/osc.ts";
 
 export type Snapshot = { time: number; high: number; low: number; close: number };
 /** The range the price covered since the previous snapshot; `from` is null the first time (no side known). */
@@ -125,6 +127,7 @@ export function targetShape(
   a: Alert, find: (id: string) => Drawing | undefined, now: number, fib: FibSettings, name: (k: DrawKind) => string,
 ): Shape | null | "gone" {
   if (a.target.kind === "price") return { type: "levels", levels: [{ name: "", price: a.target.price }] };
+  if (a.target.kind === "indicator") return null; // its line's values come from the bars: see indicatorStep
   const d = find(a.target.id);
   return d ? shapeAt(d, now, a.tf, fib, name, a.cond) : "gone";
 }
@@ -134,7 +137,8 @@ export type AlertEvent =
   | { type: "box"; cond: BoxCond; top: number; bottom: number; name?: string }
   | { type: "time"; t: number }
   | { type: "entry"; price: number }
-  | { type: "exit"; how: "stop" | "target"; price: number; r: number };
+  | { type: "exit"; how: "stop" | "target"; price: number; r: number }
+  | { type: "ind"; text: string };
 
 export type Outcome = { events: AlertEvent[]; stage?: TradeStage };
 const NONE: Outcome = { events: [] };
@@ -215,5 +219,55 @@ export function describe(e: AlertEvent, fmt: (p: number) => string, fmtTime: (t:
       return `倉位進場（${fmt(e.price)}）`;
     case "exit":
       return e.how === "stop" ? `倉位止損（${fmt(e.price)}，−1R）` : `倉位止盈（${fmt(e.price)}，+${e.r.toFixed(2)}R）`;
+    case "ind":
+      return e.text;
   }
+}
+
+// ----------------------------------------------------------------------------- indicator lines
+/**
+ * What an indicator alert watches on each bar: its line minus what it is compared with (the number, its other
+ * line, or for a line on the prices the close minus the line), so the line crosses that where this crosses 0.
+ */
+export function signalOf(t: IndTarget, lines: Record<string, Num[]>, closes: readonly number[]): Num[] {
+  const own = lines[t.line] ?? [];
+  if (t.value != null) {
+    const v = t.value;
+    return own.map((x) => (x == null ? null : x - v));
+  }
+  if (t.other) {
+    const o = lines[t.other] ?? [];
+    return own.map((x, i) => (x == null || o[i] == null ? null : x - o[i]!));
+  }
+  return own.map((x, i) => (x == null ? null : closes[i] - x));
+}
+
+/** Went from `from` to `to` across 0 in the way the condition asks (touch: either way, or onto it). */
+export function crossed(cond: LevelCond, from: Num, to: Num): boolean {
+  if (from == null || to == null) return false;
+  return levelHit(0, cond, { from, lo: Math.min(from, to), hi: Math.max(from, to), price: to });
+}
+
+/**
+ * One indicator alert on one update of its bars. `sig` is signalOf on the bars (the last one still forming),
+ * `line` its line's values, `newBar` true when a bar of its timeframe just closed, `prev` the signal it saw last
+ * time (undefined: none yet, so it only looks: a cross from before the alert was made, or before the app opened,
+ * never sets it off, as with a price alert), `m` the price's move (lines on the prices are crossed as
+ * the price moves, with its highs and lows in between, like a price alert). With `close` only a bar that closed
+ * counts, against the one before it. Returns whether it goes off, and the signal to remember.
+ */
+export function indicatorStep(
+  a: Alert, t: IndTarget, sig: readonly Num[], line: readonly Num[], newBar: boolean, prev: Num | undefined, m: Move | null, now: number,
+): { hit: boolean; next: Num } {
+  const n = sig.length;
+  const to = n ? sig[n - 1] : null;
+  const cond = a.cond;
+  if (!a.on || (cond !== "touch" && cond !== "up" && cond !== "down")) return { hit: false, next: to };
+  if (a.repeat === "every" && a.fired != null && now - a.fired < REARM_SEC) return { hit: false, next: to };
+  if (a.close) return { hit: newBar && n >= 3 && crossed(cond, sig[n - 3], sig[n - 2]), next: to };
+  if (onPrices(t.spec.type)) {
+    const v = n ? line[n - 1] : null;
+    return { hit: v != null && m != null && levelHit(v, cond, m), next: to };
+  }
+  return { hit: prev !== undefined && crossed(cond, prev, to), next: to };
 }

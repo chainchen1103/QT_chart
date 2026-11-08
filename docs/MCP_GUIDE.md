@@ -278,7 +278,9 @@ args = ["--mcp-stdio"]
   - `chart` · integer · 選填：哪個圖表
   - `trades` · integer · 選填：每個策略列幾筆交易，0 到 200，預設 10
   - 回傳：
+    - `switches`：指標選單裡每個指標開著沒有
     - `movingAverages`：每條均線的最新值
+    - `indicators`：開著的布林通道、RSI、MACD、KD、ATR，各有 `spec` 參數、`timeframe`、`state` 和 `values` 每條線的最新值。`state` 是 `ok`、`loading`、`error`，或 `lower` 表示指定的週期比圖表小，不顯示
     - `zones`：`fvg`、`order_block`、`support_resistance`，`endedAt` 為 null 表示還有效
     - `pine`：每個腳本的 `plots`、`horizontalLines`、`tables`、`labels`、`error`，策略另有 `strategy` 績效
 
@@ -286,6 +288,7 @@ args = ["--mcp-stdio"]
   - 唯讀
   - `symbol` · string · 選填：只列這個幣種
   - `log` · boolean · 選填：附上最近響過的紀錄
+  - 每個提醒有 `label`，例如 `RSI 14 1時 · 向上突破 70`。指標提醒的 `target` 是 `indicator` 參數和 `line`，加上 `value` 或 `otherLine`，均線和布林通道是 `comparedWith: "price"`。收盤才判斷的有 `onBarClose: true`
 
 - **get_account**：OKX 帳戶
   - 唯讀，沒有參數
@@ -385,12 +388,18 @@ args = ["--mcp-stdio"]
 - **save_alert**：新增或修改提醒
   - `price` · number · 選填：價格提醒的價位
   - `drawing_id` · string · 選填：畫線提醒。一個畫線只有一個提醒，新的取代舊的
+  - `indicator` · string · 選填：指標提醒，`rsi`、`macd`、`kd`、`atr`、`boll`、`ma`，用指標現在的參數，指標不用開著
+  - `ma_id` · string · 選填：`ma` 用哪一條均線，預設第一條開著的
+  - `line` · string · 選填：指標的哪條線，預設主線。RSI 是 `rsi`，MACD 是 `macd`、`signal`、`hist`，KD 是 `k`、`d`，ATR 是 `atr`，布林通道是 `upper`、`basis`、`lower`，均線是 `ma`
+  - `value` · number · 選填：RSI、MACD、KD、ATR 的線要穿過的數值，例如 80。修改時也能改
+  - `other_line` · string · 選填：改成穿過同一個指標的另一條線，例如 `signal`、`d`
+  - `on_bar_close` · boolean · 選填：指標提醒只在 K 線收盤時判斷
   - `id` · string · 選填：修改這個提醒
   - `condition` · string · 選填：`touch`、`up`、`down`、`enter`、`exit`、`time`、`trade`，見下表
   - `repeat` · string · 選填：`once` 響一次就關，`every` 一直開著，最多每分鐘一次
   - `note` · string · 選填：附註，最多 120 字
   - `on` · boolean · 選填：開或關
-  - `timeframe` · string · 選填：斜線用哪個週期的 K 線時間取價
+  - `timeframe` · string · 選填：斜線用哪個週期的 K 線時間取價。指標提醒是指標用哪個週期算，預設指標自己設的週期，沒設就用圖表的
   - `symbol` · string · 選填：幣種
 
   | 對象 | 條件 |
@@ -400,6 +409,9 @@ args = ["--mcp-stdio"]
   | 通道 | `exit`、`enter`、`touch`、`up`、`down` |
   | 垂直線 | `time` |
   | 倉位 | `trade`：進場時響，之後止盈或止損再響 |
+  | 指標 | `touch` 觸及、`up` 向上突破、`down` 向下跌破，預設 `up` |
+
+  RSI、MACD、KD、ATR 要給 `value` 或 `other_line` 其中一個。均線和布林通道比的是價格，兩個都不能給。指標提醒只看建立之後的變化，建立前已經發生的交叉不會響。
 
 - **delete_alert**：刪提醒
   - `id` · string · 必填
@@ -416,8 +428,9 @@ args = ["--mcp-stdio"]
   - `id` · string · 必填
 
 - **update_settings**：改設定。只送要改的區塊和欄位，格式同 `get_settings`
-  - 區塊：`appearance`、`labels`、`timeframes`、`bars`、`fib`、`magnet`、`position`、`indicatorSwitches`、`movingAverages`、`maOptions`、`fvg`、`orderBlocks`、`supportResistance`、`alertOptions`、`okxSync`
+  - 區塊：`appearance`、`labels`、`timeframes`、`bars`、`fib`、`magnet`、`position`、`indicatorSwitches`、`indicators`、`movingAverages`、`maOptions`、`fvg`、`orderBlocks`、`supportResistance`、`alertOptions`、`okxSync`
   - 物件只改有給的欄位。清單整份取代：`movingAverages`、`fvg`、`orderBlocks`、`supportResistance`、`fib.levels`、`position.levels`、`timeframes.bar`
+  - `indicatorSwitches` 是均線、FVG、OB、支撐阻力的開關。`indicators` 是布林通道、RSI、MACD、KD、ATR，開關是各自的 `on`，例如 `{"indicators": {"rsi": {"on": true, "upper": 80, "lower": 20}}}`，每個指標只改有給的欄位，`tf` 給空字串就跟著圖表週期
   - 不合法的值會被改回去，列在回傳的 `notTaken`
   - `position` 只能改外觀：`levels`、`profit`、`loss`、`transparency`、`showPrices`、`infoHover`、`showClosed`，最後一項就是顯示歷史倉位。資金、風險、槓桿預設值決定哪些單要確認，只能由使用者改
   - 鎖定畫線不在設定裡，AI 不能開關
@@ -505,7 +518,7 @@ AI 下單時一定要遵守：
 
 1. `get_app_state`
 2. `get_candles` 取兩三個週期，例如 `1D`、`4H`、`1H`
-3. `get_indicators` 看均線、支撐阻力、FVG
+3. `get_indicators` 看均線、RSI、MACD、支撐阻力、FVG
 4. 需要時 `get_chart_image` 看圖形
 5. `add_drawing` 畫出關鍵價位，用顏色區分支撐和阻力
 
@@ -535,6 +548,12 @@ AI 下單時一定要遵守：
 - 移到成本：`move_stops` 的 `stop_loss` 設成進場價。
 - 不要了的掛單：`cancel_order`。
 - 價位提醒：`save_alert`。
+- 指標提醒，例如 1 小時 RSI 向上突破 80：
+
+```json
+{"name": "save_alert", "arguments": {"symbol": "ETH", "indicator": "rsi", "value": 80, "condition": "up", "timeframe": "1H"}}
+{"name": "save_alert", "arguments": {"symbol": "ETH", "indicator": "macd", "other_line": "signal", "condition": "up", "on_bar_close": true}}
+```
 
 **K 線重播**
 

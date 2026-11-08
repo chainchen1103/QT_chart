@@ -3,7 +3,9 @@
 
 import { shortName } from "../core/format.ts";
 import { checkPrices } from "../drawings/trade.ts";
-import { condsFor, type AlertCond, type Repeat } from "../alerts/model.ts";
+import { condsFor, type AlertCond, type IndTarget, type Repeat } from "../alerts/model.ts";
+import { LINES, maSpec, onPrices, specFor, specName, type IndSpec } from "../indicators/specs.ts";
+import { cleanInds } from "../settings/indicators.ts";
 import { LAYOUT_IDS, LAYOUTS, MAX_TABS, type LayoutId } from "../layout/model.ts";
 import { load } from "../pine/index.ts";
 import { SPEEDS } from "../chart/replay.ts";
@@ -342,7 +344,7 @@ export function writeTools(app: McpApp): Tool[] {
       name: "save_alert",
       title: "Add or change an alert",
       description:
-        "A new alert (with price, or drawing_id: a drawing has at most one alert, a new one replaces it), or changes to one (with id). Conditions: a price or a line: touch, up (crosses up), down (crosses down); rectangles: enter, exit; channels: exit, enter, touch, up, down; vertical lines: time; positions: trade (entry, then stop-loss or take-profit). Alerts sound in QT Chart and show a Windows notification.",
+        "A new alert (with price, drawing_id, or indicator: a drawing has at most one alert, a new one replaces it), or changes to one (with id). Conditions: a price or a line: touch, up (crosses up), down (crosses down); rectangles: enter, exit; channels: exit, enter, touch, up, down; vertical lines: time; positions: trade (entry, then stop-loss or take-profit); indicators: touch, up, down. An indicator alert uses the indicator as set now (get_settings indicators, movingAverages) on its own timeframe: RSI, MACD, KD and ATR lines cross a value (RSI 80) or another of their lines (MACD and its signal line, K and D); a moving average or Bollinger band is crossed by the price. Only crossings after the alert is made count. Alerts sound in QT Chart and show a Windows notification.",
       level: "write",
       input: {
         type: "object",
@@ -351,11 +353,17 @@ export function writeTools(app: McpApp): Tool[] {
           symbol: SYMBOL,
           price: S.num("A price alert at this price."),
           drawing_id: S.str("An alert on this drawing (list_drawings)."),
+          indicator: S.oneOf(["rsi", "macd", "kd", "atr", "boll", "ma"], "An alert on this indicator's line, with its numbers as set now (it doesn't have to be on)."),
+          ma_id: S.str("indicator ma: which moving average (get_settings movingAverages; default: the first one on)."),
+          line: S.str("The indicator's line (default its main one): rsi; macd, signal, hist; k, d; atr; upper, basis, lower; ma."),
+          value: S.num("RSI, MACD, KD, ATR: the value its line crosses, such as 80. Changes it on an existing indicator alert."),
+          other_line: S.str("RSI, MACD, KD, ATR: another of its lines to cross instead of a value, such as signal or d."),
+          on_bar_close: S.bool("Indicator alerts: only when a bar of its timeframe closes, not while it is still moving."),
           condition: S.oneOf(["touch", "up", "down", "enter", "exit", "time", "trade"], "When it goes off (default: the first that fits)."),
           repeat: S.oneOf(["once", "every"], "once: switch off after going off; every: stay on, at most once a minute."),
           note: S.str("A note shown with it (up to 120 characters)."),
           on: S.bool("Switch it on or off."),
-          timeframe: { ...TIMEFRAME, description: "For sloped lines: read the line at this timeframe's bar start. Default: a chart's timeframe." },
+          timeframe: { ...TIMEFRAME, description: "Sloped lines: read the line at this timeframe's bar start. Indicators: the timeframe it runs on. Default: the indicator's own timeframe, else a chart's." },
         },
       },
       annotations: EDIT,
@@ -628,8 +636,13 @@ function saveAlert(app: McpApp, a: Args, c: CallCtx): ToolResult {
     const al = app.alerts.all().find((x) => x.id === id);
     if (!al) throw new ArgError(`No alert ${id}`);
     const price = num(a, "price", { optional: true, min: 0 });
-    if (price != null && al.target.kind !== "price") throw new ArgError("That alert is on a drawing: move the drawing instead");
-    const kind = al.target.kind === "price" ? "price" : app.alerts.drawingOf(al)?.kind;
+    if (price != null && al.target.kind !== "price") throw new ArgError("That alert is not on a price");
+    const t = al.target;
+    const value = num(a, "value", { optional: true });
+    if (value != null && !(t.kind === "indicator" && t.value != null)) throw new ArgError("Only an indicator alert on a value takes value");
+    const close = bool(a, "on_bar_close");
+    if (close != null && t.kind !== "indicator") throw new ArgError("Only indicator alerts take on_bar_close");
+    const kind = t.kind === "drawing" ? app.alerts.drawingOf(al)?.kind : t.kind;
     if (cond && kind && !condsFor(kind).includes(cond)) throw new ArgError(`That alert can use: ${condsFor(kind).join(", ")}`);
     app.alerts.update(id, {
       ...(cond ? { cond } : {}),
@@ -637,14 +650,17 @@ function saveAlert(app: McpApp, a: Args, c: CallCtx): ToolResult {
       ...(note != null ? { note } : {}),
       ...(on != null ? { on } : {}),
       ...(price != null ? { target: { kind: "price" as const, price } } : {}),
+      ...(value != null && t.kind === "indicator" ? { target: { ...t, value } } : {}),
+      ...(close != null ? { close } : {}),
     });
     app.note(`${who(c)} 改了 ${shortName(al.instId)} 的提醒`);
     return data({ alert: app.alerts.all().find((x) => x.id === id) });
   }
   const instId = symbolArg(app, a);
+  if (a.indicator != null) return saveIndicatorAlert(app, a, c, instId, cond, repeat, note, on);
   const price = num(a, "price", { optional: true, min: 0 });
   const drawingId = str(a, "drawing_id", { optional: true, max: 80 });
-  if ((price == null) === (drawingId == null)) throw new ArgError("Give price, or drawing_id");
+  if ((price == null) === (drawingId == null)) throw new ArgError("Give price, drawing_id or indicator");
   let kind: "price" | DrawKind = "price";
   if (drawingId) kind = findDrawing(loadDrawings(instId), drawingId, instId).kind;
   if (price != null && !(price > 0)) throw new ArgError("price must be above 0");
@@ -664,6 +680,58 @@ function saveAlert(app: McpApp, a: Args, c: CallCtx): ToolResult {
   if (on === false) app.alerts.update(r.id, { on: false });
   app.note(`${who(c)} 在 ${shortName(instId)} 設了提醒`);
   return data({ alert: r });
+}
+
+/** A new alert on an indicator's line, with the indicator's numbers as set now. */
+function saveIndicatorAlert(
+  app: McpApp, a: Args, c: CallCtx, instId: string, cond: AlertCond | undefined, repeat: string | undefined, note: string | undefined, on: boolean | undefined,
+): ToolResult {
+  const type = oneOf(a, "indicator", ["rsi", "macd", "kd", "atr", "boll", "ma"] as const);
+  const chartBar = chartsOf(app, instId)[0]?.feed.bar ?? app.workspace.inUse().feed.bar;
+  let spec: IndSpec;
+  let ownTf: string;
+  if (type === "ma") {
+    const mas = app.settings.mas.get();
+    const maId = str(a, "ma_id", { optional: true, max: 80 });
+    const m = maId ? mas.find((x) => x.id === maId) : mas.find((x) => x.on);
+    if (!m) throw new ArgError(maId ? `No moving average ${maId} (get_settings movingAverages)` : "No moving average is on: give ma_id");
+    spec = maSpec(m);
+    ownTf = m.tf;
+  } else {
+    const inds = app.settings.inds.get();
+    spec = specFor(type, inds);
+    ownTf = inds[type].tf;
+  }
+  const lines = LINES[spec.type].map((l) => l.key);
+  const line = str(a, "line", { optional: true, max: 20 }) ?? lines[0];
+  if (!lines.includes(line)) throw new ArgError(`${type} lines: ${lines.join(", ")}`);
+  const value = num(a, "value", { optional: true });
+  const other = str(a, "other_line", { optional: true, max: 20 });
+  const target: IndTarget = { kind: "indicator", spec, line };
+  if (onPrices(spec.type)) {
+    if (value != null || other != null) throw new ArgError("A moving average or a Bollinger band is crossed by the price: no value or other_line");
+  } else if ((value == null) === (other == null)) {
+    throw new ArgError("Give value (the value its line crosses) or other_line (another of its lines)");
+  } else if (value != null) target.value = value;
+  else {
+    if (!lines.includes(other!) || other === line) throw new ArgError(`other_line: another of ${lines.join(", ")}`);
+    target.other = other!;
+  }
+  const chosen: AlertCond = cond ?? "up";
+  if (!condsFor("indicator").includes(chosen)) throw new ArgError(`An indicator alert can use: ${condsFor("indicator").join(", ")}`);
+  const r = app.alerts.add({
+    instId,
+    target,
+    cond: chosen,
+    repeat: (repeat ?? "once") as Repeat,
+    tf: tfArg(a) ?? (ownTf || chartBar),
+    note: note ?? "",
+    close: bool(a, "on_bar_close") === true,
+  });
+  if (typeof r === "string") throw new ArgError(r);
+  if (on === false) app.alerts.update(r.id, { on: false });
+  app.note(`${who(c)} 在 ${shortName(instId)} 設了 ${specName(spec)} 提醒`);
+  return data({ alert: r, label: app.alerts.label(r) });
 }
 
 // ----------------------------------------------------------------------------- Pine
@@ -752,7 +820,23 @@ const SECTIONS: Record<string, Section> = {
       app.settings.position.set(cleanPosition(merged(app.settings.position.get(), v, "position")));
     },
   },
-  indicatorSwitches: { about: "{ma, fvg, ob, sr}: the toolbar switches", apply: (app, v) => app.settings.groups.set(cleanGroups(merged(app.settings.groups.get(), v, "indicatorSwitches"))) },
+  indicatorSwitches: { about: "{ma, fvg, ob, sr}: switches in the 指標 menu (the other indicators' are their own `on`, in indicators)", apply: (app, v) => app.settings.groups.set(cleanGroups(merged(app.settings.groups.get(), v, "indicatorSwitches"))) },
+  indicators: {
+    about:
+      "Bollinger Bands, RSI, MACD, KD and ATR, each merged field by field: {boll: {on, tf, length 1-500, mult 0.1-10, color, fill}, rsi: {on, tf, length, color, upper 0-100, lower 0-100}, macd: {on, tf, fast, slow, signal, macdColor, signalColor, up, down}, kd: {on, tf, length, smoothK 1-50, smoothD 1-50, kColor, dColor, upper, lower}, atr: {on, tf, length, color}}. tf '' = the chart's timeframe; colors #rrggbb. RSI, MACD, KD and ATR each get a pane of their own.",
+    apply: (app, v) => {
+      if (!isObj(v)) throw new ArgError("indicators must be an object");
+      const cur = app.settings.inds.get();
+      const next: Record<string, unknown> = { ...cur };
+      for (const k of Object.keys(v)) {
+        if (!(k in cur)) throw new ArgError(`indicators.${k}: one of ${Object.keys(cur).join(", ")}`);
+        const part = merged(cur[k as keyof typeof cur], v[k], `indicators.${k}`);
+        if (part.tf != null) part.tf = tfName(part.tf, `indicators.${k}.tf`);
+        next[k] = part;
+      }
+      app.settings.inds.set(cleanInds(next));
+    },
+  },
   movingAverages: { list: true, about: "The whole list, up to 10: [{id (keep it to change one), kind SMA|EMA|WMA, length 1-1000, color, on, tf ('' = the chart's timeframe)}]", apply: (app, v) => app.settings.mas.set(cleanMas(colored(withTf(list(v, "movingAverages"), "movingAverages"))) ?? []) },
   maOptions: { about: "{waitClose: higher-timeframe averages move only when their bar closes}", apply: (app, v) => app.settings.maOptions.set(cleanMaOptions(merged(app.settings.maOptions.get(), v, "maOptions"))) },
   fvg: { list: true, about: "Fair value gap sets, the whole list, up to 4: [{id, on, tf, body, minPct 0-10, maxCount 1-50, showEnded, up, down}]", apply: (app, v) => app.settings.fvgs.set(cleanFvgs(withTf(list(v, "fvg"), "fvg")) ?? []) },
@@ -767,7 +851,7 @@ function current(app: McpApp, key: string): unknown {
   const s = app.settings;
   const map: Record<string, () => unknown> = {
     appearance: () => s.appearance.get(), labels: () => s.labels.get(), timeframes: () => s.timeframes.get(), bars: () => s.bars.get(), fib: () => s.fib.get(),
-    magnet: () => s.magnet.get(), position: () => s.position.get(), indicatorSwitches: () => s.groups.get(), movingAverages: () => s.mas.get(),
+    magnet: () => s.magnet.get(), position: () => s.position.get(), indicatorSwitches: () => s.groups.get(), indicators: () => s.inds.get(), movingAverages: () => s.mas.get(),
     maOptions: () => s.maOptions.get(), fvg: () => s.fvgs.get(), orderBlocks: () => s.obs.get(), supportResistance: () => s.srs.get(),
     alertOptions: () => app.alerts.options(), okxSync: () => s.okxSync.get(),
   };
@@ -785,7 +869,14 @@ function updateSettings(app: McpApp, a: Args, c: CallCtx): ToolResult {
     const want = a[k];
     const now = current(app, k) as Record<string, unknown> | unknown[];
     if (isObj(want) && isObj(now)) {
-      for (const f of Object.keys(want)) if (JSON.stringify(want[f]) !== JSON.stringify(now[f]) && !Array.isArray(want[f])) notTaken.push(`${k}.${f}`);
+      for (const f of Object.keys(want)) {
+        const w = want[f];
+        const n = now[f];
+        if (isObj(w) && isObj(n)) {
+          // a section of sections (indicators): the fields given
+          for (const g of Object.keys(w)) if (JSON.stringify(w[g]) !== JSON.stringify(n[g]) && !Array.isArray(w[g])) notTaken.push(`${k}.${f}.${g}`);
+        } else if (JSON.stringify(w) !== JSON.stringify(n) && !Array.isArray(w)) notTaken.push(`${k}.${f}`);
+      }
     } else if (Array.isArray(want) && Array.isArray(now) && want.length !== now.length) notTaken.push(`${k}: ${want.length - now.length} entries were not valid`);
   }
   app.note(`${who(c)} 改了設定：${keys.join("、")}`);

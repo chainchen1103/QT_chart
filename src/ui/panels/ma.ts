@@ -15,7 +15,7 @@ import {
   type MaOptions,
 } from "../../settings/model.ts";
 import { checkbox, colorInput, el, labelled, lbl, numInput, textButton } from "../dom.ts";
-import { togglePopover } from "../popover.ts";
+import { togglePopover, type Render } from "../popover.ts";
 import { tfSelect } from "./controls.ts";
 
 export function toggleMaPanel(
@@ -23,6 +23,8 @@ export function toggleMaPanel(
   mas: { get: () => MaConf[]; set: (v: MaConf[]) => void },
   opts: { get: () => MaOptions; set: (v: MaOptions) => void },
   chartBar: () => string,
+  /** More at the end (the alerts on the moving averages). */
+  extra?: Render,
 ) {
   const patch = (id: string, p: Partial<MaConf>) => mas.set(mas.get().map((m) => (m.id === id ? { ...m, ...p } : m)));
   togglePopover(anchor, "below", "均線", (body, rerender) => {
@@ -71,5 +73,6 @@ export function toggleMaPanel(
       rerender();
     }));
     body.append(foot);
+    extra?.(body, rerender);
   });
 }

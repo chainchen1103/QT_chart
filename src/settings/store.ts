@@ -4,6 +4,7 @@
 import { setting } from "../core/setting.ts";
 import { cleanOrderPrefs } from "../trade/model.ts";
 import { cleanMcp } from "../mcp/model.ts";
+import { cleanInds } from "./indicators.ts";
 import { readJson, readRaw, writeJson, writeRaw } from "../core/storage.ts";
 import {
   clone,
@@ -41,6 +42,8 @@ export function loadSettings() {
     fvgs: setting("fvgs", (r) => cleanFvgs(r) ?? [clone(DEFAULT_FVG)]),
     obs: setting("obs", (r) => cleanObs(r) ?? [clone(DEFAULT_OB)]),
     srs: setting("srs", (r) => cleanSrs(r) ?? [clone(DEFAULT_SR)]),
+    /** Bollinger Bands, RSI, MACD, KD and ATR: on or off, and their numbers and colors. */
+    inds: setting("inds", cleanInds),
     // first run of the version with switch groups: the old moving-average switch decides the "均線" one
     groups: setting("groups", (r) => (r === undefined ? { ...DEFAULT_GROUPS, ma: readJson("ma") !== 0 } : cleanGroups(r))),
     labels: setting("labels", cleanLabels),

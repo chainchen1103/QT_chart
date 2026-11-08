@@ -9,6 +9,8 @@ import type { MarketFeed } from "../chart/feed.ts";
 import type { ChartView } from "../chart/view.ts";
 import type { Setting } from "../core/setting.ts";
 import type { ScaleLabels } from "../settings/model.ts";
+import type { PaneKind } from "../settings/indicators.ts";
+import { fmtSig } from "../indicators/specs.ts";
 import { isTyping, menuItem } from "./dom.ts";
 import { openScaleMenu } from "./panels/scale.ts";
 import { closePopover, popoverAt } from "./popover.ts";
@@ -23,6 +25,10 @@ export type PaneMenuDeps = {
   appearanceAt(x: number, y: number): void;
   /** Back to the default view: the newest bars at the default zoom, prices fitted; the timeframe stays. */
   resetView(): void;
+  /** The indicator pane at this height of the screen, and its value there. */
+  studyAt(clientY: number): { kind: PaneKind; value: number } | null;
+  /** A new alert on that indicator, at that value, with its window at a screen point. */
+  indicatorAlertAt(kind: PaneKind, value: number, x: number, y: number): void;
 };
 
 /** The menus of one chart. */
@@ -30,6 +36,8 @@ export class PaneMenus {
   private readonly d: PaneMenuDeps;
   /** The crosshair's y in the price pane, while the mouse is over this chart. */
   private crossY: number | null = null;
+  /** The indicator pane the mouse is over, with its value there. */
+  private overStudy: { kind: PaneKind; value: number } | null = null;
   private mouse = { x: 0, y: 0 };
 
   constructor(d: PaneMenuDeps) {
@@ -43,6 +51,20 @@ export class PaneMenus {
       const addAlert = (body: HTMLElement) => {
         if (p != null) body.append(menuItem(`在 ${feed.fmtPrice(p)} 新增提醒`, () => alertDialogAt(cx, cy, d.alerts, p), "Alt+A"));
       };
+      const study = d.studyAt(cy);
+      if (study) {
+        // an indicator's pane: an alert on it, at the value there
+        popoverAt(cx, cy, "圖表", (body) => {
+          const v = study.kind === "rsi" || study.kind === "kd" ? study.value.toFixed(1) : fmtSig(study.value);
+          body.append(menuItem(`在 ${study.kind.toUpperCase()} ${v} 新增提醒`, () => d.indicatorAlertAt(study.kind, study.value, cx, cy), "Alt+A"));
+          const reset = () => {
+            closePopover();
+            d.resetView();
+          };
+          body.append(menuItem("重設圖表視圖", reset, "Alt+R"), menuItem("圖表外觀…", () => d.appearanceAt(cx, cy)));
+        });
+        return;
+      }
       if (x < view.chart.timeScale().width()) {
         popoverAt(cx, cy, "圖表", (body) => {
           addAlert(body);
@@ -59,7 +81,11 @@ export class PaneMenus {
     view.chart.subscribeCrosshairMove((p) => {
       this.crossY = p.point && (p.paneIndex ?? 0) === 0 ? p.point.y : null;
     });
-    el.addEventListener("mousemove", (e) => (this.mouse = { x: e.clientX, y: e.clientY }));
+    el.addEventListener("mousemove", (e) => {
+      this.mouse = { x: e.clientX, y: e.clientY };
+      this.overStudy = d.studyAt(e.clientY);
+    });
+    el.addEventListener("mouseleave", () => (this.overStudy = null));
   }
 
   private priceAt(clientY: number): number | null {
@@ -69,6 +95,11 @@ export class PaneMenus {
 
   /** Alt+A with the crosshair on this chart's prices: a new alert there. False when it isn't on this chart. */
   alertAtCrosshair(): boolean {
+    const st = this.overStudy;
+    if (st) {
+      this.d.indicatorAlertAt(st.kind, st.value, this.mouse.x, this.mouse.y);
+      return true;
+    }
     if (this.crossY == null) return false;
     const p = this.d.view.priceAt(this.crossY);
     if (p == null) return false;
@@ -78,7 +109,7 @@ export class PaneMenus {
 
   /** The mouse is over this chart's prices. */
   hovered(): boolean {
-    return this.crossY != null;
+    return this.crossY != null || this.overStudy != null;
   }
   resetView() {
     this.d.resetView();

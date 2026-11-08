@@ -4,8 +4,13 @@
 // AlertDeps, so this file knows nothing about the chart or the DOM.
 
 import type { Drawing, DrawKind, FibSettings } from "../settings/model.ts";
+import type { Candle } from "../core/api.ts";
 import { shortName } from "../core/format.ts";
-import { describe, evaluate, moveSince, targetShape, tradeSig, type AlertEvent, type Snapshot } from "./engine.ts";
+import { tfLabel } from "../core/timeframes.ts";
+import type { Num } from "../indicators/osc.ts";
+import { computeLines, fmtValue, lineName, LINES, onPrices, sameSpec, specName, warmupOf, type IndSpec } from "../indicators/specs.ts";
+import { AlertBars } from "./bars.ts";
+import { describe, evaluate, indicatorStep, moveSince, signalOf, targetShape, tradeSig, type AlertEvent, type Move, type Snapshot } from "./engine.ts";
 import {
   cleanAlerts,
   cleanLog,
@@ -19,6 +24,7 @@ import {
   type AlertCond,
   type AlertOptions,
   type AlertTarget,
+  type IndTarget,
   type LogEntry,
   type Repeat,
   type TradeStage,
@@ -41,14 +47,28 @@ export type AlertDeps = {
   write(key: string, v: unknown): void;
   /** UTC seconds. */
   now(): number;
+  /** The newest `count` bars of a symbol and timeframe (indicator alerts need their history). */
+  candles(instId: string, bar: string, count: number): Promise<Candle[]>;
 };
 
 export type NewAlert = {
-  instId: string; target: AlertTarget; cond: AlertCond; repeat: Repeat; tf: string; note: string; stage?: TradeStage;
+  instId: string; target: AlertTarget; cond: AlertCond; repeat: Repeat; tf: string; note: string; stage?: TradeStage; close?: boolean;
 };
-export type AlertPatch = Partial<Pick<Alert, "cond" | "repeat" | "note" | "on" | "target">>;
+export type AlertPatch = Partial<Pick<Alert, "cond" | "repeat" | "note" | "on" | "target" | "close">>;
 
 export const STAGE_TEXT: Record<TradeStage, string> = { wait: "等進場", open: "已進場，等出場", done: "已出場" };
+
+/** Words of a phrase, with a space where Latin letters or digits meet Chinese: "K 向上突破 D", "價格觸及 EMA20". */
+function phrase(...parts: string[]): string {
+  const latin = (c: string) => /[A-Za-z0-9]/.test(c);
+  let out = "";
+  for (const p of parts) {
+    if (!p) continue;
+    if (out && latin(out[out.length - 1]) !== latin(p[0])) out += " ";
+    out += p;
+  }
+  return out;
+}
 
 export class AlertService {
   private readonly deps: AlertDeps;
@@ -62,9 +82,13 @@ export class AlertService {
   /** Symbols with an alert on: the only prices that matter. */
   private watched = new Set<string>();
   private watching = "";
+  /** Bars of the timeframes indicator alerts run on, and the value each of them saw last. */
+  private readonly indBars: AlertBars;
+  private readonly indPrev = new Map<string, Num>();
 
   constructor(deps: AlertDeps) {
     this.deps = deps;
+    this.indBars = new AlertBars(deps.candles);
     this.alerts = cleanAlerts(deps.read("alerts"), deps.isTf);
     this.entries = cleanLog(deps.read("alertlog"));
     this.opts = cleanOptions(deps.read("alertopts"));
@@ -95,12 +119,35 @@ export class AlertService {
   log(): readonly LogEntry[] {
     return this.entries;
   }
+  /** Numbers that alerts on this symbol compare an indicator's line with, drawn across its pane: only alerts on
+   * the indicator as drawn there, the same numbers and timeframe (an RSI 1m alert means nothing on a 1H pane). */
+  indicatorLevels(instId: string, spec: IndSpec, tf: string): number[] {
+    const out: number[] = [];
+    for (const a of this.alerts) {
+      const t = a.target;
+      if (a.on && a.instId === instId && a.tf === tf && t.kind === "indicator" && t.value != null && sameSpec(t.spec, spec)) out.push(t.value);
+    }
+    return out;
+  }
+
+  /** "向上突破 80", "MACD 向上突破訊號線", "價格向上突破 EMA20", "價格觸及布林上軌". */
+  private indWhat(a: Alert, t: IndTarget): string {
+    const cond = COND_TEXT[a.cond];
+    const own = LINES[t.spec.type].length > 1 ? lineName(t.spec, t.line) : "";
+    if (onPrices(t.spec.type)) return phrase("價格", cond, lineName(t.spec, t.line));
+    if (t.other) return phrase(own || lineName(t.spec, t.line), cond, lineName(t.spec, t.other));
+    const level = t.value ?? 0;
+    // a level the user typed: as typed (80, not 80.00)
+    const v = t.spec.type === "rsi" || t.spec.type === "kd" ? String(Number(level.toFixed(2))) : fmtValue(t.spec, level, (p) => this.deps.fmtPrice(a.instId, p));
+    return `${own ? own + " " : ""}${cond} ${v}`;
+  }
   options(): AlertOptions {
     return this.opts;
   }
-  /** Short text for a list: "觸及 78,500.0", "趨勢線 · 向上突破", "倉位 · 進場、止盈、止損". */
+  /** Short text for a list: "觸及 78,500.0", "趨勢線 · 向上突破", "倉位 · 進場、止盈、止損", "RSI 14 1時 · 向上突破 80". */
   label(a: Alert): string {
     if (a.target.kind === "price") return `${COND_TEXT[a.cond]} ${this.deps.fmtPrice(a.instId, a.target.price)}`;
+    if (a.target.kind === "indicator") return `${specName(a.target.spec)} ${tfLabel(a.tf)} · ${this.indWhat(a, a.target)}${a.close ? " · 收盤" : ""}`;
     const d = this.drawingOf(a);
     return `${d ? this.deps.kindName(d.kind) : "畫線"} · ${COND_TEXT[a.cond]}`;
   }
@@ -131,6 +178,7 @@ export class AlertService {
       fired: null,
       count: 0,
     };
+    if (n.target.kind === "indicator" && n.close) a.close = true;
     if (n.cond === "trade") {
       a.stage = n.stage ?? "wait";
       const d = this.drawingOf(a);
@@ -146,6 +194,8 @@ export class AlertService {
     if (!a) return;
     const rearm = patch.on === true && !a.on;
     Object.assign(a, patch);
+    if (a.target.kind !== "indicator" || !a.close) delete a.close;
+    this.indPrev.delete(a.id); // what it compares changed, or it starts again
     if (patch.note != null) a.note = patch.note.slice(0, MAX_NOTE);
     if (rearm) {
       a.created = this.deps.now(); // a vertical line's time must still be ahead
@@ -189,7 +239,7 @@ export class AlertService {
 
   // ------------------------------------------------------------------- prices
   /** A 1-minute candle snapshot (of any symbol: others than the watched ones are ignored). */
-  onCandle(instId: string, c: Snapshot) {
+  onCandle(instId: string, c: Candle) {
     if (!this.watched.has(instId)) return;
     const m = moveSince(this.tracks.get(instId) ?? null, c);
     if (!m) return;
@@ -197,8 +247,14 @@ export class AlertService {
     const now = this.deps.now();
     const fib = this.deps.fib();
     let dirty = false;
+    const closed = this.indBars.fold(instId, c);
+    const computed = new Map<string, { lines: Record<string, Num[]>; closes: number[] }>();
     for (const a of this.alerts) {
       if (!a.on || a.instId !== instId) continue;
+      if (a.target.kind === "indicator") {
+        if (this.checkIndicator(a, a.target, m, closed.has(a.tf), computed, now)) dirty = true;
+        continue;
+      }
       const shape = targetShape(a, (id) => this.findDrawing(instId, id), now, fib, this.deps.kindName);
       if (shape === "gone") continue; // removed through drawingsChanged
       if (shape?.type === "trade") {
@@ -220,6 +276,34 @@ export class AlertService {
       }
     }
     if (dirty) this.changed(true);
+  }
+
+  /** One indicator alert on a price update: true when it went off. */
+  private checkIndicator(
+    a: Alert, t: IndTarget, m: Move, newBar: boolean,
+    computed: Map<string, { lines: Record<string, Num[]>; closes: number[] }>, now: number,
+  ): boolean {
+    const bars = this.indBars.get(a.instId, a.tf, warmupOf(t.spec) + 50);
+    if (!bars || bars.length < 3) return false;
+    const key = `${a.tf} ${JSON.stringify(t.spec)}`;
+    let c = computed.get(key);
+    if (!c) {
+      c = { lines: computeLines(t.spec, bars), closes: bars.map((b) => b.close) };
+      computed.set(key, c);
+    }
+    const sig = signalOf(t, c.lines, c.closes);
+    const out = indicatorStep(a, t, sig, c.lines[t.line] ?? [], newBar, this.indPrev.get(a.id), m, now);
+    this.indPrev.set(a.id, out.next);
+    if (!out.hit) return false;
+    const line = c.lines[t.line] ?? [];
+    const at = a.close ? line.length - 2 : line.length - 1; // the bar that closed, or the one moving
+    const value = line[at];
+    const fmt = (v: number) => fmtValue(t.spec, v, (p) => this.deps.fmtPrice(a.instId, p));
+    const now2 = onPrices(t.spec.type) ? "" : value == null ? "" : t.other ? `（${fmt(value)}，${fmt(c.lines[t.other]?.[at] ?? 0)}）` : `（現值 ${fmt(value)}）`;
+    const where = onPrices(t.spec.type) && value != null ? `（${fmt(value)}）` : "";
+    const text = `${specName(t.spec)} ${tfLabel(a.tf)}：${this.indWhat(a, t)}${where}${now2}${a.close ? "，K 線收盤" : ""}`;
+    this.fire(a, [{ type: "ind", text }], c.closes[c.closes.length - 1], now);
+    return true;
   }
 
   private fire(a: Alert, events: AlertEvent[], price: number, now: number) {
@@ -256,7 +340,10 @@ export class AlertService {
 
   /** Stream exactly the symbols with an alert on; forget prices and drawings of the others. */
   private syncWatch() {
-    const ids = [...new Set(this.alerts.filter((a) => a.on).map((a) => a.instId))].sort();
+    const on = this.alerts.filter((a) => a.on);
+    this.indBars.keep(new Set(on.filter((a) => a.target.kind === "indicator").map((a) => AlertBars.key(a.instId, a.tf))));
+    for (const id of [...this.indPrev.keys()]) if (!on.some((a) => a.id === id)) this.indPrev.delete(id);
+    const ids = [...new Set(on.map((a) => a.instId))].sort();
     const key = ids.join(",");
     if (key === this.watching) return;
     this.watching = key;

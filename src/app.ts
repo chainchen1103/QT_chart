@@ -16,7 +16,7 @@
 //   ui/        the toolbars, menus, status bar and settings windows
 //   core/      calls to the backend, which live candles to stream, storage, formatting, timeframes
 
-import { alertNotify, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, wipeData, windowAttention, type CandleEvent } from "./core/api.ts";
+import { alertNotify, getCandles, gpuPref, onAlertOpen, onCandle, onStatus, openTradingView, setGpuPref, setStreams, wipeData, windowAttention, type CandleEvent } from "./core/api.ts";
 import { fmtClock, shortName } from "./core/format.ts";
 import { LiveHub } from "./core/live.ts";
 import { freezeStorage, keysWith, readJson, readRaw, writeJson } from "./core/storage.ts";
@@ -28,6 +28,7 @@ import { renderQuote } from "./chart/legend.ts";
 import { Notifier } from "./alerts/notify.ts";
 import { renderAlertOptions, toggleAlertManager, type AlertUi } from "./alerts/panel.ts";
 import { AlertService } from "./alerts/service.ts";
+import type { IndicatorDeps } from "./ui/indicators.ts";
 import { toggleLayoutPicker } from "./layout/picker.ts";
 import { TradeAccount } from "./trade/account.ts";
 import { paintAccountButton, renderAccount, renderSync } from "./trade/panel.ts";
@@ -89,6 +90,7 @@ const alerts = new AlertService({
   read: readJson,
   write: writeJson,
   now: () => Date.now() / 1000,
+  candles: (instId, bar, count) => getCandles(instId, bar, null, count),
 });
 /** The alert list (bell button) works on the chart in use. */
 const alertUi: AlertUi = {
@@ -180,11 +182,19 @@ const tools: Tools = new Tools({
   instId: () => workspace.inUse().feed.instId,
   apiEquity: () => account.equity(),
 });
+const indicatorDeps: IndicatorDeps = {
+  settings,
+  bar: () => workspace.inUse().feed.bar,
+  alerts: () => workspace.inUse().alertUi,
+  sources: (k) => workspace.inUse().indicatorSources(k),
+  preset: (k) => workspace.inUse().indicatorPreset(k),
+};
 const toolbar = new Toolbar({
   catalog,
   settings,
   current: () => workspace.inUse().feed,
   switchTo: (id, bar) => workspace.inUse().switchTo(id, bar),
+  indicators: indicatorDeps,
 });
 const appearanceIo: AppearanceIo = {
   get: () => settings.appearance.get(),

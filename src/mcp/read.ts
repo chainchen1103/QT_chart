@@ -137,7 +137,7 @@ export function readTools(app: McpApp): Tool[] {
       name: "get_indicators",
       title: "Indicator values",
       description:
-        "What a chart's indicators show now: moving averages' latest values, FVG / order block / support-resistance zones (bars and prices), and each Pine script's output on that chart (latest plot values, horizontal lines, tables, recent labels, errors) with a strategy's backtest summary and recent trades.",
+        "What a chart's indicators show now: moving averages' latest values, Bollinger Bands, RSI, MACD, KD and ATR (their numbers and each line's latest value), FVG / order block / support-resistance zones (bars and prices), and each Pine script's output on that chart (latest plot values, horizontal lines, tables, recent labels, errors) with a strategy's backtest summary and recent trades.",
       level: "read",
       input: {
         type: "object",
@@ -149,13 +149,18 @@ export function readTools(app: McpApp): Tool[] {
         const trades = num(a, "trades", { optional: true, int: true, min: 0, max: 200 }) ?? 10;
         const ind = p.indicators();
         const groups = app.settings.groups.get();
+        const inds = app.settings.inds.get();
         return data({
           chart: app.workspace.charts().indexOf(p),
           symbol: p.feed.instId,
           timeframe: p.feed.bar,
           replay: p.feed.replaying,
-          switches: { movingAverages: groups.ma, fvg: groups.fvg, orderBlocks: groups.ob, supportResistance: groups.sr },
+          switches: {
+            movingAverages: groups.ma, fvg: groups.fvg, orderBlocks: groups.ob, supportResistance: groups.sr,
+            bollinger: inds.boll.on, rsi: inds.rsi.on, macd: inds.macd.on, kd: inds.kd.on, atr: inds.atr.on,
+          },
           movingAverages: ind.mas.map((m) => ({ name: m.name, value: m.value, state: m.state })),
+          indicators: ind.studies,
           zones: ind.zones.map((z) => ({
             kind: z.kind === "fvg" ? "fvg" : z.kind === "ob" ? "order_block" : "support_resistance",
             side: z.kind === "sr" ? (z.dir === 1 ? "support" : "resistance") : z.dir === 1 ? "bullish" : "bearish",
@@ -172,7 +177,7 @@ export function readTools(app: McpApp): Tool[] {
     {
       name: "list_alerts",
       title: "List alerts",
-      description: "Price and drawing alerts (all symbols, or one): id, what they watch, condition, repeat, on or off, note, when they last went off; with `log` the recent alerts that went off.",
+      description: "Price, drawing and indicator alerts (all symbols, or one): id, what they watch, condition, repeat, on or off, note, when they last went off; with `log` the recent alerts that went off.",
       level: "read",
       input: { type: "object", properties: { symbol: { ...SYMBOL, description: "Only this symbol's (default: all symbols)." }, log: S.bool("Add the recent alerts that went off.") } },
       annotations: READ,
@@ -185,7 +190,14 @@ export function readTools(app: McpApp): Tool[] {
             return {
               id: x.id,
               symbol: x.instId,
-              target: x.target.kind === "price" ? { price: x.target.price } : { drawingId: x.target.id, drawingKind: d?.kind ?? null },
+              target:
+                x.target.kind === "price"
+                  ? { price: x.target.price }
+                  : x.target.kind === "drawing"
+                    ? { drawingId: x.target.id, drawingKind: d?.kind ?? null }
+                    : { indicator: x.target.spec, line: x.target.line, ...(x.target.value != null ? { value: x.target.value } : {}), ...(x.target.other ? { otherLine: x.target.other } : {}), ...(x.target.value == null && !x.target.other ? { comparedWith: "price" } : {}) },
+              label: app.alerts.label(x),
+              ...(x.close ? { onBarClose: true } : {}),
               condition: x.cond,
               conditionText: COND_TEXT[x.cond],
               repeat: x.repeat,
